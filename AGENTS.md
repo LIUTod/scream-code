@@ -1157,6 +1157,16 @@ The main agent ships with `RunScript` **enabled by default**: one JavaScript pro
 - **Packaging**: `neverBundle`d in `apps/scream-code/tsdown.config.ts` (worker + wasm resolve from the package dir, like mupdf) and declared as a dependency in both `packages/agent-core` and `apps/scream-code` (pnpm strict resolution).
 - **Tests**: `test/tools/script.test.ts` (isolation, approval incl. denial, dedup regression, record degradation, store persistence, toggle + resume), `test/tools/script-sandbox.test.ts` (package smoke).
 
+### AGENTS.md Prompt Budget
+
+`prepareSystemPromptContext()` (`packages/agent-core/src/profile/context.ts`) merges every discovered `AGENTS.md` into `SCREAM_AGENTS_MD`, and the whole merge is capped at `AGENTS_MD_MAX_BYTES` (32 KiB) — everything else would be paid on every request (the repo guide at 148 KB is ~37k tokens by itself).
+
+- **Precedence vs budget**: files render shallow → deep; the budget is allocated deep → shallow, so a deeper file overrides its ancestors in the prompt.
+- **Per-file floor**: `AGENTS_MD_MIN_BYTES` (2 KiB) is reserved for every file before deeper files take the remainder. Without it one oversized project guide zeroed every user-level file, and the user's `~/.scream-code/AGENTS.md` conventions disappeared from the prompt with no trace.
+- **Never silent**: a cut file ends with `[... N bytes truncated; read <path> for the rest]`, so the model knows to open it; a file that cannot fit at all gets an omission marker. Silent truncation left the model believing it had read the whole guide, TOC included.
+- **Cost**: `truncateUtf8` is one encode plus a UTF-8 boundary walk, never a per-character re-measure — it runs on every agent start and every subagent spawn.
+- **Tests**: `test/profile/context.test.ts` (floor, marker, budget ceiling, multi-byte boundary, quadratic regression).
+
 ### Self Assets Map & InspectOwnAssets
 
 The base system prompt carries a **Self Assets** section that tells the main agent where its own persistent configuration and data live, and what it must never touch. The accompanying `InspectOwnAssets` tool lets the agent actually inspect those assets — read-only, no write path.

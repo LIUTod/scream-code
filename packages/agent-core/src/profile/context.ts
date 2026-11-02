@@ -136,37 +136,83 @@ async function isFile(jian: Jian, path: string): Promise<boolean> {
   }
 }
 
+/**
+ * Per-file floor: every discovered AGENTS.md keeps at least this much content
+ * before a larger file may take the rest of the budget.
+ *
+ * Without it, a huge project file consumed the whole budget and every shallower
+ * file was dropped outright — a 148 KB `AGENTS.md` silently erased the user-level
+ * `~/.scream-code/AGENTS.md` conventions from the prompt. Deeper files still
+ * override shallower ones; they no longer delete them.
+ */
+const AGENTS_MD_MIN_BYTES = 2 * 1024;
+
+/** Tells the model what it did not get, and where to read it, instead of cutting silently. */
+function truncationMarker(omittedBytes: number, path: string): string {
+  return `\n\n[... ${omittedBytes} bytes truncated; read ${path} for the rest]`;
+}
+
+function omissionMarker(path: string): string {
+  return `\n\n[... ${path} omitted: the AGENTS.md budget is full; read the file directly]`;
+}
+
 function renderAgentFiles(files: readonly AgentFile[]): string {
   if (files.length === 0) return '';
 
+  const frames = files.map((file, index) => ({
+    annotation: annotationFor(file.path),
+    separator: index < files.length - 1 ? '\n\n' : '',
+    size: byteLength(file.content),
+  }));
+  const framed = files.map(() => false);
+  const allocation = files.map(() => 0);
   let remaining = AGENTS_MD_MAX_BYTES;
-  const budgeted: Array<AgentFile | undefined> = Array.from({ length: files.length });
 
-  for (let i = files.length - 1; i >= 0; i--) {
-    const file = files[i];
-    if (file === undefined) continue;
+  /** Charge this file's annotation the first time it is paid for, then hand it bytes. */
+  const take = (index: number, want: number): number => {
+    if (want <= 0) return 0;
+    const frame = frames[index]!;
+    const frameCost = framed[index] === true ? 0 : byteLength(frame.annotation) + byteLength(frame.separator);
+    const available = remaining - frameCost;
+    if (available <= 0) return 0;
+    const give = Math.min(want, available);
+    remaining -= frameCost + give;
+    framed[index] = true;
+    return give;
+  };
 
-    const annotation = annotationFor(file.path);
-    const separator = i < files.length - 1 ? '\n\n' : '';
-    remaining -= byteLength(annotation) + byteLength(separator);
-    if (remaining <= 0) {
-      budgeted[i] = { path: file.path, content: '' };
-      remaining = 0;
-      continue;
-    }
-
-    let content = file.content;
-    if (byteLength(content) > remaining) {
-      content = truncateUtf8(content, remaining).trim();
-    }
-    remaining -= byteLength(content);
-    budgeted[i] = { path: file.path, content };
+  // Deepest first on both passes: a deeper file overrides its ancestors, so it
+  // gets the floor and then the remainder before they do.
+  for (let index = files.length - 1; index >= 0; index--) {
+    allocation[index] = take(index, Math.min(frames[index]!.size, AGENTS_MD_MIN_BYTES));
+  }
+  for (let index = files.length - 1; index >= 0; index--) {
+    allocation[index] = allocation[index]! + take(index, frames[index]!.size - allocation[index]!);
   }
 
-  return budgeted
-    .filter((file): file is AgentFile => file !== undefined && file.content.length > 0)
-    .map((file) => `${annotationFor(file.path)}${file.content}`)
-    .join('\n\n');
+  const rendered = files.map((file, index) => {
+    const given = allocation[index]!;
+    if (given === 0) {
+      // Nothing left even for a marker we could not pay for: skip silently
+      // rather than emit a frame with no content.
+      const marker = omissionMarker(file.path);
+      const cost = byteLength(frames[index]!.annotation) + byteLength(marker) + byteLength(frames[index]!.separator);
+      if (remaining < cost) return '';
+      take(index, byteLength(marker));
+      return `${frames[index]!.annotation}${marker.slice(2)}`;
+    }
+    if (given >= frames[index]!.size) {
+      return `${frames[index]!.annotation}${file.content}`;
+    }
+    // Reserve the marker out of this file's own allocation, so the block stays
+    // inside the budget and the model is told where the rest lives.
+    const estimated = truncationMarker(frames[index]!.size - given, file.path);
+    const kept = truncateUtf8(file.content, Math.max(0, given - byteLength(estimated))).trim();
+    const marker = truncationMarker(frames[index]!.size - byteLength(kept), file.path);
+    return `${frames[index]!.annotation}${kept}${marker}`;
+  });
+
+  return rendered.filter((block) => block.length > 0).join('\n\n');
 }
 
 /**

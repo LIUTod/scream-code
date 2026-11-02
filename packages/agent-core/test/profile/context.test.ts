@@ -75,6 +75,52 @@ describe('loadAgentsMd user-level discovery', () => {
     expect(elapsed).toBeLessThan(1_500);
   }, 20_000);
 
+  it('never lets a huge project file delete the user-level conventions', async () => {
+    await mkdir(join(homeDir, '.scream-code'), { recursive: true });
+    await writeFile(
+      join(homeDir, '.scream-code', 'AGENTS.md'),
+      'user-level: use the cf CLI unless the project has a wrangler config',
+      'utf-8',
+    );
+    await writeFile(join(workDir, 'AGENTS.md'), 'x'.repeat(120_000), 'utf-8');
+
+    const result = await loadAgentsMd(testJian);
+
+    // The project file overrides its ancestors; it must not starve them.
+    expect(result).toContain('use the cf CLI unless the project has a wrangler config');
+    expect(Buffer.byteLength(result, 'utf8')).toBeLessThanOrEqual(32 * 1024);
+  });
+
+  it('says what it dropped instead of cutting silently', async () => {
+    await writeFile(join(workDir, 'AGENTS.md'), 'y'.repeat(120_000), 'utf-8');
+
+    const result = await loadAgentsMd(testJian);
+
+    // A silent cut leaves the model believing it read the whole file, so it
+    // never opens the rest; the marker names the file and the omitted size.
+    expect(result).toMatch(/\[\.\.\. \d+ bytes truncated; read .*AGENTS\.md for the rest\]/);
+    expect(result).not.toContain('y'.repeat(40_000));
+    expect(Buffer.byteLength(result, 'utf8')).toBeLessThanOrEqual(32 * 1024);
+  });
+
+  it('keeps a marker and the budget honest when several files compete', async () => {
+    await mkdir(join(homeDir, '.scream-code'), { recursive: true });
+    // A project root marker so the nested directory is part of the same tree.
+    await mkdir(join(workDir, '.git'), { recursive: true });
+    await mkdir(join(workDir, 'nested'), { recursive: true });
+    await writeFile(join(homeDir, '.scream-code', 'AGENTS.md'), 'global-rule\n', 'utf-8');
+    await writeFile(join(workDir, 'AGENTS.md'), 'root-rule\n' + 'r'.repeat(60_000), 'utf-8');
+    vi.spyOn(testJian, 'getcwd').mockReturnValue(join(workDir, 'nested'));
+    await writeFile(join(workDir, 'nested', 'AGENTS.md'), 'leaf-rule\n' + 'l'.repeat(60_000), 'utf-8');
+
+    const result = await loadAgentsMd(testJian);
+
+    expect(result).toContain('global-rule');
+    expect(result).toContain('root-rule');
+    expect(result).toContain('leaf-rule');
+    expect(Buffer.byteLength(result, 'utf8')).toBeLessThanOrEqual(32 * 1024);
+  });
+
   it('does not load the same file twice when the work dir is the home dir', async () => {
     vi.spyOn(testJian, 'getcwd').mockReturnValue(homeDir);
     await mkdir(join(homeDir, '.scream-code'), { recursive: true });
