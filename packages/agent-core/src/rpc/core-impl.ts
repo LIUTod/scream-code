@@ -734,6 +734,9 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       await this.markPluginError(pluginId, error);
       throw error;
     }
+    // A previous failed activation left `state: 'error'`; the sync below treats
+    // anything that is not `ok` as not live and would unwind this activation.
+    await this.plugins.clearError(pluginId).catch(() => undefined);
     // Activation is the user's code-execution approval; the plugin's skills
     // and MCP servers now hot-apply to every live session.
     await this.syncSessionsBestEffort([pluginId]);

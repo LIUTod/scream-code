@@ -37,6 +37,13 @@ export interface ParsedManifestResult {
   readonly manifestPath?: string;
   readonly shadowedManifestPath?: string;
   readonly diagnostics: readonly PluginDiagnostic[];
+  /**
+   * The manifest declared an `entryPoint` that validation had to drop (not
+   * `./`-relative, outside the plugin directory, or not a string). Callers that
+   * accept code entries must reject on this flag instead of string-matching a
+   * diagnostic, so a numeric field is not reported as a path problem.
+   */
+  readonly entryPointRejected?: boolean;
 }
 
 export async function parseManifest(pluginRoot: string): Promise<ParsedManifestResult> {
@@ -137,14 +144,14 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
   const name = typeof raw['name'] === 'string' ? raw['name'].trim() : '';
   if (name.length === 0) {
     diagnostics.push({ severity: 'error', message: '"name" is required' });
-    return { manifestKind, manifestPath, shadowedManifestPath, diagnostics };
+    return { manifestKind, manifestPath, shadowedManifestPath, diagnostics, entryPointRejected: false };
   }
   if (!PLUGIN_NAME_REGEX.test(name)) {
     diagnostics.push({
       severity: 'error',
       message: `"name" must match ${PLUGIN_NAME_REGEX} (got "${name}")`,
     });
-    return { manifestKind, manifestPath, shadowedManifestPath, diagnostics };
+    return { manifestKind, manifestPath, shadowedManifestPath, diagnostics, entryPointRejected: false };
   }
 
   let skills = await resolveSkillsField(pluginRoot, raw['skills'], diagnostics);
@@ -168,6 +175,9 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
   recordUnsupportedRuntimeFields(raw, diagnostics);
 
   const entryPoint = await readEntryPoint(pluginRoot, raw['entryPoint'], diagnostics);
+  // Typed, not message-matched: callers branch on this to refuse a manifest that
+  // asked for a code entry it cannot have.
+  const entryPointRejected = raw['entryPoint'] !== undefined && entryPoint === undefined;
   const hooks = readHooks(pluginRoot, raw['hooks'], diagnostics);
 
   const manifest: PluginManifest = {
@@ -188,7 +198,14 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
     hooks,
   };
 
-  return { manifest, manifestKind, manifestPath, shadowedManifestPath, diagnostics };
+  return {
+    manifest,
+    manifestKind,
+    manifestPath,
+    shadowedManifestPath,
+    diagnostics,
+    entryPointRejected,
+  };
 }
 
 function recordUnsupportedRuntimeFields(
@@ -337,14 +354,20 @@ async function resolvePluginPathField(input: {
     });
     return undefined;
   }
-  const absolute = path.resolve(input.pluginRoot, input.value);
+  const rootReal = await realpath(input.pluginRoot).catch(() => input.pluginRoot);
+  const absolute = path.resolve(rootReal, input.value);
   let real: string;
   try {
     real = await realpath(absolute);
   } catch {
+    // The target does not exist (a missing entry file, say). Keep the lexical
+    // path, but derive it from the canonical root: comparing an unresolved path
+    // against the resolved root made every missing target look like it escaped
+    // whenever the plugin root itself sat behind a symlink (/tmp, /var, a
+    // symlinked workspace), which silently dropped the field instead of
+    // reporting the missing file.
     real = absolute;
   }
-  const rootReal = await realpath(input.pluginRoot).catch(() => input.pluginRoot);
   if (!isWithin(real, rootReal)) {
     input.diagnostics.push({
       severity: 'warn',

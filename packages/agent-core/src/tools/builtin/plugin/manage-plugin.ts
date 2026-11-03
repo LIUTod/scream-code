@@ -1,3 +1,5 @@
+import { stat } from 'node:fs/promises';
+
 import { z } from 'zod';
 
 import type { Agent } from '#/agent';
@@ -36,6 +38,7 @@ export const MANAGE_PLUGIN_ACTIONS = [
   'reset',
   'rollback',
   'reload',
+  'reload_code',
 ] as const;
 
 /**
@@ -93,6 +96,25 @@ interface ErrorEnvelope {
 const SOURCE_SCOPED_ACTIONS = new Set<ManagePluginAction>(['install', 'register_generated']);
 
 /**
+ * Mutating actions whose approval identity must name the plugin.
+ *
+ * Without this, a session grant recorded as `ManagePlugin(activate)` would
+ * approve every later activation in that session, whatever id it names — so a
+ * grant given for one plugin could activate code the agent authored afterwards.
+ */
+const ID_SCOPED_ACTIONS = new Set<ManagePluginAction>([
+  'activate',
+  'deactivate',
+  'remove',
+  'enable',
+  'disable',
+  'set_mcp_enabled',
+  'reset',
+  'rollback',
+  'reload_code',
+]);
+
+/**
  * Actions that cannot be answered without naming a plugin. `check` is not here:
  * without an id it reports the health of the whole table.
  */
@@ -106,6 +128,7 @@ const NEEDS_ID = new Set<ManagePluginAction>([
   'remove',
   'reset',
   'rollback',
+  'reload_code',
 ]);
 
 function isKnownAction(action: string): action is ManagePluginAction {
@@ -258,6 +281,8 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
           return await this.reset(manager, args.id!);
         case 'rollback':
           return await this.rollbackPlugin(manager, args.id!);
+        case 'reload_code':
+          return await this.reloadCode(manager, args.id!);
         case 'reload': {
           const summary = await manager.reload();
           const sync = await this.sync();
@@ -425,6 +450,17 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
       });
     }
     const record = await manager.install(source);
+    // Unlike `register_generated`, install is a third-party path: a manifest may
+    // use a portable shape, so a rejected entry point is reported rather than
+    // refused. Without this the plugin looks installed while its code silently
+    // never runs.
+    const installedManifest = await parseManifest(record.root).catch(() => undefined);
+    const entryWarning =
+      installedManifest?.entryPointRejected === true
+        ? {
+            warn: 'the manifest declares an entryPoint that was rejected (it must be a string starting with "./" inside the plugin directory); the plugin is installed without code',
+          }
+        : {};
     const sync = await this.sync([record.id], { skipMcpAdd: true });
     await this.acknowledgeQuarantine(source);
     return result({
@@ -435,6 +471,7 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
       codeExecuted: false,
       hasCodeEntryPoint: record.manifest?.entryPoint !== undefined,
       record: listView(record),
+      ...entryWarning,
       ...quarantineNote,
       ...(sync !== undefined ? { sync } : {}),
       message:
@@ -446,9 +483,12 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
   }
 
   /**
-   * Register a locally generated plugin directory. A manifest with an
-   * `entryPoint` is refused: the generated-skill flow is auto-approved, so it
-   * must never become a channel for running unapproved code.
+   * Register a locally generated plugin directory. Registration never imports
+   * or runs its code: an `entryPoint` is accepted, but only a separate approved
+   * `activate` executes it. That stays safe because the manifest layer confines
+   * the path — it must start with `./` and resolve, through realpath, inside the
+   * plugin directory (see `resolvePluginPathField` in plugin/manifest.ts) — so
+   * registration cannot point at arbitrary code outside the authored plugin.
    */
   private async registerGenerated(
     manager: PluginManager,
@@ -468,12 +508,30 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
         true,
       );
     }
-    if (parsed.manifest.entryPoint !== undefined) {
+    // A manifest that *declares* an entry point the validator had to drop (not
+    // `./`-relative, outside the plugin directory, or not a string) would
+    // otherwise register as a data-only plugin while the caller believes it
+    // registered code. The flag is typed, so a numeric field is not misreported
+    // as a path problem.
+    if (parsed.entryPointRejected) {
+      const detail =
+        parsed.diagnostics.find((diagnostic) => diagnostic.message.includes('"entryPoint"'))?.message ??
+        'the "entryPoint" field was rejected';
       return result(
         fail(
-          'code_entry_point_not_allowed',
-          `Refusing to register "${parsed.manifest.name}": its manifest declares an entryPoint, which would run code through a path that is normally auto-approved.`,
-          'Install it from its source instead, then activate it as a separate approved step: {action:"install", source:"<path or url>"} followed by {action:"activate", id:"<plugin id>"}.',
+          'entry_point_rejected',
+          `Cannot register "${parsed.manifest.name}": ${detail}.`,
+          'Fix the "entryPoint" in the manifest — it must be a string starting with "./" that stays inside the plugin directory — then call again.',
+        ),
+        true,
+      );
+    }
+    if (parsed.manifest.entryPoint !== undefined && !(await isFile(parsed.manifest.entryPoint))) {
+      return result(
+        fail(
+          'entry_file_missing',
+          `Cannot register "${parsed.manifest.name}": its manifest declares an entryPoint at "${parsed.manifest.entryPoint}", but no file exists there.`,
+          'Add the entry file inside that plugin directory, or fix the "entryPoint" path in the manifest, then call again.',
         ),
         true,
       );
@@ -485,10 +543,10 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
       id: record.id,
       registered: true,
       enabled: record.enabled,
-      hasCodeEntryPoint: false,
+      hasCodeEntryPoint: record.manifest?.entryPoint !== undefined,
       record: listView(record),
       ...(sync !== undefined ? { sync } : {}),
-      note: 'Registered in place; its skills are hot-applied to this session when sync reports skills.inject.',
+      note: 'Registered in place; its skills are hot-applied to this session when sync reports skills.inject. A declared code entry point only runs after a separate activate.',
     });
   }
 
@@ -514,6 +572,19 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
         alreadyActive: true,
         note: 'Nothing ran again — the plugin is already live in this process.',
       });
+    }
+    if (!record.enabled) {
+      // The sync that follows a successful activation treats a disabled record
+      // as not live and would deactivate it immediately, so refuse up front
+      // instead of returning `active: true` for an activation that never stands.
+      return result(
+        fail(
+          'plugin_disabled',
+          `Plugin "${record.id}" is disabled, so activating it would be undone by the capability sync.`,
+          `Enable it first: {action:"enable", id:"${record.id}"}.`,
+        ),
+        true,
+      );
     }
     const [extension] = runtime.discover([record]);
     if (extension === undefined) {
@@ -548,6 +619,10 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
         true,
       );
     }
+    // A previous failure left the record at `state: 'error'`; the capability
+    // sync below treats anything that is not `ok` as not live, so without this
+    // it would tear down the activation that just succeeded.
+    await manager.clearError(record.id);
     const sync = await this.sync([record.id]);
     return result({
       action: 'activate',
@@ -556,9 +631,30 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
       entryPoint: extension.entryPoint,
       enabled: record.enabled,
       ...(sync !== undefined ? { sync } : {}),
-      ...(record.enabled
-        ? {}
-        : { warning: 'The plugin record is disabled; enable it so its capabilities survive the next reload.' }),
+    });
+  }
+
+  /**
+   * Re-import an edited plugin: deactivate (if live) then activate.
+   *
+   * Separate from `reload`, which only re-reads the plugin table from disk: a
+   * model that edited its entry file and called `reload` would get a success
+   * envelope with no new code. One word, one meaning.
+   */
+  private async reloadCode(manager: PluginManager, id: string): Promise<ExecutableToolResult> {
+    const record = manager.get(id);
+    if (record === undefined) return result(notFound(id, manager), true);
+    if (this.runtime?.isActive(record.id) === true) {
+      const stopped = await this.deactivate(manager, record.id);
+      if (stopped.isError === true) return stopped;
+    }
+    const started = await this.activate(manager, record.id);
+    if (started.isError === true) return started;
+    return result({
+      action: 'reload_code',
+      id: record.id,
+      reloaded: true,
+      note: 'entry module re-imported; the previous activation (if any) was dropped first',
     });
   }
 
@@ -758,6 +854,9 @@ function ruleSubject(args: ManagePluginInput): string {
   if (isSourceScoped(args.action) && args.source !== undefined) {
     return `${args.action} ${args.source}`;
   }
+  if (ID_SCOPED_ACTIONS.has(args.action) && args.id !== undefined) {
+    return `${args.action} ${args.id}`;
+  }
   return args.action;
 }
 
@@ -777,7 +876,7 @@ function approvalDescription(args: ManagePluginInput): string {
     case 'install':
       return `Install plugin from source: ${args.source} (downloads code; it is not executed until a separate activate)`;
     case 'register_generated':
-      return `Register generated plugin from directory: ${args.source}`;
+      return `Register generated plugin from directory: ${args.source} (a declared code entry point runs only on activate)`;
     case 'enable':
       return `Enable plugin "${args.id}"`;
     case 'disable':
@@ -796,6 +895,8 @@ function approvalDescription(args: ManagePluginInput): string {
       return `Roll back plugin "${args.id}" to its pre-upgrade backup`;
     case 'reload':
       return 'Reload the plugin table from disk';
+    case 'reload_code':
+      return `Re-import plugin "${args.id}" — deactivates and activates it so edited code runs`;
     default:
       // Unreachable while every action is handled above; kept as a guard
       // against future actions added without a description.
@@ -861,6 +962,15 @@ function nextForError(args: ManagePluginInput, error: unknown): string {
     return 'pass an absolute directory path, a https GitHub url, or a https zip url';
   }
   return 'inspect {action:"list"} and retry; if a record is broken, {action:"remove", id:"<id>"} it';
+}
+
+/** True when the path exists and is a regular file. */
+async function isFile(target: string): Promise<boolean> {
+  try {
+    return (await stat(target)).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function listView(record: PluginRecord) {

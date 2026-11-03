@@ -40,6 +40,8 @@ export interface ExtensionModule {
 /** A plugin that declares a code entry point, ready to be loaded. */
 export interface DiscoveredExtension {
   readonly pluginId: string;
+  /** Plugin directory; kept so `activate()` can re-check containment. */
+  readonly root: string;
   readonly entryPoint: string;
   readonly manifest: PluginManifest;
 }

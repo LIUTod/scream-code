@@ -85,7 +85,11 @@ export class PluginManager {
    * Throws if a plugin with the same id already exists.
    */
   async registerGenerated(root: string): Promise<PluginRecord> {
-    const parsed = await parseManifest(root);
+    // Same normalization as install: an absolute, realpath'd directory. A
+    // relative root would be persisted verbatim and re-parsed against whatever
+    // the cwd is on the next process start, silently losing the plugin.
+    const normalizedRoot = await normalizeInstallRoot(root);
+    const parsed = await parseManifest(normalizedRoot);
     if (parsed.manifest === undefined) {
       const msg = parsed.diagnostics.find((d) => d.severity === 'error')?.message ?? 'no manifest';
       throw new Error(`Cannot register generated plugin at ${root}: ${msg}`);
@@ -98,7 +102,7 @@ export class PluginManager {
     const now = new Date().toISOString();
     const record = await recordFrom({
       id,
-      root,
+      root: normalizedRoot,
       enabled: true,
       installedAt: now,
       updatedAt: now,
@@ -533,6 +537,25 @@ export class PluginManager {
       diagnostics: [...current.diagnostics, diagnostic],
       updatedAt: new Date().toISOString(),
     });
+    await this.persist();
+  }
+
+  /**
+   * Clear the failure flag after the plugin activated successfully.
+   *
+   * `state` is derived from the manifest when a record loads, but a failed
+   * activation writes `state: 'error'` and nothing else clears it. Without this,
+   * the fix-and-retry loop is broken: the agent repairs the entry file, the
+   * activation succeeds, then the capability sync that follows sees
+   * `state !== 'ok'`, treats the plugin as not live, and tears down the
+   * activation it just created. The diagnostics stay, so `/plugin info` still
+   * explains what went wrong before.
+   */
+  async clearError(id: string): Promise<void> {
+    const key = normalizePluginId(id);
+    const current = this.records.get(key);
+    if (current === undefined || current.state !== 'error') return;
+    this.records.set(key, { ...current, state: 'ok', updatedAt: new Date().toISOString() });
     await this.persist();
   }
 

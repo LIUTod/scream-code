@@ -2,11 +2,12 @@ import { t } from '@scream-code/config';
 import type { SlashCommandHost } from './dispatch';
 
 /**
- * /extension activate|deactivate|status [pluginId]
+ * /extension activate|deactivate|reload|status [pluginId]
  *
  * Activates and deactivates code-entry plugins (manifests that declare an
  * `entryPoint`) on the session's main agent, or lists them with their
- * activation state. Activation is lazy and isolated: a failing extension never
+ * activation state. `reload` is deactivate + activate, which re-imports edited
+ * plugin code. Activation is lazy and isolated: a failing extension never
  * breaks the agent.
  */
 export async function handleExtensionCommand(
@@ -43,6 +44,21 @@ export async function handleExtensionCommand(
       try {
         await session.deactivatePlugin(pluginId);
         host.showStatus(t('extension.deactivated', { pluginId }));
+      } catch (error) {
+        host.showError(getErrorMessage(error));
+      }
+      return;
+    case 'reload':
+      if (!pluginId) {
+        host.showError(t('extension.missing_id', { action: 'reload' }));
+        return;
+      }
+      try {
+        // A plain activate would return the module cached for the entry point,
+        // so the deactivate first drops it and the re-import picks up edits.
+        await session.deactivatePlugin(pluginId);
+        await session.activatePlugin(pluginId);
+        host.showStatus(t('extension.reloaded', { pluginId }));
       } catch (error) {
         host.showError(getErrorMessage(error));
       }

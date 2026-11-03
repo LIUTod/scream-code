@@ -719,10 +719,11 @@ export const zh: Record<string, string> = {
   // ─── skill-center ─────────────
   'plugin.no_session': '请先创建或恢复一个会话，再使用 Plugin 中心。',
   'extension.no_session': '请先创建或恢复一个会话，再使用扩展命令。',
-  'extension.usage': '用法：/extension activate|deactivate|status [pluginId]',
+  'extension.usage': '用法：/extension activate|deactivate|reload|status [pluginId]',
   'extension.missing_id': '缺少扩展 id：/extension {action} <pluginId>',
   'extension.activated': '扩展 {pluginId} 已激活。',
   'extension.deactivated': '扩展 {pluginId} 已停用。',
+  'extension.reloaded': '扩展 {pluginId} 已重新加载。',
   'extension.no_extensions': '没有安装代码插件（entryPoint）。',
   'plugin.loading': '正在加载 Plugin 中心…',
   'plugin.center_title': 'Plugin 中心',

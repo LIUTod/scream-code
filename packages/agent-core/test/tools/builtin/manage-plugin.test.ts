@@ -322,17 +322,19 @@ describe('ManagePluginTool mutating actions', () => {
     expect((await json(harness, { action: 'list' })).count).toBe(1);
   });
 
-  it('register_generated refuses a manifest with an entryPoint', async () => {
+  it('register_generated accepts a manifest with an entryPoint without running it', async () => {
     const harness = await makeHarness();
-    const source = await makePlugin('sneaky', { entryPoint: true });
+    resetPluginGlobals();
+    const source = await makePlugin('with-code', { entryPoint: true });
 
-    const result = await run(harness, { action: 'register_generated', source });
-    const payload = JSON.parse(String(result.output));
-    expect(result.isError).toBe(true);
-    expect(payload.error.code).toBe('code_entry_point_not_allowed');
-    expect(payload.error.message).toContain('entryPoint');
-    expect(payload.error.next).toContain('activate');
-    expect(await harness.manager.get('sneaky')).toBeUndefined();
+    const payload = await json(harness, { action: 'register_generated', source });
+    expect(payload).toMatchObject({ registered: true, id: 'with-code', hasCodeEntryPoint: true });
+    expect(payload.note).toContain('separate activate');
+    // Registration is a bookkeeping step: the entry point is not imported and
+    // nothing runs until an approved activate.
+    expect(pluginGlobals['__managedPluginActivations']).toBe(0);
+    expect(harness.runtime.isActive('with-code')).toBe(false);
+    expect(await harness.manager.get('with-code')?.root).toContain('manage-plugin-with-code-');
   });
 
   it('register_generated reports an invalid manifest instead of throwing', async () => {
@@ -574,12 +576,17 @@ describe('ManagePluginTool approval identity', () => {
     }
 
     expect(list.approvalRule).toBe('ManagePlugin(list)');
-    expect(enable.approvalRule).toBe('ManagePlugin(enable)');
+    // Mutating actions are id-scoped now: a grant recorded for one plugin must
+    // not approve the same action on another.
+    expect(enable.approvalRule).toBe('ManagePlugin(enable demo)');
     // The install rule keeps the source, so it cannot be replayed for another.
     expect(install.approvalRule).toContain('install');
     expect(install.approvalRule).toContain('https://github.com/o/r');
 
-    expect(enable.matchesRule?.('enable')).toBe(true);
+    // A grant for one plugin's enable must not approve another plugin's.
+    expect(enable.matchesRule?.('enable demo')).toBe(true);
+    expect(enable.matchesRule?.('enable other')).toBe(false);
+    expect(enable.matchesRule?.('enable')).toBe(false);
     expect(enable.matchesRule?.('install')).toBe(false);
     expect(install.matchesRule?.('install https://github.com/o/r')).toBe(true);
     expect(install.matchesRule?.('install https://github.com/evil/r')).toBe(false);

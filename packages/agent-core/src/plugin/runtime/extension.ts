@@ -1,3 +1,6 @@
+import { realpath } from 'node:fs/promises';
+import { sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { Agent, AgentServices } from '../../agent';
 import type { EventSubscriptionBus, EventHandler, Unsubscribe } from '../../agent/events';
 import type { ToolManager } from '../../agent/tool';
@@ -24,17 +27,29 @@ import type {
  *   plugin itself via `context.services.tools.registerUserTool`. Hooks and
  *   event subscriptions made during a failed activation are rolled back
  * - `deactivate()` — symmetric removal (hooks + event subscriptions +
- *   deactivate hook), isolated so a failing plugin never breaks the agent
+ *   deactivate hook + the cached module, so an edited entry point is re-imported
+ *   on the next activate), isolated so a failing plugin never breaks the agent
  *
  * Activation is deliberately lazy (a `/plugin activate` command or explicit
  * config opt-in), so merely installing a plugin never executes its code.
  */
 export class ExtensionRuntime {
   private readonly loaded = new Map<string, ExtensionModule>();
+  /**
+   * Per-entry module generation. Bumped whenever the cached module must not be
+   * reused again — on deactivate, and on a failed load or activation.
+   * `load()` appends the current generation to the specifier, so the host's
+   * process-wide module cache cannot pin a stale or broken module. An earlier
+   * one-shot "stale" flag was consumed by the first load and lost exactly when
+   * an activation failed, which made reload re-run the broken code.
+   */
+  private readonly generations = new Map<string, number>();
   private readonly activations = new Map<
     string,
     {
       module: ExtensionModule;
+      /** Absolute path this activation was imported from; dropped on deactivate. */
+      entryPoint: string;
       hooksUnregister?: () => void;
       /** Unsubscribes for every `context.events.subscribe()` this activation made. */
       subscriptions: Unsubscribe[];
@@ -52,6 +67,7 @@ export class ExtensionRuntime {
       if (plugin.manifest?.entryPoint === undefined) continue;
       result.push({
         pluginId: plugin.id,
+        root: plugin.root,
         entryPoint: plugin.manifest.entryPoint,
         manifest: plugin.manifest,
       });
@@ -63,10 +79,52 @@ export class ExtensionRuntime {
   async load(entryPoint: string): Promise<ExtensionModule> {
     const cached = this.loaded.get(entryPoint);
     if (cached !== undefined) return cached;
-    const imported: unknown = await import(entryPoint);
-    const module = normalizeExtensionModule(imported);
-    this.loaded.set(entryPoint, module);
-    return module;
+    // Import through a file URL: a Windows absolute path is not a valid module
+    // specifier (its drive letter reads as a URL scheme), and the reload query
+    // needs the URL form anyway. The cache key stays the plain path.
+    const url = pathToFileURL(entryPoint);
+    // Every generation past the first gets a distinct specifier, because the
+    // bare path stays bound to the module imported before the edit.
+    const generation = this.generations.get(entryPoint) ?? 0;
+    if (generation > 0) url.search = `scream-reload=${generation}`;
+    try {
+      const imported: unknown = await import(url.href);
+      const module = normalizeExtensionModule(imported);
+      this.loaded.set(entryPoint, module);
+      return module;
+    } catch (error) {
+      // A file that fails to import (or does not export activate) must not stay
+      // pinned: the next attempt has to read the file again, otherwise fixing
+      // the code and reloading would keep replaying the broken import.
+      this.invalidate(entryPoint);
+      throw error;
+    }
+  }
+
+  /**
+   * Re-check that the entry point still lives inside the plugin directory.
+   *
+   * Parsing already confined the path, but the record caches the result: a file
+   * replaced by a symlink after registration would otherwise import code from
+   * outside the directory the docs advertise as a boundary. Node resolves
+   * symlinks at import time, so the check has to happen here as well.
+   */
+  private async assertConfined(extension: DiscoveredExtension): Promise<void> {
+    const [rootReal, entryReal] = await Promise.all([
+      realpath(extension.root).catch(() => extension.root),
+      realpath(extension.entryPoint).catch(() => extension.entryPoint),
+    ]);
+    if (entryReal !== rootReal && !entryReal.startsWith(`${rootReal}${sep}`)) {
+      throw new Error(
+        `Entry point ${extension.entryPoint} resolves outside the plugin directory ${extension.root}`,
+      );
+    }
+  }
+
+  /** Drop the cached module and make the next load use a fresh specifier. */
+  private invalidate(entryPoint: string): void {
+    this.loaded.delete(entryPoint);
+    this.generations.set(entryPoint, (this.generations.get(entryPoint) ?? 0) + 1);
   }
 
   /** Activate a discovered plugin against a live agent. */
@@ -76,6 +134,7 @@ export class ExtensionRuntime {
       // leaking the first activation's manifest hooks. Fail loudly.
       throw new Error(`Plugin "${extension.pluginId}" is already active`);
     }
+    await this.assertConfined(extension);
     const module = await this.load(extension.entryPoint);
     // Declared manifest hooks first; roll back if activation throws.
     let hooksUnregister: (() => void) | undefined;
@@ -112,10 +171,14 @@ export class ExtensionRuntime {
     } catch (error) {
       hooksUnregister?.();
       releaseSubscriptions(subscriptions);
+      // A failed activation must not pin the module: the usual recovery is to
+      // fix the plugin and activate again in the same process.
+      this.invalidate(extension.entryPoint);
       throw error;
     }
     this.activations.set(extension.pluginId, {
       module,
+      entryPoint: extension.entryPoint,
       hooksUnregister,
       subscriptions,
       log: agent.log,
@@ -132,6 +195,9 @@ export class ExtensionRuntime {
     // handler left behind keeps firing into a plugin that is no longer active.
     releaseSubscriptions(activation.subscriptions);
     this.activations.delete(pluginId);
+    // Drop the module cached for this entry point so a re-edit followed by a
+    // re-activate imports the edited file instead of the stale module.
+    this.invalidate(activation.entryPoint);
     // Reclaim the plugin's owned user tools from the agent it was activated
     // into. Doing it inside deactivate() makes every deactivation path —
     // explicit action, sync teardown, or the event-fault circuit — leave no

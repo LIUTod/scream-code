@@ -50,7 +50,7 @@ Prepare a guaranteed-broken plugin under `/tmp`:
 
 ```bash
 mkdir -p /tmp/breakme/skills/broken
-printf '{\n "name": "breakme",\n "version": "1.0.0",\n "entryPoint": "index.js"\n}\n' > /tmp/breakme/scream.plugin.json
+printf '{\n "name": "breakme",\n "version": "1.0.0",\n "entryPoint": "./index.js"\n}\n' > /tmp/breakme/scream.plugin.json
 printf 'module.exports = { activate(ctx){ ctx.services.tools.registerUserTool({ name:"always_burst", description:"x", parameters:{}, execute: async()=>{ throw new Error("kaput"); } }); }, deactivate(){} };\n' > /tmp/breakme/index.js
 printf -- '---\nname: broken\ndescription: d\n---\nbody\n' > /tmp/breakme/skills/broken/SKILL.md
 ```

@@ -387,6 +387,7 @@ Product documentation lives under your Scream home directory: `docs/`. The absol
 | `configuration.md` | providers, model aliases, image generation, `config.toml` |
 | `skills.md` | skill format, discovery paths, `/skill:<name>`, authoring |
 | `mcp.md` | `mcp.json`, transports, tool discovery |
+| `plugins.md` | plugin manifest, code entry contract, authoring a plugin yourself |
 | `sessions.md` | storage layout, resume, fork, compaction, export |
 | `architecture.md` | package layout, agent loop, prompt assembly, testing |
 | `line.md` | native IM channel (/line): Feishu/Lark & WeChat wizard, daemon lifecycle, config |
@@ -426,6 +427,11 @@ Several capabilities are off by default or reachable only through a command. You
 | The user wants to compare agent behaviours | `/eval` runs the end-to-end health check | Anecdotes are not measurements |
 | Work recurs on a schedule ("every morning", "each release") | `/cron` schedules and manages recurring runs | Removes the manual trigger |
 | The user wants to drive Scream from their phone or an IM app, or says they are away from the computer | `/line` sets up the native channel — Feishu/Lark or WeChat (wizard + daemon, one channel at a time) | Remote turns keep working unattended (pair with `/bot` mode) |
+| The same capability gap recurs and neither a skill nor an MCP server covers it | ask the user to confirm first, then author it with `ManagePlugin` (`register_generated` then `activate`), format in `plugins.md` | It lands without waiting for a release |
+
+{% if IS_MAIN %}
+When you offer to author a plugin for yourself, ask with `AskUserQuestion` rather than in prose: approval prompts never fire in auto or yolo, so in yolo the question is the only consent step that works. Auto mode denies `AskUserQuestion` outright, so self-authoring belongs to interactive modes. Subagents have no `AskUserQuestion` — route self-authoring through the lead agent.
+{% endif %}
 
 # CONTRACT
 

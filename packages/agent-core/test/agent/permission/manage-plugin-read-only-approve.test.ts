@@ -176,10 +176,10 @@ describe('ManagePluginReadOnlyApprovePermissionPolicy', () => {
 
 describe('ManagePlugin session approval granularity', () => {
   /**
-   * The mutating actions publish a per-action `approvalRule`
-   * (`ManagePlugin(enable)`), and the source-scoped ones fold the source into
-   * it. This is the proof that a memorized grant cannot be replayed against a
-   * different action — or a different URL.
+   * The mutating actions publish a per-plugin `approvalRule`
+   * (`ManagePlugin(enable demo)`), and the source-scoped ones fold the source
+   * into it. This is the proof that a memorized grant cannot be replayed
+   * against a different action, a different plugin — or a different URL.
    */
   function sessionPolicy(approvedPatterns: readonly string[]): SessionApprovalHistoryPermissionPolicy {
     const agent = {
@@ -190,13 +190,27 @@ describe('ManagePlugin session approval granularity', () => {
 
   it('replays a memorized enable only for the same action', () => {
     const grant = executionFor('enable').approvalRule ?? '';
-    expect(grant).toBe('ManagePlugin(enable)');
+    expect(grant).toBe('ManagePlugin(enable demo)');
     const policy = sessionPolicy([grant]);
 
     expect(policy.evaluate(contextForAction('enable'))?.kind).toBe('approve');
     for (const action of ['disable', 'remove', 'activate', 'reload'] as const) {
       expect(policy.evaluate(contextForAction(action)), action).toBeUndefined();
     }
+  });
+
+  it('does not replay an activation grant onto a different plugin', () => {
+    // Before id-scoping, `ManagePlugin(activate)` approved every later
+    // activation in the session — a grant given for one plugin covered code
+    // the agent authored afterwards.
+    const grant = executionFor('activate').approvalRule ?? '';
+    expect(grant).toBe('ManagePlugin(activate demo)');
+    const policy = sessionPolicy([grant]);
+
+    expect(policy.evaluate(contextForAction('activate'))?.kind).toBe('approve');
+    const otherArgs = { action: 'activate' as const, id: 'someone-else' };
+    const other = policyContext('ManagePlugin', otherArgs, executionForArgs(otherArgs));
+    expect(policy.evaluate(other)).toBeUndefined();
   });
 
   it('replays a memorized install only for the exact same source', () => {

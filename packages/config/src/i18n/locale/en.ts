@@ -723,10 +723,11 @@ export const en: Record<string, string> = {
   // ─── skill-center ─────────────
   'plugin.no_session': 'Please create or resume a session before using the Plugin center.',
   'extension.no_session': 'Please create or resume a session before using extension commands.',
-  'extension.usage': 'Usage: /extension activate|deactivate|status [pluginId]',
+  'extension.usage': 'Usage: /extension activate|deactivate|reload|status [pluginId]',
   'extension.missing_id': 'Missing plugin id: /extension {action} <pluginId>',
   'extension.activated': 'Extension {pluginId} activated.',
   'extension.deactivated': 'Extension {pluginId} deactivated.',
+  'extension.reloaded': 'Extension {pluginId} reloaded.',
   'extension.no_extensions': 'No code extensions (entryPoint) installed.',
   'plugin.loading': 'Loading Plugin center…',
   'plugin.center_title': 'Plugin Center',

@@ -49,4 +49,19 @@ describe('product documentation index in the system prompt', () => {
     expect(block).toContain('self-asset map');
     expect(block).toContain('never from the working directory');
   });
+
+  it('makes a self-authored plugin ask for consent, since approval prompts never fire in yolo', () => {
+    const md = readFileSync(SYSTEM_MD, 'utf8');
+    const row = md
+      .split('\n')
+      .find((line) => line.includes('neither a skill nor an MCP server covers it'));
+
+    // AskUserQuestion is a question, not a tool operation: it is the only
+    // consent step that survives auto/yolo. The permission prompt alone would
+    // let the agent install code without ever asking. It is named in a
+    // lead-agent-only block because subagents have no AskUserQuestion tool.
+    expect(row).toContain('plugins.md');
+    expect(md).toContain('ask with `AskUserQuestion` rather than in prose');
+    expect(md).toContain('never fire in auto or yolo');
+  });
 });
