@@ -282,6 +282,28 @@ describe('AgentTool', () => {
     expect(tool.description).toContain('- coder: General coding.');
   });
 
+  it('caps a chatty subagent summary and points at resume for the rest', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn().mockResolvedValue({
+        agentId: 'agent-chatty',
+        profileName: 'explore',
+        resumed: false,
+        completion: Promise.resolve({ result: 'x'.repeat(200_000) }),
+      }),
+    });
+    const tool = new AgentTool(host);
+
+    const result = await executeTool(
+      tool,
+      context({ prompt: 'Investigate', description: 'Find cause', subagent_type: 'explore' }),
+    );
+
+    const output = result.output as string;
+    // 50 KiB budget + envelope; the point is that it is bounded at all.
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThan(60 * 1024);
+    expect(output).toContain('truncated; Agent(resume="agent-chatty")');
+  });
+
   it('spawns a foreground subagent and returns its summary', async () => {
     const host = mockSubagentHost({
       spawn: vi.fn().mockResolvedValue({

@@ -10,6 +10,7 @@ import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { MEDIA_SNIFF_BYTES, detectFileType } from '../../support/file-type';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { byteLength, truncateToBytes } from '../../support/result-builder';
 import { listDirectory } from '../../support/list-directory';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import {
@@ -22,7 +23,7 @@ import { formatConflictNotice, scanConflictLines } from './conflict-detect';
 import readDescriptionTemplate from './read.md';
 
 export const MAX_LINES: number = 1000;
-export const MAX_LINE_LENGTH: number = 2000;
+export const MAX_LINE_BYTES: number = 2048;
 export const MAX_BYTES: number = 100 * 1024;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
@@ -88,11 +89,11 @@ interface FinishReadResultInput {
   readonly anchor: string;
 }
 
-function truncateLine(line: string, maxLength: number): string {
-  if (line.length <= maxLength) return line;
+function truncateLine(line: string, maxBytes: number): string {
+  if (byteLength(line) <= maxBytes) return line;
   const marker = '...';
-  const target = Math.max(maxLength, marker.length);
-  return line.slice(0, target - marker.length) + marker;
+  const target = Math.max(maxBytes, marker.length);
+  return truncateToBytes(line, target - marker.length) + marker;
 }
 
 function stripTrailingLf(line: string): string {
@@ -126,7 +127,7 @@ function renderLine(entry: ReadLineEntry, lineEndingStyle: LineEndingStyle): Ren
     lineEndingStyle === 'crlf' && entry.rawContent.endsWith('\r')
       ? entry.rawContent.slice(0, -1)
       : entry.rawContent;
-  const truncated = truncateLine(modelContent, MAX_LINE_LENGTH);
+  const truncated = truncateLine(modelContent, MAX_LINE_BYTES);
   const renderedContent =
     lineEndingStyle === 'mixed' ? makeCarriageReturnsVisible(truncated) : truncated;
   return {
@@ -183,7 +184,7 @@ function notReadableFileOutput(path: string): string {
 const READ_DESCRIPTION = renderPrompt(readDescriptionTemplate, {
   MAX_LINES,
   MAX_BYTES_KB: MAX_BYTES / 1024,
-  MAX_LINE_LENGTH,
+  MAX_LINE_BYTES,
 });
 
 export class ReadTool implements BuiltinTool<ReadInput> {
@@ -562,7 +563,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     }
     if (input.truncatedLineNumbers.length > 0) {
       parts.push(
-        `Lines [${input.truncatedLineNumbers.join(', ')}] exceed the ${String(MAX_LINE_LENGTH)}-char limit and were truncated. Re-read with line_offset and n_lines=1 to view individual long lines in full.`,
+        `Line(s) [${input.truncatedLineNumbers.join(', ')}] exceed the ${String(Math.floor(MAX_LINE_BYTES / 1024))} KB line limit. Read one with: bash sed -n '<line>p' <file> | head -c 65536 (prints up to 64 KB of that line)`,
       );
     }
     if (input.lineEndingStyle === 'mixed') {

@@ -28,14 +28,68 @@ export function catalogCachePath(screamHome: string): string {
  * the next time the network is unreachable.  Best-effort — write failures
  * are silently ignored so they never block the happy path.
  */
-export function saveCatalogCache(catalog: Catalog, screamHome: string): void {
+export function saveCatalogCache(
+  catalog: Catalog,
+  screamHome: string,
+  meta: CatalogCacheMeta = {},
+): void {
   try {
     const path = catalogCachePath(screamHome);
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(catalog), 'utf-8');
+    const payload =
+      meta.etag === undefined && meta.fetchedAt === undefined
+        ? catalog
+        : { catalog, ...meta };
+    writeFileSync(path, JSON.stringify(payload), 'utf-8');
   } catch {
     // best-effort cache
   }
+}
+
+/**
+ * Update only the freshness metadata of an existing snapshot (used after a
+ * `304 Not Modified`, where there is no new catalog to store).
+ */
+export function saveCatalogCacheMeta(screamHome: string, meta: CatalogCacheMeta): void {
+  try {
+    const path = catalogCachePath(screamHome);
+    const current = loadCatalogCacheFile(screamHome);
+    if (current === undefined) return;
+    writeFileSync(path, JSON.stringify({ ...current, ...meta }), 'utf-8');
+  } catch {
+    // best-effort cache
+  }
+}
+
+interface CatalogCacheFileShape {
+  readonly catalog?: Catalog;
+  readonly fetchedAt?: string;
+  readonly etag?: string;
+}
+
+/** Reads the cache file in either shape: a bare catalog (legacy) or `{catalog, etag, fetchedAt}`. */
+function loadCatalogCacheFile(screamHome: string): CatalogCacheFileShape | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(catalogCachePath(screamHome), 'utf-8')) as
+      | Catalog
+      | CatalogCacheFileShape;
+    if (raw !== null && typeof raw === 'object' && 'catalog' in raw) {
+      return raw as CatalogCacheFileShape;
+    }
+    return { catalog: raw as Catalog };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Freshness metadata of the cached snapshot, when it has any. */
+export function loadCatalogCacheMeta(screamHome: string): CatalogCacheMeta {
+  const file = loadCatalogCacheFile(screamHome);
+  if (file === undefined) return {};
+  return {
+    ...(file.fetchedAt === undefined ? {} : { fetchedAt: file.fetchedAt }),
+    ...(file.etag === undefined ? {} : { etag: file.etag }),
+  };
 }
 
 /**
@@ -43,12 +97,7 @@ export function saveCatalogCache(catalog: Catalog, screamHome: string): void {
  * no cache file exists or the file is corrupt.
  */
 export function loadCatalogCache(screamHome: string): Catalog | undefined {
-  try {
-    const raw = readFileSync(catalogCachePath(screamHome), 'utf-8');
-    return JSON.parse(raw) as Catalog;
-  } catch {
-    return undefined;
-  }
+  return loadCatalogCacheFile(screamHome)?.catalog;
 }
 
 export const DEFAULT_CATALOG_URL = 'https://models.dev/api.json';
@@ -59,6 +108,12 @@ export class CatalogFetchError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+/** Freshness metadata for the on-disk catalog snapshot. */
+export interface CatalogCacheMeta {
+  readonly fetchedAt?: string;
+  readonly etag?: string;
 }
 
 /** Fetches a models.dev-style catalog. Public endpoint, no credentials needed. */
@@ -76,6 +131,37 @@ export async function fetchCatalog(
     throw new Error(`Unexpected catalog response from ${url}.`);
   }
   return payload as Catalog;
+}
+
+/**
+ * Conditional catalog fetch: sends `If-None-Match` when an ETag is known and
+ * reports `304` as `notModified` instead of throwing.
+ */
+export async function fetchCatalogWithMeta(
+  url: string,
+  options: { readonly etag?: string; readonly signal?: AbortSignal } = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ catalog?: Catalog; etag?: string; notModified: boolean }> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (options.etag !== undefined) headers['If-None-Match'] = options.etag;
+  const res = await fetchImpl(url, {
+    headers,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  if (res.status === 304) return { notModified: true };
+  if (!res.ok) {
+    throw new CatalogFetchError(`Failed to fetch catalog (HTTP ${res.status}).`, res.status);
+  }
+  const payload: unknown = await res.json();
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new Error(`Unexpected catalog response from ${url}.`);
+  }
+  const etag = res.headers.get('etag');
+  return {
+    catalog: payload as Catalog,
+    notModified: false,
+    ...(etag === null ? {} : { etag }),
+  };
 }
 
 function capabilityToStrings(capability: ModelCapability): string[] | undefined {

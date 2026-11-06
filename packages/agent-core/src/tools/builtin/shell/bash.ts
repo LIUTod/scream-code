@@ -835,7 +835,9 @@ export class BashTool implements BuiltinTool<BashInput> {
       const builder = new ToolResultBuilder({
         artifactSink: async (fullOutput) => {
           const artifactPath = join(tmpdir(), `scream-bash-output-${randomUUID()}.log`);
-          await writeFile(artifactPath, fullOutput, 'utf8');
+          // `0o600` keeps command output private, `wx` refuses to reuse a name
+          // (a pre-created symlink would otherwise redirect the write).
+          await writeFile(artifactPath, fullOutput, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
           return artifactPath;
         },
       });

@@ -98,7 +98,7 @@ export class FetchURLTool implements BuiltinTool<FetchURLInput> {
         };
       }
 
-      const builder = new ToolResultBuilder({ maxLineLength: null });
+      const builder = new ToolResultBuilder({ maxLineBytes: null });
       builder.write(content);
       // Tell the LLM whether it received the whole body or only the
       // extracted article text, so it can judge how complete the

@@ -1,5 +1,13 @@
 import type { ScreamConfig, ScreamHarness, Session, ThinkingEffort } from '@scream-code/scream-code-sdk';
-import { DEFAULT_CATALOG_URL, fetchCatalog, resolveScreamHome, saveCatalogCache } from '@scream-code/scream-code-sdk';
+import {
+  DEFAULT_CATALOG_URL,
+  fetchCatalogWithMeta,
+  loadCatalogCache,
+  loadCatalogCacheMeta,
+  resolveScreamHome,
+  saveCatalogCache,
+  saveCatalogCacheMeta,
+} from '@scream-code/scream-code-sdk';
 import type { SkillListSession } from '../commands';
 
 import type { SessionEventHandler } from './session-event-handler';
@@ -25,6 +33,9 @@ export interface AuthFlowHost {
   refreshSkillCommands(session?: SkillListSession): Promise<void>;
 }
 
+/** Skip the startup refresh when the cached snapshot is younger than this. */
+const CATALOG_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 export class AuthFlowController {
   constructor(private readonly host: AuthFlowHost) {}
 
@@ -46,9 +57,35 @@ export class AuthFlowController {
    * existing cache (or built-in) keeps working. Never throws.
    */
   async prefetchCatalogCache(): Promise<void> {
+    const home = resolveScreamHome();
+    const meta = loadCatalogCacheMeta(home);
+    const fresh =
+      meta.fetchedAt !== undefined &&
+      Date.now() - Date.parse(meta.fetchedAt) < CATALOG_REFRESH_INTERVAL_MS &&
+      loadCatalogCache(home) !== undefined;
+    if (fresh) return;
+
     try {
-      const catalog = await fetchCatalog(DEFAULT_CATALOG_URL);
-      saveCatalogCache(catalog, resolveScreamHome());
+      const result = await fetchCatalogWithMeta(
+        DEFAULT_CATALOG_URL,
+        meta.etag === undefined ? {} : { etag: meta.etag },
+      );
+      const fetchedAt = new Date().toISOString();
+      if (result.notModified) {
+        // Same snapshot, new timestamp: no reparse, no rewrite of the catalog body.
+        saveCatalogCacheMeta(
+          home,
+          meta.etag === undefined ? { fetchedAt } : { fetchedAt, etag: meta.etag },
+        );
+        return;
+      }
+      if (result.catalog !== undefined) {
+        saveCatalogCache(
+          result.catalog,
+          home,
+          result.etag === undefined ? { fetchedAt } : { fetchedAt, etag: result.etag },
+        );
+      }
     } catch {
       // Network unavailable — keep the existing cache; /config falls back.
     }

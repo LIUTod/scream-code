@@ -95,7 +95,7 @@ export class WebSearchTool implements BuiltinTool<WebSearchInput> {
       if (args.limit !== undefined) opts.limit = args.limit;
       if (args.include_content !== undefined) opts.includeContent = args.include_content;
       const results = await this.provider.search(args.query, opts);
-      const builder = new ToolResultBuilder({ maxLineLength: null });
+      const builder = new ToolResultBuilder({ maxLineBytes: null });
 
       if (results.length === 0) {
         builder.write('No search results found.');

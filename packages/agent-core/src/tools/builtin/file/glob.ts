@@ -45,6 +45,7 @@ import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import type { PathClass } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { byteLength, truncateToBytes } from '../../support/result-builder';
 import { listDirectory } from '../../support/list-directory';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
 import { scanCache } from '../../support/scan-cache';
@@ -71,6 +72,9 @@ export const GlobInputSchema = z.object({
 export type GlobInput = z.Infer<typeof GlobInputSchema>;
 
 export const MAX_MATCHES = 1000;
+
+/** Byte ceiling for the rendered path list (the match count is not a size cap). */
+export const MAX_OUTPUT_BYTES = 50 * 1024;
 
 /**
  * Directory basenames the Glob tool prunes by default — see
@@ -356,6 +360,9 @@ export class GlobTool implements BuiltinTool<GlobInput> {
       const displayLines = paths.map((p) => relativizeIfUnder(p, relBase, pathClass));
 
       let output: string;
+      // Header lines are not paths; the byte-cut accounting has to know how
+      // many of the surviving lines are headers rather than matches.
+      let headerLines = 0;
       if (entries.length === 0 && !truncated) {
         output = 'No matches found';
       } else {
@@ -363,12 +370,28 @@ export class GlobTool implements BuiltinTool<GlobInput> {
         if (truncated) {
           lines.push(`[Truncated at ${String(MAX_MATCHES)} matches — use a more specific pattern]`);
           lines.push(`Only the first ${String(MAX_MATCHES)} matches are returned.`);
+          headerLines = 2;
         }
         lines.push(...displayLines);
         if (!truncated && entries.length === MAX_MATCHES) {
           lines.push(`Found ${String(entries.length)} matches`);
         }
         output = lines.join('\n');
+      }
+      // A match count cap is not a size cap: 1000 very long paths can still
+      // flood the context. Trim on bytes, keep whole lines, and say how many
+      // paths were dropped so the caller knows to narrow the pattern.
+      if (byteLength(output) > MAX_OUTPUT_BYTES) {
+        // Cut on the last newline so the boundary cannot leave half a path
+        // (a partial path reads as a real one and gets used).
+        const raw = truncateToBytes(output, MAX_OUTPUT_BYTES - 96);
+        const lastBreak = raw.lastIndexOf('\n');
+        const kept = lastBreak > 0 ? raw.slice(0, lastBreak) : raw;
+        // Header lines sit in front of the paths and survive every cut, so they
+        // must not be counted as kept paths or the omitted count would be short.
+        const keptPaths = Math.max(0, countKeptPaths(kept) - headerLines);
+        const omitted = Math.max(1, displayLines.length - keptPaths);
+        output = `${kept}\n[...${String(omitted)} paths omitted: output exceeds ${String(MAX_OUTPUT_BYTES / 1024)} KB — narrow the pattern]`;
       }
       scanCache.set(searchRoots[0]!, args.pattern, includeDirs, output);
       return { output };
@@ -466,4 +489,15 @@ function containsBraceExpansion(pattern: string): boolean {
     if (ch === ',' && inBrace) sawCommaInsideBrace = true;
   }
   return false;
+}
+
+/**
+ * Paths that survived the byte cut.
+ *
+ * The cut backs up to the last newline, so every retained line is a complete
+ * path: `newlines + 1`, not `newlines`.
+ */
+function countKeptPaths(text: string): number {
+  if (text.length === 0) return 0;
+  return text.split('\n').length;
 }

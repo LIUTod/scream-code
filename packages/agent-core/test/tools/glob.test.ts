@@ -77,6 +77,21 @@ describe('GlobTool', () => {
     expect(tool.description).not.toContain('forward slashes');
   });
 
+  it('caps the path list by bytes, not only by match count', async () => {
+    // 300 paths of ~200 characters each: well under MAX_MATCHES, well over the
+    // 50 KiB output budget. A count cap alone would flood the context.
+    const longName = 'd'.repeat(180);
+    const paths = Array.from({ length: 300 }, (_, index) => `/workspace/src/${longName}/${String(index)}.ts`);
+    const glob = vi.fn().mockReturnValue(asyncPaths(paths));
+    const tool = new GlobTool(createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1)) }), workspace);
+
+    const result = await executeTool(tool, context({ pattern: 'src/**/*.ts', path: '/workspace' }));
+    const output = result.output as string;
+
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThan(52 * 1024);
+    expect(output).toContain('paths omitted: output exceeds 50 KB');
+  });
+
   it('returns matching paths sorted by mtime and relative to an explicit search root', async () => {
     const glob = vi
       .fn()

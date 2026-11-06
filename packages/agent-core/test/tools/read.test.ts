@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   MAX_BYTES,
-  MAX_LINE_LENGTH,
+  MAX_LINE_BYTES,
   MAX_LINES,
   type ReadInput,
   ReadInputSchema,
@@ -523,18 +523,18 @@ describe('ReadTool', () => {
   });
 
   it('truncates long lines and surfaces the affected line numbers', async () => {
-    const long = 'x'.repeat(MAX_LINE_LENGTH + 10);
+    const long = 'x'.repeat(MAX_LINE_BYTES + 10);
     const tool = toolWithContent([long, 'short', long].join('\n'));
 
     const result = await executeTool(tool, context({ path: '/tmp/long.txt' }));
 
-    expect(result.output).toContain('Lines [1, 3]');
-    expect(result.output).toContain('were truncated');
+    expect(result.output).toContain('Line(s) [1, 3]');
+    expect(result.output).toContain('line limit');
     expect(result.output).toContain('...');
   });
 
   it('checks the byte cap before adding the next rendered line', async () => {
-    const line = 'x'.repeat(MAX_LINE_LENGTH);
+    const line = 'x'.repeat(MAX_LINE_BYTES);
     const content = Array.from({ length: 80 }, () => line).join('\n');
     const tool = toolWithContent(content);
 
@@ -713,9 +713,9 @@ describe('ReadTool', () => {
 
   it('description pins byte caps and the Grep-over-Read preference', () => {
     const tool = toolWithContent('');
-    // Line/byte caps: MAX_LINE_LENGTH is in the description; MAX_LINES and
+    // Line/byte caps: MAX_LINE_BYTES is in the description; MAX_LINES and
     // tail mode are documented in the field-level schema describe.
-    expect(tool.description).toContain(String(MAX_LINE_LENGTH));
+    expect(tool.description).toContain(String(MAX_LINE_BYTES));
     // Recommend Grep when searching for unknown content.
     expect(tool.description).toContain('Grep');
   });
@@ -850,7 +850,7 @@ describe('ReadTool', () => {
 
   it('tail mode reports absolute line numbers when long lines are truncated', async () => {
     const shortLine = 'short';
-    const longLine = 'X'.repeat(MAX_LINE_LENGTH + 500);
+    const longLine = 'X'.repeat(MAX_LINE_BYTES + 500);
     const content = [shortLine, longLine, shortLine, longLine, shortLine].join('\n');
     const tool = toolWithContent(content);
 
@@ -859,8 +859,8 @@ describe('ReadTool', () => {
     expect(result.isError).toBeFalsy();
     // Last 3 lines = 3, 4, 5; line 4 is the long one.
     expect(result.output).toContain('Total lines in file: 5.');
-    expect(result.output).toContain('Lines [4]');
-    expect(result.output).toContain('were truncated');
+    expect(result.output).toContain('Line(s) [4]');
+    expect(result.output).toContain('line limit');
   });
 });
 

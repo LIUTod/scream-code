@@ -4,7 +4,7 @@ If the user provides a concrete file path to a text file, call Read directly. Do
 
 When you need several files, prefer to read them in parallel: emit multiple `Read` calls in a single response instead of reading one file per turn.
 
-- Returns up to {{ MAX_BYTES_KB }} KB per call; lines longer than {{ MAX_LINE_LENGTH }} chars are truncated mid-line.
+- Returns up to {{ MAX_BYTES_KB }} KB per call; lines longer than {{ MAX_LINE_BYTES }} bytes are truncated mid-line, and the status block names the exact bash command that prints such a line in full.
 - Sensitive files (`.env` files, credential stores, SSH keys, and similar secrets) are refused to protect secrets; do not attempt to read them.
 - Only UTF-8 text files can be read. Non-UTF-8 encodings, binary files, and files containing NUL bytes are refused; use `ReadMediaFile` for images or video, and Bash or an MCP tool for other binary formats.
 - Output format: `<line-number>\t<content>` per line.

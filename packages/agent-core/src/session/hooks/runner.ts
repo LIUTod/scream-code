@@ -21,16 +21,16 @@ const KILL_GRACE_MS = 100;
  * HookResult. Outputs below the cap round-trip byte-for-byte, so structured
  * JSON parsing is unaffected.
  */
-const HOOK_STREAM_MAX_CHARS = 24 * 1024;
-const HOOK_STREAM_TAIL_CHARS = 8 * 1024;
+const HOOK_STREAM_MAX_BYTES = 24 * 1024;
+const HOOK_STREAM_TAIL_BYTES = 8 * 1024;
 
 function createHookStreamBuffer(): ToolResultBuilder {
   return new ToolResultBuilder({
-    maxChars: HOOK_STREAM_MAX_CHARS,
-    maxTailChars: HOOK_STREAM_TAIL_CHARS,
+    maxBytes: HOOK_STREAM_MAX_BYTES,
+    maxTailBytes: HOOK_STREAM_TAIL_BYTES,
     // Long single-line JSON is the normal shape of hook output — only the
     // total size may be bounded, not the line length.
-    maxLineLength: null,
+    maxLineBytes: null,
   });
 }
 const OptionalStringSchema = z.preprocess(

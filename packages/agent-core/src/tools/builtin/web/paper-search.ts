@@ -152,7 +152,7 @@ export class PaperSearchTool implements BuiltinTool<PaperSearchInput> {
       if (args.sources !== undefined) options.sources = args.sources;
 
       const { results, failures } = await this.provider.search(args.query, options);
-      const builder = new ToolResultBuilder({ maxLineLength: null });
+      const builder = new ToolResultBuilder({ maxLineBytes: null });
 
       if (results.length === 0) {
         builder.write('No papers found.');

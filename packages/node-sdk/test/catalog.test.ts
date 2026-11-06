@@ -7,6 +7,10 @@ import {
   catalogProviderModels,
   CatalogFetchError,
   fetchCatalog,
+  fetchCatalogWithMeta,
+  loadCatalogCache,
+  loadCatalogCacheMeta,
+  saveCatalogCache,
   resolveCatalogSessionHeader,
   type CatalogModel,
 } from '../src/catalog';
@@ -229,5 +233,67 @@ describe('sessionHeader stamp', () => {
     expect(config.providers['opencode']).toMatchObject({
       sessionHeader: 'x-custom-session',
     });
+  });
+});
+
+describe('catalog cache freshness', () => {
+  it('reads a legacy bare-catalog cache and writes meta alongside it', async () => {
+    const { mkdtemp, writeFile, readFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'scream-catalog-'));
+
+    const legacy = { anthropic: { id: 'anthropic', models: {} } };
+    await writeFile(join(home, 'catalog-cache.json'), JSON.stringify(legacy), 'utf-8');
+
+    expect(loadCatalogCache(home)).toEqual(legacy);
+    expect(loadCatalogCacheMeta(home)).toEqual({});
+
+    saveCatalogCache(legacy, home, { fetchedAt: '2026-01-01T00:00:00.000Z', etag: 'W/"1"' });
+    expect(loadCatalogCache(home)).toEqual(legacy);
+    expect(loadCatalogCacheMeta(home)).toEqual({
+      fetchedAt: '2026-01-01T00:00:00.000Z',
+      etag: 'W/"1"',
+    });
+    const raw = JSON.parse(await readFile(join(home, 'catalog-cache.json'), 'utf-8'));
+    expect(raw.catalog).toEqual(legacy);
+  });
+
+  it('sends If-None-Match and reports 304 as not modified', async () => {
+    const calls: Array<{ headers?: Record<string, string> }> = [];
+    const fetchMock = vi.fn(async (_url: string, init?: { headers?: Record<string, string> }) => {
+      calls.push({ ...(init?.headers === undefined ? {} : { headers: init.headers }) });
+      return new Response(null, { status: 304 });
+    });
+
+    const result = await fetchCatalogWithMeta(
+      'https://x/api.json',
+      { etag: 'W/"abc"' },
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(result.notModified).toBe(true);
+    expect(calls[0]?.headers?.['If-None-Match']).toBe('W/"abc"');
+  });
+
+  it('returns the new catalog and its ETag on 200', async () => {
+    const catalog = { anthropic: { id: 'anthropic', models: {} } };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify(catalog), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', etag: 'W/"new"' },
+        }),
+    );
+
+    const result = await fetchCatalogWithMeta(
+      'https://x/api.json',
+      {},
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(result.notModified).toBe(false);
+    expect(result.catalog).toEqual(catalog);
+    expect(result.etag).toBe('W/"new"');
   });
 });

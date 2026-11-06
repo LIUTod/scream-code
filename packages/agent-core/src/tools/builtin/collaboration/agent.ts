@@ -22,6 +22,7 @@ import type { BuiltinTool } from '../../../agent/tool';
 import type { Logger } from '../../../logging';
 import { ToolAccesses } from '../../../loop/tool-access';
 import { isAbortError } from '../../../loop/errors';
+import { byteLength, truncateToBytes } from '../../support/result-builder';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import type { ResolvedAgentProfile } from '../../../profile';
 import type {
@@ -674,13 +675,20 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     result: SubagentCompletion,
     outputSchema: string | undefined,
   ): string {
+    // A chatty child must not be able to inject an unbounded blob into the
+    // parent's context; the full text stays reachable via resume.
+    const MAX_SUMMARY_BYTES = 50 * 1024;
+    const summary =
+      byteLength(result.result) <= MAX_SUMMARY_BYTES
+        ? result.result
+        : `${truncateToBytes(result.result, MAX_SUMMARY_BYTES - 160)}\n[...truncated; Agent(resume="${handle.agentId}") returns the rest]`;
     const lines = [
       `agent_id: ${handle.agentId}`,
       `actual_subagent_type: ${handle.profileName}`,
       'status: completed',
       '',
       '[summary]',
-      result.result,
+      summary,
     ];
     // Structured output: when a schema was requested, try to parse the final
     // answer as JSON and surface it as its own block. Parse failure is
