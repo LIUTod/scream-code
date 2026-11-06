@@ -15,7 +15,15 @@ import {
   type UnexpectedCloseListener,
   type UnexpectedCloseReason,
 } from './client-shared';
-import type { MCPClient, MCPToolDefinition, MCPToolResult } from './types';
+import type {
+  MCPClient,
+  MCPPromptDefinition,
+  MCPResourceContent,
+  MCPResourceDefinition,
+  MCPResourceTemplateDefinition,
+  MCPToolDefinition,
+  MCPToolResult,
+} from './types';
 
 export interface HttpMcpClientOptions {
   readonly clientName?: string;
@@ -142,6 +150,63 @@ export class HttpMcpClient implements MCPClient {
   async listTools(): Promise<MCPToolDefinition[]> {
     const result = await this.client.listTools();
     return result.tools.map(toMcpToolDefinition);
+  }
+
+  getInstructions(): string | undefined {
+    // The SDK surfaces the server's `initialize` instructions here; absent
+    // capabilities mean this returns undefined rather than throwing.
+    const instructions = this.client.getInstructions?.();
+    return typeof instructions === 'string' && instructions.length > 0 ? instructions : undefined;
+  }
+
+  async listResources(): Promise<MCPResourceDefinition[]> {
+    if (this.client.getServerCapabilities()?.resources === undefined) return [];
+    const result = await this.client.listResources();
+    return result.resources.map((resource) => ({
+      uri: resource.uri,
+      ...(resource.name === undefined ? {} : { name: resource.name }),
+      ...(resource.description === undefined ? {} : { description: resource.description }),
+      ...(resource.mimeType === undefined ? {} : { mimeType: resource.mimeType }),
+    }));
+  }
+
+  async readResource(uri: string): Promise<MCPResourceContent> {
+    const result = await this.client.readResource({ uri });
+    const parts = result.contents;
+    const first = parts[0];
+    if (first === undefined) return { uri };
+    // Keep every text part: a resource may split its payload across contents.
+    const texts = parts
+      .map((part) => (part as { text?: unknown }).text)
+      .filter((value): value is string => typeof value === 'string');
+    return {
+      uri: first.uri ?? uri,
+      ...(first.mimeType === undefined ? {} : { mimeType: first.mimeType }),
+      ...(texts.length === 0 ? {} : { text: texts.join('\n\n') }),
+    };
+  }
+
+  async listResourceTemplates(): Promise<MCPResourceTemplateDefinition[]> {
+    if (this.client.getServerCapabilities()?.resources === undefined) return [];
+    const result = await this.client.listResourceTemplates();
+    return result.resourceTemplates.map((template) => ({
+      uriTemplate: template.uriTemplate,
+      ...(template.name === undefined ? {} : { name: template.name }),
+      ...(template.description === undefined ? {} : { description: template.description }),
+      ...(template.mimeType === undefined ? {} : { mimeType: template.mimeType }),
+    }));
+  }
+
+  async listPrompts(): Promise<MCPPromptDefinition[]> {
+    if (this.client.getServerCapabilities()?.prompts === undefined) return [];
+    const result = await this.client.listPrompts();
+    return result.prompts.map((prompt) => ({
+      name: prompt.name,
+      ...(prompt.description === undefined ? {} : { description: prompt.description }),
+      ...(prompt.arguments === undefined
+        ? {}
+        : { arguments: prompt.arguments.map((argument) => argument.name) }),
+    }));
   }
 
   async callTool(

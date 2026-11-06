@@ -78,9 +78,54 @@ export interface MCPToolDefinition {
  * or a mock for testing. Keeping the surface small lets tests inject fakes
  * without pulling in the full SDK type graph.
  */
+/** A resource advertised by an MCP server (`resources/list`). */
+export interface MCPResourceDefinition {
+  readonly uri: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+}
+
+/** The text content returned by `resources/read`. */
+export interface MCPResourceContent {
+  readonly uri: string;
+  readonly mimeType?: string;
+  readonly text?: string;
+}
+
+/** A resource template advertised by an MCP server (`resources/templates/list`). */
+export interface MCPResourceTemplateDefinition {
+  readonly uriTemplate: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+}
+
+/** A prompt template advertised by an MCP server (`prompts/list`). */
+export interface MCPPromptDefinition {
+  readonly name: string;
+  readonly description?: string;
+  readonly arguments?: readonly string[];
+}
+
 export interface MCPClient {
   /** List the tools advertised by the MCP server. */
   listTools(): Promise<MCPToolDefinition[]>;
+
+  /** Server instructions from the initialize handshake, when it sent any. */
+  getInstructions?(): string | undefined;
+
+  /** Advertised resources; absent when the server does not declare the capability. */
+  listResources?(): Promise<MCPResourceDefinition[]>;
+
+  /** Reads one resource; absent when the server does not declare the capability. */
+  readResource?(uri: string): Promise<MCPResourceContent>;
+
+  /** Advertised resource templates; absent when the server declares none. */
+  listResourceTemplates?(): Promise<MCPResourceTemplateDefinition[]>;
+
+  /** Advertised prompt templates; absent when the server does not declare the capability. */
+  listPrompts?(): Promise<MCPPromptDefinition[]>;
   /**
    * Invoke a tool by name with the given JSON arguments.
    *

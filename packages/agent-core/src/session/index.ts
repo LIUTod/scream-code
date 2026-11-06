@@ -22,6 +22,7 @@ import {
   type McpServerEntry,
   type SessionMcpConfig,
 } from '../mcp';
+import { collectMcpInstructions } from '../mcp/instructions';
 import type { EnabledPluginSessionStart } from '../plugin';
 import {
   DEFAULT_AGENT_PROFILES,
@@ -195,6 +196,9 @@ export class Session {
   private readonly backgroundManagers = new Set<WeakRef<BackgroundManager>>();
   private readonly skillsReady: Promise<void>;
   private readonly mcpReady: Promise<void>;
+  /** Coalesces a burst of MCP connect events into one instructions reminder. */
+  private mcpInstructionsTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastMcpInstructions = '';
   metadata: SessionMeta = {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -332,6 +336,14 @@ export class Session {
     );
     await agent.memoStoreReady;
     await agent.knowledgeStoreReady;
+    // MCP servers usually connect before the main agent exists, so the
+    // status-change path could not deliver their instructions. Deliver them
+    // here too — without blocking agent creation on a slow MCP startup, which
+    // is a contract this method must keep. The content check makes it a no-op
+    // when nothing is pending.
+    void this.mcpReady.then(() => {
+      this.injectMcpInstructions();
+    });
     await this.triggerSessionStart('startup');
     return agent;
   }
@@ -399,11 +411,24 @@ export class Session {
         variant: 'recap',
       });
     }
+    // A resumed session never goes through createMain, so it needs the same
+    // non-blocking instruction delivery: without this, MCP servers that describe
+    // how to use their tools stay invisible after every resume.
+    if (main !== undefined) {
+      void this.mcpReady.then(() => {
+        this.injectMcpInstructions();
+      });
+    }
     await this.triggerSessionStart('resume');
     return { warning: resumeWarning };
   }
 
   async close(): Promise<void> {
+    // A pending instruction delivery must not touch agents after teardown.
+    if (this.mcpInstructionsTimer !== undefined) {
+      clearTimeout(this.mcpInstructionsTimer);
+      this.mcpInstructionsTimer = undefined;
+    }
     // Seal every background manager this session created before anything else
     // runs — in particular before the turn cancels below. The registry covers
     // resident agents and evicted subagents alike (see
@@ -804,6 +829,7 @@ export class Session {
   }
 
   private onMcpServerStatusChange(entry: McpServerEntry): void {
+    this.scheduleMcpInstructionsInjection();
     // Always surface server-level status changes to clients so the TUI/SDK
     // can keep its dashboard in sync, even before the main agent exists.
     void this.rpc.emitEvent({
@@ -823,6 +849,37 @@ export class Session {
   private backgroundTaskTimeoutMs(): number | undefined {
     const timeoutS = this.options.background?.agentTaskTimeoutS;
     return timeoutS === undefined ? undefined : timeoutS * 1000;
+  }
+
+  /**
+   * Inject MCP server instructions once the connections settle.
+   *
+   * Servers connect asynchronously and often in a burst, so a short coalescing
+   * window turns "three servers connected" into one reminder instead of three.
+   * The text is compared against the last injection: reconnects that carry the
+   * same instructions stay silent.
+   */
+  private scheduleMcpInstructionsInjection(): void {
+    if (this.mcpInstructionsTimer !== undefined) clearTimeout(this.mcpInstructionsTimer);
+    this.mcpInstructionsTimer = setTimeout(() => {
+      this.mcpInstructionsTimer = undefined;
+      this.injectMcpInstructions();
+    }, 250);
+    this.mcpInstructionsTimer.unref?.();
+  }
+
+  private injectMcpInstructions(): void {
+    const text = collectMcpInstructions(this.mcp);
+    if (text.length === 0 || text === this.lastMcpInstructions) return;
+    const main = this.agents.get('main');
+    // Record only once delivery is possible: a delivery attempt before the main
+    // agent exists must be retried, not remembered as done.
+    if (main === undefined) return;
+    this.lastMcpInstructions = text;
+    main.context.appendSystemReminder(
+      `<scream-mcp-instructions>\n${text}\n</scream-mcp-instructions>`,
+      { kind: 'injection', variant: 'mcp-instructions' },
+    );
   }
 
   private refreshAgentBuiltinTools(): void {

@@ -18,7 +18,10 @@ if (delayMs > 0) {
   await sleep(delayMs);
 }
 
-const server = new McpServer({ name: 'mock-stdio', version: '0.0.1' });
+const server = new McpServer(
+  { name: 'mock-stdio', version: '0.0.1' },
+  { instructions: 'Fixture: prefer the echo tool.' },
+);
 
 server.registerTool(
   'echo',
@@ -28,6 +31,35 @@ server.registerTool(
   },
   ({ text }) => ({
     content: [{ type: 'text', text }],
+  }),
+);
+
+server.registerResource(
+  'note',
+  'mock://note',
+  { title: 'Note', mimeType: 'text/plain' },
+  async (uri) => ({
+    contents: [{ uri: uri.href, mimeType: 'text/plain', text: 'hello from mock' }],
+  }),
+);
+
+server.registerResource(
+  'multi',
+  'mock://multi',
+  { title: 'Multi', mimeType: 'text/plain' },
+  async () => ({
+    contents: [
+      { uri: 'mock://multi', mimeType: 'text/plain', text: 'part one' },
+      { uri: 'mock://multi#2', mimeType: 'text/plain', text: 'part two' },
+    ],
+  }),
+);
+
+server.registerPrompt(
+  'greet',
+  { title: 'Greet', description: 'Greets someone', argsSchema: { name: z.string() } },
+  ({ name }) => ({
+    messages: [{ role: 'user', content: { type: 'text', text: `hi ${name}` } }],
   }),
 );
 

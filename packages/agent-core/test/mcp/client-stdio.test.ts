@@ -371,3 +371,30 @@ describe('StdioMcpClient', () => {
     }
   }, 15000);
 });
+
+describe('StdioMcpClient resources and prompts', () => {
+  it('exposes server instructions, resources and prompts when advertised', async () => {
+    const client = new StdioMcpClient({ transport: 'stdio', command: process.execPath, args: [fixture] });
+    try {
+      await client.connect();
+      expect(client.getInstructions()).toBe('Fixture: prefer the echo tool.');
+
+      const resources = await client.listResources?.();
+      expect(resources?.map((resource) => resource.uri)).toEqual(['mock://note', 'mock://multi']);
+
+      const content = await client.readResource?.('mock://note');
+      expect(content?.text).toBe('hello from mock');
+      expect(content?.mimeType).toBe('text/plain');
+
+      // Multi-part resources keep every text part.
+      const multi = await client.readResource?.('mock://multi');
+      expect(multi?.text).toBe('part one\n\npart two');
+
+      const prompts = await client.listPrompts?.();
+      expect(prompts?.map((prompt) => prompt.name)).toEqual(['greet']);
+      expect(prompts?.[0]?.arguments).toEqual(['name']);
+    } finally {
+      await client.close();
+    }
+  }, 20_000);
+});

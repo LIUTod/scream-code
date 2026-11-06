@@ -1265,6 +1265,11 @@ export class ToolManager {
         // enables them through this meta tool (server `exposure: on-demand`,
         // the default); see `tools/builtin/mcp/discover-mcp-tools.ts`.
         this.agent.mcp && new b.DiscoverMcpToolsTool(this),
+        // Resource access is a host tool because a read is not a `callTool`;
+        // names and semantics follow the conventional MCP trio.
+        this.agent.mcp && new b.ListMcpResourcesTool(this.agent),
+        this.agent.mcp && new b.ListMcpResourceTemplatesTool(this.agent),
+        this.agent.mcp && new b.ReadMcpResourceTool(this.agent),
         // Goal tools are main-agent-only.
         this.agent.type === 'main' && new b.CreateGoalTool(this.agent),
         this.agent.type === 'main' && new b.UpdateGoalTool(this.agent, createGoalGrader(this.agent)),

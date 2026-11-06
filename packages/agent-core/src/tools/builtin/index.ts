@@ -24,6 +24,7 @@ export * from './knowledge/knowledge-lookup';
 export * from './image/image-generate';
 export * from './lsp-tool';
 export * from './mcp/discover-mcp-tools';
+export * from './mcp/resources';
 
 export * from './collaboration/skill-tool';
 export * from './skill/make-skill-apply';
