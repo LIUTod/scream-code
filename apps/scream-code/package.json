@@ -1,6 +1,6 @@
 {
   "name": "scream-code",
-  "version": "0.19.6",
+  "version": "0.19.7",
   "description": "A terminal-native AI agent for builders",
   "license": "MIT",
   "author": "ScreamCli",
@@ -58,7 +58,7 @@
     "@earendil-works/pi-codemode": "^1.1.0",
     "@huggingface/tokenizers": "^0.2.0",
     "@larksuiteoapi/node-sdk": "^1.76.0",
-    "@liutod-scream/pi-tui": "^1.1.0",
+    "@liutod-scream/pi-tui": "^1.5.0",
     "@mariozechner/clipboard": "^0.3.2",
     "chalk": "^5.4.1",
     "cli-highlight": "^2.1.11",
