@@ -2218,3 +2218,47 @@ describe('Anthropic client retry configuration', () => {
     expect((provider as any)._client.maxRetries).toBe(0);
   });
 });
+
+describe('cache retention', () => {
+  const history: Message[] = [
+    {
+      role: 'user',
+      content: [{ type: 'text', text: 'hi' }],
+      toolCalls: [],
+    },
+  ];
+
+  it('defaults to the 5-minute tier with no beta header', async () => {
+    const provider = createProvider('k25');
+    const state = getGenerationState(provider);
+    expect(state.betaFeatures).not.toContain('extended-cache-ttl-2025-04-11');
+
+    const body = await captureRequestBody(provider, 'sys', [], history);
+    const messageBlocks = body['messages'] as Array<{ content: Array<Record<string, unknown>> }>;
+    const withCache = messageBlocks.flatMap((m) => m.content).filter((b) => b['cache_control'] !== undefined);
+    expect(withCache.length).toBeGreaterThan(0);
+    for (const block of withCache) {
+      expect(block['cache_control']).toEqual({ type: 'ephemeral' });
+    }
+  });
+
+  it('long retention sets a 1h TTL and the extended-cache-ttl beta', async () => {
+    const provider = new AnthropicChatProvider({
+      model: 'k25',
+      apiKey: 'test-key',
+      defaultMaxTokens: 1024,
+      stream: false,
+      cacheRetention: 'long',
+    });
+    const state = getGenerationState(provider);
+    expect(state.betaFeatures).toContain('extended-cache-ttl-2025-04-11');
+
+    const body = await captureRequestBody(provider, 'sys', [], history);
+    const messageBlocks = body['messages'] as Array<{ content: Array<Record<string, unknown>> }>;
+    const withCache = messageBlocks.flatMap((m) => m.content).filter((b) => b['cache_control'] !== undefined);
+    expect(withCache.length).toBeGreaterThan(0);
+    for (const block of withCache) {
+      expect(block['cache_control']).toEqual({ type: 'ephemeral', ttl: '1h' });
+    }
+  });
+});

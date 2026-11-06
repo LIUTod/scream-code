@@ -63,6 +63,9 @@ export const ModelAliasSchema = z.object({
   // model-name version inference. Needed for custom-named Anthropic endpoints
   // whose model name does not encode a parseable Claude version.
   adaptiveThinking: z.boolean().optional(),
+  // Prompt-cache breakpoint TTL for Anthropic: 'long' selects the 1-hour tier
+  // (plus the extended-cache-ttl beta header). Default is the 5-minute tier.
+  cacheRetention: z.enum(['short', 'long']).optional(),
   // Model always thinks and rejects an explicit disable (HTTP 400). When set,
   // requesting "off" degrades to the lowest reasoning effort instead.
   forceThinking: z.boolean().optional(),

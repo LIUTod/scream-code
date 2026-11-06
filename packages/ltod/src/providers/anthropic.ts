@@ -99,6 +99,12 @@ export interface AnthropicOptions {
    * encode a parseable Claude version. Leave undefined to infer from the name.
    */
   adaptiveThinking?: boolean | undefined;
+  /**
+   * Prompt-cache breakpoint TTL. `short` (default) is the 5-minute default
+   * tier; `long` selects the 1-hour tier and adds the extended-cache-ttl beta.
+   * Only useful for sessions that idle longer than 5 minutes between turns.
+   */
+  cacheRetention?: 'short' | 'long' | undefined;
   clientFactory?: (auth: ProviderRequestAuth) => Anthropic;
 }
 
@@ -113,6 +119,8 @@ interface AnthropicGenerationKwargs {
 }
 
 const INTERLEAVED_THINKING_BETA = 'interleaved-thinking-2025-05-14';
+/** Required by Anthropic for `cache_control.ttl: '1h'` breakpoints. */
+const EXTENDED_CACHE_TTL_BETA = 'extended-cache-ttl-2025-04-11';
 const FAMILY_VERSION_RE = /(?:opus|sonnet|haiku)[.-](\d+)[.-](\d{1,2})(?!\d)/;
 const OPUS_VERSION_RE = /opus[.-](\d+)[.-](\d{1,2})(?!\d)/;
 const ADAPTIVE_MIN_VERSION = { major: 4, minor: 6 } as const;
@@ -340,9 +348,12 @@ const ANTHROPIC_TOOL_CALL_ID_POLICY: ToolCallIdPolicy = {
   maxLength: 64,
 };
 
-const CACHE_CONTROL = { type: 'ephemeral' as const };
+const CACHE_CONTROL_SHORT = { type: 'ephemeral' as const };
+const CACHE_CONTROL_LONG = { type: 'ephemeral' as const, ttl: '1h' as const };
 
-type CacheableBlock = ContentBlockParam & { cache_control?: { type: 'ephemeral' } };
+type CacheableBlock = ContentBlockParam & {
+  cache_control?: { type: 'ephemeral'; ttl?: '1h' };
+};
 
 /**
  * Content block types that support cache_control injection.
@@ -358,7 +369,11 @@ const CACHEABLE_TYPES = new Set([
   'web_search_tool_result',
 ]);
 
-function injectCacheControlOnLastBlock(messages: MessageParam[], messageIndex?: number): void {
+function injectCacheControlOnLastBlock(
+  messages: MessageParam[],
+  cacheControl: { type: 'ephemeral'; ttl?: '1h' },
+  messageIndex?: number,
+): void {
   const targetIndex = messageIndex ?? messages.length - 1;
   const message = messages[targetIndex];
   if (message === undefined) return;
@@ -367,7 +382,7 @@ function injectCacheControlOnLastBlock(messages: MessageParam[], messageIndex?: 
   const lastBlock = content.at(-1) as CacheableBlock | undefined;
   if (lastBlock === undefined) return;
   if (CACHEABLE_TYPES.has(lastBlock.type)) {
-    lastBlock.cache_control = CACHE_CONTROL;
+    lastBlock.cache_control = cacheControl;
   }
 }
 
@@ -375,9 +390,12 @@ function injectCacheControlOnLastBlock(messages: MessageParam[], messageIndex?: 
  * Inject cache_control on the last block of the second-to-last message,
  * when there is enough budget for an extra breakpoint.
  */
-function injectCacheControlOnPenultimateMessage(messages: MessageParam[]): void {
+function injectCacheControlOnPenultimateMessage(
+  messages: MessageParam[],
+  cacheControl: { type: 'ephemeral'; ttl?: '1h' },
+): void {
   if (messages.length < 2) return;
-  injectCacheControlOnLastBlock(messages, messages.length - 2);
+  injectCacheControlOnLastBlock(messages, cacheControl, messages.length - 2);
 }
 
 /**
@@ -842,6 +860,7 @@ class AnthropicStreamedMessage implements StreamedMessage {
   }
 }
 export class AnthropicChatProvider implements ChatProvider {
+  private readonly _cacheControl: { type: 'ephemeral'; ttl?: '1h' };
   readonly name: string = 'anthropic';
 
   private _model: string;
@@ -870,6 +889,14 @@ export class AnthropicChatProvider implements ChatProvider {
       max_tokens: resolveDefaultMaxTokens(options.model, options.defaultMaxTokens),
       betaFeatures: options.betaFeatures ?? [INTERLEAVED_THINKING_BETA],
     };
+    this._cacheControl =
+      options.cacheRetention === 'long' ? CACHE_CONTROL_LONG : CACHE_CONTROL_SHORT;
+    if (options.cacheRetention === 'long' && !this._generationKwargs.betaFeatures!.includes(EXTENDED_CACHE_TTL_BETA)) {
+      this._generationKwargs.betaFeatures = [
+        ...this._generationKwargs.betaFeatures!,
+        EXTENDED_CACHE_TTL_BETA,
+      ];
+    }
   }
 
   get modelName(): string {
@@ -941,7 +968,7 @@ export class AnthropicChatProvider implements ChatProvider {
             (text, index): TextBlockParam => ({
               type: 'text',
               text,
-              ...(index === 0 ? { cache_control: CACHE_CONTROL } : {}),
+              ...(index === 0 ? { cache_control: this._cacheControl } : {}),
             }),
           );
 
@@ -965,8 +992,8 @@ export class AnthropicChatProvider implements ChatProvider {
     // Inject cache_control on the last content block of the penultimate and
     // last messages. Anthropic allows up to 4 cache_control breakpoints; we
     // use system, the last tool, the penultimate message, and the last message.
-    injectCacheControlOnPenultimateMessage(messages);
-    injectCacheControlOnLastBlock(messages);
+    injectCacheControlOnPenultimateMessage(messages, this._cacheControl);
+    injectCacheControlOnLastBlock(messages, this._cacheControl);
 
     // Build generation kwargs (excluding betaFeatures)
     const kwargs: Record<string, unknown> = {};
@@ -1001,7 +1028,7 @@ export class AnthropicChatProvider implements ChatProvider {
     if (anthropicTools.length > 0) {
       const lastTool = anthropicTools.at(-1);
       if (lastTool !== undefined) {
-        lastTool.cache_control = CACHE_CONTROL;
+        lastTool.cache_control = this._cacheControl;
       }
     }
 

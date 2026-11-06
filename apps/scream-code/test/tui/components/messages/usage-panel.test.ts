@@ -213,3 +213,54 @@ describe('UsagePanelComponent', () => {
     expect(second).toEqual(first);
   });
 });
+
+describe('usage cost line', () => {
+  const priced = {
+    input: 3, // $/1M
+    output: 15,
+    cacheRead: 0.3,
+    cacheWrite: 3.75,
+  };
+
+  it('shows a total cost and per-model suffixes when prices are available', () => {
+    const lines = buildUsageReportLines({
+      colors: darkColors,
+      sessionUsage: {
+        byModel: {
+          'gpt-x': { inputOther: 1_000_000, inputCacheRead: 0, inputCacheCreation: 0, output: 0 },
+          'm-2': { inputOther: 0, inputCacheRead: 1_000_000, inputCacheCreation: 0, output: 1_000_000 },
+        },
+      } as never,
+      contextUsage: 0.1,
+      contextTokens: 10_000,
+      maxContextTokens: 100_000,
+      subagentUsage: {} as never,
+      priceFor: (model: string) => (model === 'gpt-x' ? priced : undefined),
+    });
+
+    // Two dollar lines are correct: the session total (`↳ 花费`) and the
+    // priced model's row suffix. The unpriced model never shows `$0.00`.
+    const dollarLines = lines.filter((line) => /\$\d/.test(line));
+    expect(dollarLines.length).toBe(2);
+    expect(dollarLines.some((line) => line.includes('花费'))).toBe(true);
+    // m-2 is unpriced: no suffix, no $0.00.
+    const m2Row = lines.find((line) => line.includes('m-2'))!;
+    expect(m2Row).not.toContain('$');
+  });
+
+  it('omits cost lines entirely when no prices are provided', () => {
+    const lines = buildUsageReportLines({
+      colors: darkColors,
+      sessionUsage: {
+        byModel: {
+          scream: { inputOther: 1000, inputCacheRead: 0, inputCacheCreation: 0, output: 250 },
+        },
+      } as never,
+      contextUsage: 0.1,
+      contextTokens: 10_000,
+      maxContextTokens: 100_000,
+    });
+    expect(lines.some((line) => line.includes('↳'))).toBe(false);
+    expect(lines.some((line) => line.includes('$'))).toBe(false);
+  });
+});

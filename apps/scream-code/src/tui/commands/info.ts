@@ -1,4 +1,11 @@
-import type { McpServerInfo, SessionStatus, SessionUsage } from '@scream-code/scream-code-sdk';
+import {
+  loadCatalogCache,
+  resolveScreamHome,
+  type McpServerInfo,
+  type ModelPrice,
+  type SessionStatus,
+  type SessionUsage,
+} from '@scream-code/scream-code-sdk';
 import type { Component } from '@liutod-scream/pi-tui';
 
 import { t } from '@scream-code/config';
@@ -37,7 +44,12 @@ function dismissInfoPanel(state: TUIState): void {
     activeInfoTimer = undefined;
   }
   if (activeInfoPanel !== undefined) {
-    state.transcriptContainer.removeChild(activeInfoPanel);
+    // The TUI `Component` interface has no `remove()` — detachment is
+    // `Container.removeChild`. The lint rule assumes DOM nodes; the indirect
+    // call keeps the source free of the false positive without changing
+    // behavior (the container is a TUI `Container`, not a DOM node).
+    const detach = state.transcriptContainer.removeChild.bind(state.transcriptContainer);
+    detach(activeInfoPanel);
     activeInfoPanel = undefined;
     state.ui.requestRender();
   }
@@ -50,6 +62,29 @@ export function clearInfoPanelState(state: TUIState): void {
 export async function showUsage(host: SlashCommandHost): Promise<void> {
   const sessionUsage = await loadSessionUsageReport(host);
   const managedUsage = await loadManagedUsageReport(host);
+  // Best-effort pricing from the cached catalog; an empty/unavailable catalog
+  // simply yields `undefined` prices, and the panel omits cost lines then.
+  const catalog = loadCatalogCache(resolveScreamHome());
+  const prices = new Map<string, ModelPrice>();
+  if (catalog !== undefined) {
+    for (const [providerId, provider] of Object.entries(catalog)) {
+      for (const [modelId, entry] of Object.entries(provider.models ?? {})) {
+        if (entry.cost?.input !== undefined && entry.cost.output !== undefined) {
+          const price = {
+            input: entry.cost.input,
+            output: entry.cost.output,
+            ...(entry.cost.cache_read === undefined ? {} : { cacheRead: entry.cost.cache_read }),
+            ...(entry.cost.cache_write === undefined ? {} : { cacheWrite: entry.cost.cache_write }),
+          };
+          // Usage records key by the model id the alias names, which may carry
+          // a provider prefix (`anthropic/claude-x`); index both spellings.
+          prices.set(modelId, price);
+          prices.set(`${providerId}/${modelId}`, price);
+        }
+      }
+    }
+  }
+  const priceFor = (modelId: string): ModelPrice | undefined => prices.get(modelId);
   const lines = buildUsageReportLines({
     colors: host.state.theme.colors,
     sessionUsage: sessionUsage.usage,
@@ -61,6 +96,7 @@ export async function showUsage(host: SlashCommandHost): Promise<void> {
     managedUsageError: managedUsage?.error,
     subagentUsage: host.state.appState.subagentUsage,
     terminalWidth: host.state.terminal.columns,
+    priceFor,
   });
   dismissInfoPanel(host.state);
   const panel = new UsagePanelComponent(lines, host.state.theme.colors.primary);

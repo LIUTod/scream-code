@@ -144,11 +144,23 @@ describe('catalogProviderModels', () => {
     const models = catalogProviderModels({
       id: 'p',
       models: {
-        good: { id: 'good', limit: { context: 1000 } },
+        good: {
+          id: 'good',
+          limit: { context: 1000 },
+          cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+        },
         bad: { id: 'bad' },
+        pricedBad: { id: 'pricedBad', cost: { input: '3' } } as unknown as CatalogModelEntry,
       },
     });
     expect(models).toHaveLength(1);
     expect(models[0]?.id).toBe('good');
+    // The price survives normalization; a non-numeric cost is dropped.
+    expect(models[0]?.price).toEqual({
+      input: 3,
+      output: 15,
+      cacheRead: 0.3,
+      cacheWrite: 3.75,
+    });
   });
 });

@@ -1,5 +1,6 @@
 import type { ModelCapability } from './capability';
 import type { ProviderType } from './providers';
+import type { ModelPrice } from './cost';
 
 /**
  * models.dev-style catalog: a public map of provider/model metadata. Callers
@@ -11,6 +12,13 @@ export interface CatalogModelEntry {
   readonly name?: string;
   readonly family?: string;
   readonly limit?: { readonly context?: number; readonly output?: number };
+  /** USD per 1M tokens, straight from models.dev; optional and often absent. */
+  readonly cost?: {
+    readonly input?: number;
+    readonly output?: number;
+    readonly cache_read?: number;
+    readonly cache_write?: number;
+  };
   readonly tool_call?: boolean;
   readonly reasoning?: boolean;
   readonly interleaved?: boolean | { readonly field?: string };
@@ -44,6 +52,8 @@ export interface CatalogModel {
   readonly maxOutputSize?: number;
   readonly reasoningKey?: string;
   readonly capability: ModelCapability;
+  /** USD per 1M tokens, when the catalog publishes a price. */
+  readonly price?: ModelPrice;
 }
 
 const KNOWN_WIRE_TYPES = [
@@ -129,6 +139,7 @@ export function catalogModelToCapability(model: CatalogModelEntry): CatalogModel
     name: typeof model.name === 'string' && model.name.length > 0 ? model.name : undefined,
     maxOutputSize: typeof output === 'number' && output > 0 ? output : undefined,
     reasoningKey: catalogReasoningKey(model.interleaved),
+    ...(priceFromEntry(model) === undefined ? {} : { price: priceFromEntry(model) }),
     capability: {
       image_in: inputs.includes('image'),
       video_in: inputs.includes('video'),
@@ -137,6 +148,18 @@ export function catalogModelToCapability(model: CatalogModelEntry): CatalogModel
       tool_use: model.tool_call ?? true,
       max_context_tokens: context,
     },
+  };
+}
+
+/** USD per 1M tokens when the entry carries a usable price. */
+function priceFromEntry(model: CatalogModelEntry): ModelPrice | undefined {
+  const cost = model.cost;
+  if (typeof cost?.input !== 'number' || typeof cost?.output !== 'number') return undefined;
+  return {
+    input: cost.input,
+    output: cost.output,
+    ...(typeof cost.cache_read === 'number' ? { cacheRead: cost.cache_read } : {}),
+    ...(typeof cost.cache_write === 'number' ? { cacheWrite: cost.cache_write } : {}),
   };
 }
 

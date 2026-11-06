@@ -40,6 +40,9 @@ export {
   inferWireType,
 } from './catalog';
 export type { Catalog, CatalogModel, CatalogModelEntry, CatalogProviderEntry } from './catalog';
+// Cost estimation (USD) from catalog prices + token usage
+export { addCost, estimateCost, formatUsd } from './cost';
+export type { ModelPrice } from './cost';
 
 // Core functions
 export { generate } from './generate';

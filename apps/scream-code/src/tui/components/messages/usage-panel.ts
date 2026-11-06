@@ -6,7 +6,8 @@
 
 import type { Component } from '@liutod-scream/pi-tui';
 import { truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
-import type { SessionUsage, TokenUsage } from '@scream-code/scream-code-sdk';
+import type { ModelPrice, SessionUsage, TokenUsage } from '@scream-code/scream-code-sdk';
+import { estimateCost, formatUsd } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 import {
   formatTokenCount,
@@ -46,6 +47,12 @@ export interface UsageReportOptions {
   readonly managedUsage?: ManagedUsageReport;
   readonly managedUsageError?: string;
   readonly subagentUsage?: SubagentUsageMap;
+  /**
+   * Per-model USD price lookup (from the model catalog). When absent or when a
+   * model is unpriced, the cost line is omitted for that model — never `$0.00`,
+   * which would read as "free".
+   */
+  readonly priceFor?: (modelId: string) => ModelPrice | undefined;
   /**
    * Terminal width in columns (optional). When absent the name column uses
    * a safe fixed cap; when present the cap scales with the available width
@@ -164,6 +171,7 @@ function buildSessionUsageSection(
   muted: Colorize,
   errorStyle: Colorize,
   subagentUsage: SubagentUsageMap | undefined,
+  priceFor: ((modelId: string) => ModelPrice | undefined) | undefined,
 ): string[] {
   if (error !== undefined) return [errorStyle(`  ${error}`)];
   const byModel = (usage as { readonly byModel?: Record<string, TokenUsage> } | undefined)
@@ -175,6 +183,12 @@ function buildSessionUsageSection(
   const sessionTotal = sumTokenRows(entries.map(([, row]) => row));
   const subagentRows = Object.values(subagentUsage ?? {});
   const subagentTotal = sumTokenRows(subagentRows);
+  const priceOf = (model: string): ModelPrice | undefined => priceFor?.(model);
+  const modelCosts = entries.map(([model, row]) => estimateCost(row, priceOf(model)));
+  const sessionCost = modelCosts.reduce<number | undefined>((acc, cost) => {
+    if (cost === undefined) return acc;
+    return acc === undefined ? cost : acc + cost;
+  }, undefined);
 
   const lines: string[] = [];
   // 1. Session total, then a main/sub split so the relationship is explicit:
@@ -201,6 +215,11 @@ function buildSessionUsageSection(
     );
   }
 
+  // Cost line sits with the cache note: same "how the bill is composed" role.
+  if (sessionCost !== undefined) {
+    lines.push(padName(`  ↳ ${t('usage.cost')}`) + value(formatUsd(sessionCost)));
+  }
+
   if (subagentRows.length > 0) {
     const mainInput = Math.max(0, sessionTotal.input - subagentTotal.input);
     const mainOutput = Math.max(0, sessionTotal.output - subagentTotal.output);
@@ -215,10 +234,14 @@ function buildSessionUsageSection(
   // 2. Per-model breakdown. Truncate the plain model name first, then
   // colour — truncating an ANSI-wrapped string would cut the escape code.
   lines.push(usageTableHeader(table, t('usage.model')));
-  for (const [model, row] of entries) {
+  for (const [entryIndex, [model, row]] of entries.entries()) {
     const input = usageInputTotal(row);
     const output = usageNumber(row.output);
-    lines.push(padNameColored(model, muted) + num(input) + num(output) + num(input + output));
+    const costSuffix =
+      modelCosts[entryIndex] === undefined ? '' : `  ${muted(formatUsd(modelCosts[entryIndex]))}`;
+    lines.push(
+      padNameColored(model, muted) + num(input) + num(output) + num(input + output) + costSuffix,
+    );
   }
   return lines;
 }
@@ -341,6 +364,7 @@ export function buildUsageReportLines(options: UsageReportOptions): string[] {
     muted,
     errorStyle,
     options.subagentUsage,
+    options.priceFor,
   );
 
   if (options.maxContextTokens > 0) {

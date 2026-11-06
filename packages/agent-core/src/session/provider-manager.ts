@@ -110,6 +110,7 @@ export class ProviderManager implements ModelProvider {
       this.options.promptCacheKey,
       alias.adaptiveThinking,
       alias.forceThinking,
+      alias.cacheRetention,
     );
 
     return {
@@ -256,6 +257,7 @@ function toLtodProviderConfig(
   promptCacheKey: string | undefined,
   adaptiveThinking: boolean | undefined,
   forceThinking: boolean | undefined,
+  cacheRetention: 'short' | 'long' | undefined,
 ): LtodProviderConfig {
   switch (provider.type) {
     case 'anthropic':
@@ -266,6 +268,7 @@ function toLtodProviderConfig(
         apiKey: providerApiKey(provider),
         ...(maxOutputSize !== undefined ? { defaultMaxTokens: maxOutputSize } : {}),
         ...(adaptiveThinking !== undefined ? { adaptiveThinking } : {}),
+        ...(cacheRetention !== undefined ? { cacheRetention } : {}),
         ...defaultHeadersField(
           resolvedHeaderFields(provider, promptCacheKey, screamRequestHeaders),
         ),
