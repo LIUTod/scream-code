@@ -564,7 +564,7 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
         true,
       );
     }
-    if (runtime.isActive(record.id)) {
+    if (runtime.isActive(record.id, this.agent.sessionId)) {
       return result({
         action: 'activate',
         id: record.id,
@@ -644,7 +644,7 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
   private async reloadCode(manager: PluginManager, id: string): Promise<ExecutableToolResult> {
     const record = manager.get(id);
     if (record === undefined) return result(notFound(id, manager), true);
-    if (this.runtime?.isActive(record.id) === true) {
+    if (this.runtime?.isActive(record.id, this.agent?.sessionId) === true) {
       const stopped = await this.deactivate(manager, record.id);
       if (stopped.isError === true) return stopped;
     }
@@ -659,6 +659,14 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
   }
 
   private async deactivate(manager: PluginManager, id: string): Promise<ExecutableToolResult> {
+    return this.deactivateSession(manager, id, this.agent?.sessionId);
+  }
+
+  private async deactivateSession(
+    manager: PluginManager,
+    id: string,
+    sessionId: string | undefined,
+  ): Promise<ExecutableToolResult> {
     const record = manager.get(id);
     if (record === undefined) return result(notFound(id, manager), true);
     const runtime = this.runtime;
@@ -673,7 +681,7 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
       );
     }
     const wasActive = runtime.isActive(record.id);
-    await runtime.deactivate(record.id);
+    await runtime.deactivate(record.id, sessionId);
     // The plugin's code just stopped running; its in-process tools must stop
     // being offered too (its own deactivate hook may have unregistered them —
     // that path is idempotent). Skills and MCP servers stay until disable or
@@ -699,6 +707,8 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
     // drops tools, MCP servers, and skills from every live session.
     const runtime = this.runtime;
     const wasActive = runtime?.isActive(record.id) === true;
+    // Remove is global: the plugin is gone from the table, so every session's
+    // copy must go, not just the calling session's.
     if (wasActive && runtime !== undefined) await runtime.deactivate(record.id);
     await manager.remove(record.id);
     const sync = await this.sync([record.id]);

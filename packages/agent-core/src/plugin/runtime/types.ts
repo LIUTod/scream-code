@@ -2,6 +2,7 @@ import type { AgentServices } from '../../agent';
 import type { EventHandler, Unsubscribe } from '../../agent/events';
 import type { AgentEvent } from '../../rpc';
 import type { PluginManifest } from '../types';
+import type { PluginUi } from './ui';
 
 /**
  * The event-bus view handed to a single activation. It is the public surface of
@@ -26,6 +27,11 @@ export interface ExtensionContext {
   readonly services: AgentServices;
   /** In-process event bus mirroring `AgentEvent`s broadcast to the host. */
   readonly events: ExtensionEventBus;
+  /**
+   * Host interaction: `notify`, `confirm`, `progress`. Every method degrades on
+   * a headless host instead of throwing, so a plugin cannot wedge a session.
+   */
+  readonly ui: PluginUi;
   /** The plugin's default config (manifest `config` block) or undefined. */
   readonly config: Readonly<Record<string, unknown>> | undefined;
   readonly pluginId: string;

@@ -363,6 +363,35 @@ describe('ExtensionRuntime event-handler circuit', () => {
   });
 });
 
+describe('ExtensionRuntime event-handler circuit scoping', () => {
+  it('only unwinds the session whose handler threw', async () => {
+    const runtime = new ExtensionRuntime();
+    const withSession = (sessionId: string): Agent =>
+      Object.assign(makeAgent(new HookEngine()), { sessionId }) as Agent;
+    const agentA = withSession('a');
+    const agentB = withSession('b');
+    const manifest: PluginManifest = {
+      ...codeManifest,
+      entryPoint: path.join(FIXTURE_DIR, 'plugin-entry-subscribe-faulty.ts'),
+    };
+    const [extension] = runtime.discover([pluginRecord({ id: 'faulty', manifest })]);
+    await runtime.activate(agentA, extension!);
+    await runtime.activate(agentB, extension!);
+
+    const fire = (agent: Agent) => {
+      agent.eventBus.dispatch({ type: 'turn.started', turnId: '1' } as never);
+    };
+    fire(agentA);
+    fire(agentA);
+    fire(agentA);
+    await new Promise((r) => setImmediate(r));
+
+    // One session's broken handler is not proof another session's copy is bad.
+    expect(runtime.isActive('faulty', 'a')).toBe(false);
+    expect(runtime.isActive('faulty', 'b')).toBe(true);
+  });
+});
+
 describe('ExtensionRuntime deactivation tool reclaim', () => {
   it('event-fault deactivation reclaims the plugin-owned user tools too', async () => {
     const runtime = new ExtensionRuntime();
@@ -398,5 +427,69 @@ describe('ExtensionRuntime deactivation tool reclaim', () => {
     // A deactivated plugin leaves no "dead limb" tools behind — whatever path
     // (explicit action, sync teardown, event-fault circuit) caused it.
     expect(unregisterToolsByOwner).toHaveBeenCalledWith('faulty');
+  });
+});
+
+describe('per-session activations', () => {
+  function agentForSession(sessionId: string): Agent {
+    const agent = makeAgent();
+    return Object.assign(agent, { sessionId }) as Agent;
+  }
+
+  it('runs the same plugin in two sessions and stops one without the other', async () => {
+    const runtime = new ExtensionRuntime();
+    const [extension] = runtime.discover([pluginRecord({ id: 'code', manifest: codeManifest })]);
+    const agentA = agentForSession('sess-a');
+    const agentB = agentForSession('sess-b');
+
+    await runtime.activate(agentA, extension!);
+    await runtime.activate(agentB, extension!);
+
+    expect(runtime.isActive('code', 'sess-a')).toBe(true);
+    expect(runtime.isActive('code', 'sess-b')).toBe(true);
+    expect(runtime.activePluginIds('sess-a')).toEqual(['code']);
+
+    // Stopping one session's copy must not unwind the other's.
+    await runtime.deactivate('code', 'sess-a');
+    expect(runtime.isActive('code', 'sess-a')).toBe(false);
+    expect(runtime.isActive('code', 'sess-b')).toBe(true);
+    // The global view still sees it until it is gone everywhere.
+    expect(runtime.isActive('code')).toBe(true);
+
+    await runtime.deactivate('code');
+    expect(runtime.isActive('code')).toBe(false);
+  });
+
+  it('re-activating is refused only within the same session', async () => {
+    const runtime = new ExtensionRuntime();
+    const [extension] = runtime.discover([pluginRecord({ id: 'code', manifest: codeManifest })]);
+    await runtime.activate(agentForSession('a'), extension!);
+
+    await expect(runtime.activate(agentForSession('a'), extension!)).rejects.toThrow(
+      'already active',
+    );
+    await expect(runtime.activate(agentForSession('b'), extension!)).resolves.toBeUndefined();
+  });
+});
+
+describe('session teardown', () => {
+  it('deactivateSession unwinds one session and leaves the other running', async () => {
+    const runtime = new ExtensionRuntime();
+    const [extension] = runtime.discover([pluginRecord({ id: 'code', manifest: codeManifest })]);
+    const withSession = (sessionId: string): Agent =>
+      Object.assign(makeAgent(), { sessionId }) as Agent;
+    await runtime.activate(withSession('a'), extension!);
+    await runtime.activate(withSession('b'), extension!);
+
+    await runtime.deactivateSession('a');
+
+    expect(runtime.isActive('code', 'a')).toBe(false);
+    expect(runtime.isActive('code', 'b')).toBe(true);
+    expect(runtime.activePluginIds('a')).toEqual([]);
+  });
+
+  it('deactivateSession is a no-op for an unknown session', async () => {
+    const runtime = new ExtensionRuntime();
+    await expect(runtime.deactivateSession('never-opened')).resolves.toBeUndefined();
   });
 });

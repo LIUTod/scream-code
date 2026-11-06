@@ -424,6 +424,9 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       try {
         await session.close();
       } finally {
+        // Plugins activated in this session die with it; otherwise their
+        // bucket outlives the agent and the plugin centre keeps reporting ●.
+        await this.extensionRuntime.deactivateSession(sessionId).catch(() => undefined);
         // Deleted even when the close threw. `Session.close()` latches the
         // session's background managers shut before it tears anything down,
         // and that latch has no reset counterpart — a failed-to-close
@@ -443,6 +446,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       try {
         await active.close();
       } finally {
+        await this.extensionRuntime.deactivateSession(sessionId).catch(() => undefined);
         // Aligned with closeSession: the instance leaves the active map even
         // when the close threw. Its background managers were latched shut by
         // `Session.close()` (no reset counterpart), so keeping it here would
@@ -718,6 +722,16 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
         details: { pluginId },
       });
     }
+    if (!plugin.enabled) {
+      // The capability sync that follows a successful activation treats a
+      // disabled record as not live and would unwind it immediately; refuse
+      // instead of reporting a success that cannot stand.
+      throw new ScreamError(
+        ErrorCodes.PLUGIN_NOT_FOUND,
+        `Plugin "${pluginId}" is disabled; enable it before activating`,
+        { details: { pluginId } },
+      );
+    }
     const [extension] = this.extensionRuntime.discover([plugin]);
     if (extension === undefined) {
       throw new ScreamError(
@@ -759,13 +773,16 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   }
 
   /** Deactivate a code plugin (removes its hooks and runs its deactivate). */
-  async deactivatePlugin({ pluginId }: { pluginId: string }): Promise<void> {
+  async deactivatePlugin({ pluginId, sessionId }: { pluginId: string; sessionId?: string }): Promise<void> {
     await this.pluginsReady;
-    await this.extensionRuntime.deactivate(pluginId);
+    // With a session id only that session's activation is unwound; without one
+    // (a global disable/remove path) every copy goes.
+    await this.extensionRuntime.deactivate(pluginId, sessionId);
     // A deactivated plugin's code is gone, so its in-process tools must stop
     // being offered; leaving them registered would present a broken limb to
     // the model. Skills and MCP servers stay until disable/remove.
-    for (const session of this.sessions.values()) {
+    for (const [id, session] of this.sessions) {
+      if (sessionId !== undefined && id !== sessionId) continue;
       for (const agent of session.agents.values()) {
         try {
           agent.tools.unregisterToolsByOwner(pluginId);
@@ -777,16 +794,18 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   }
 
   /** Code plugins the runtime can load, with their activation state. */
-  async pluginExtensionStatus(): Promise<
+  async pluginExtensionStatus({ sessionId }: { sessionId?: string } = {}): Promise<
     readonly { pluginId: string; entryPoint: string; active: boolean }[]
   > {
     await this.pluginsReady;
+    // A session-scoped query reports that session's truth; the global form
+    // (no session) reports "live anywhere" for host-level UI.
     return this.extensionRuntime
       .discover(this.plugins.list())
       .map((extension) => ({
         pluginId: extension.pluginId,
         entryPoint: extension.entryPoint,
-        active: this.extensionRuntime.isActive(extension.pluginId),
+        active: this.extensionRuntime.isActive(extension.pluginId, sessionId),
       }));
   }
 

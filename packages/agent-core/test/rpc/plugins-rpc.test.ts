@@ -12,7 +12,7 @@ describe('ScreamCore plugin RPCs', () => {
     const pluginRoot = await mkdtemp(path.join(tmpdir(), 'plugin-'));
     await writeFile(
       path.join(pluginRoot, 'scream.plugin.json'),
-      JSON.stringify({ name: 'demo', version: '1.0.0' }),
+      JSON.stringify({ name: 'demo', version: '1.0.0', entryPoint: './index.js' }),
       'utf8',
     );
 
@@ -172,5 +172,26 @@ describe('ScreamCore plugin RPCs', () => {
     expect(record?.state).toBe('error');
     expect(record?.diagnostics.at(-1)).toEqual(expect.objectContaining({ severity: 'error' }));
     expect(core.extensionRuntime.isActive('demo')).toBe(false);
+  });
+
+  it('refuses to activate a disabled plugin instead of reporting a doomed success', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'scream-home-'));
+    const pluginRoot = await mkdtemp(path.join(tmpdir(), 'plugin-'));
+    await writeFile(
+      path.join(pluginRoot, 'scream.plugin.json'),
+      JSON.stringify({ name: 'demo', version: '1.0.0' }),
+      'utf8',
+    );
+
+    const core = new ScreamCore(async () => ({}) as never, { homeDir: home });
+    await new Promise((resolve) => setImmediate(resolve));
+    await core.installPlugin({ source: pluginRoot });
+    core.setPluginEnabled({ id: 'demo', enabled: false });
+    core.sessions.set('s-1', { agents: new Map([['main', {}]]) } as never);
+
+    await expect(core.activatePlugin({ sessionId: 's-1', pluginId: 'demo' })).rejects.toThrow(
+      /disabled/,
+    );
+    expect(core.extensionRuntime.isActive('demo', 's-1')).toBe(false);
   });
 });

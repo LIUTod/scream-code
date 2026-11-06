@@ -534,6 +534,8 @@ export interface ActivatePluginPayload {
 
 export interface DeactivatePluginPayload {
   readonly pluginId: string;
+  /** Scope the stop to one session; omit to stop every copy (global paths). */
+  readonly sessionId?: string;
 }
 
 export interface PluginExtensionSummary {
@@ -556,7 +558,7 @@ export interface CoreAPI extends SessionAPIWithId {
   listSessions: (payload: ListSessionsPayload) => readonly SessionSummary[];
   activatePlugin: (payload: ActivatePluginPayload) => Promise<void>;
   deactivatePlugin: (payload: DeactivatePluginPayload) => Promise<void>;
-  pluginExtensionStatus: (payload: EmptyPayload) => readonly PluginExtensionSummary[];
+  pluginExtensionStatus: (payload: { sessionId?: string }) => readonly PluginExtensionSummary[];
   exportSession: (payload: ExportSessionPayload) => ExportSessionResult;
   listPlugins: (payload: EmptyPayload) => readonly PluginSummary[];
   installPlugin: (payload: InstallPluginPayload) => PluginSummary;

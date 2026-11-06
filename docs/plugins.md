@@ -74,7 +74,8 @@ export async function deactivate() {}
 - 必须是 ESM。也接受 `export default { activate, deactivate }` 的写法（运行时统一经 `normalizeExtensionModule` 归一化）。
 - `activate(context)` 必须导出；`deactivate()` 可选，且不接收参数——需要清理的东西在 `activate` 里捕获到模块作用域。
 - `activate` 抛错时，本次激活完成一半的 hooks 与事件订阅会被回滚，错误写入插件记录并返回 `activation_failed`。
-- 同一个进程内同一插件不能重复激活；重新激活前先 `deactivate`。
+- 激活是**按会话**的：同一个插件可以在 A、B 两个会话里各跑一份（各自的 hooks、事件订阅、工具互不相干），但**同一会话内**不能重复激活；停用一个会话不影响另一个。
+- 会话关闭时，它激活过的插件会被自动 `deactivate`，不会残留。
 
 ## context API
 
@@ -87,6 +88,9 @@ export async function deactivate() {}
 | `services.tools.unregisterToolsByOwner(id)` | 按 owner 批量注销；宿主在停用时也会自动执行 |
 | `events.subscribe(type \| '*', handler)` | 订阅 agent 事件，返回 `unsubscribe`；`deactivate` 时宿主也会统一释放 |
 | `services` | agent 的子系统清单；只应调用这里列出的工具相关成员 |
+| `ui.notify(level, message)` | 向用户报一句：`info` / `warn` / `error`。作为状态区消息显示，不打断 |
+| `ui.confirm({ title, body?, confirmLabel?, cancelLabel? })` | 问用户是/否，返回 `Promise<boolean>`；无界面宿主一律返回 `false` 并说明原因 |
+| `ui.progress(title)` | 返回 `{ update(label), done(message?), fail(message?) }`；文本进度，`update` 限流约 5 次/秒 |
 
 `registerUserTool` 的入参：
 
@@ -98,6 +102,17 @@ export async function deactivate() {}
 | `execute(args, ctx)` | 返回 `{ output, message?, isError? }` 或 Promise；`output` 是模型看到的内容，`message` 只给 UI |
 
 运行时会给注册自动打上 `ownerPluginId`，因此停用、移除、熔断都能精确回收该插件的工具；插件自己声明的 owner 优先。`execute` 抛错会被转成工具错误，不会打断 agent loop，但会计入熔断计数。
+
+## 界面交互（ui）
+
+三个原语，全部**降级而不抛错**：
+
+| 宿主 | `notify` | `confirm` | `progress` |
+|---|---|---|---|
+| TUI | 状态区一行 | 弹出选择框，选「确认」为 `true` | 状态区文本逐步更新 |
+| `/line`、SDK、print | 事件日志 | 直接 `false` + 一条 warn | 状态区文本（若宿主有） |
+
+`confirm` 走的是和 `AskUserQuestion` 同一条提问通道，所以不需要插件自己画界面；`notify` 复用宿主的警示事件（`code: "plugin:<level>"`），宿主可据此区分级别。**插件不能阻塞会话**：任何等待都有结果，宿主不在就按「否」处理。
 
 ## 迭代
 

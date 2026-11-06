@@ -6,6 +6,7 @@ import type { EventSubscriptionBus, EventHandler, Unsubscribe } from '../../agen
 import type { ToolManager } from '../../agent/tool';
 import type { UserToolRegistration } from '../../agent/tool/types';
 import { PLUGIN_CIRCUIT_TRIP_THRESHOLD } from '../types';
+import { createPluginUi } from './ui';
 import type { Logger } from '../../logging/types';
 import type { AgentEvent } from '../../rpc';
 import type { PluginRecord } from '../types';
@@ -33,6 +34,20 @@ import type {
  * Activation is deliberately lazy (a `/plugin activate` command or explicit
  * config opt-in), so merely installing a plugin never executes its code.
  */
+/** One live plugin instance inside one session. */
+interface ActivationRecord {
+  readonly module: ExtensionModule;
+  /** Absolute path this activation was imported from; dropped on deactivate. */
+  readonly entryPoint: string;
+  hooksUnregister?: () => void;
+  /** Unsubscribes for every `context.events.subscribe()` this activation made. */
+  readonly subscriptions: Unsubscribe[];
+  /** Captured so a failing `deactivate()` can still be logged. */
+  readonly log: Logger | undefined;
+  /** The agent this plugin was activated into (its tools live there). */
+  readonly agent: Agent;
+}
+
 export class ExtensionRuntime {
   private readonly loaded = new Map<string, ExtensionModule>();
   /**
@@ -44,21 +59,12 @@ export class ExtensionRuntime {
    * an activation failed, which made reload re-run the broken code.
    */
   private readonly generations = new Map<string, number>();
-  private readonly activations = new Map<
-    string,
-    {
-      module: ExtensionModule;
-      /** Absolute path this activation was imported from; dropped on deactivate. */
-      entryPoint: string;
-      hooksUnregister?: () => void;
-      /** Unsubscribes for every `context.events.subscribe()` this activation made. */
-      subscriptions: Unsubscribe[];
-      /** Captured so a failing `deactivate()` can still be logged. */
-      log: Logger | undefined;
-      /** The agent this plugin was activated into (its tools live there). */
-      agent: Agent;
-    }
-  >();
+  /**
+   * Live activations, keyed by session then plugin: two sessions can run the
+   * same plugin independently (each with its own hooks, subscriptions and
+   * user tools), and stopping it in one must not affect the other.
+   */
+  private readonly activations = new Map<string, Map<string, ActivationRecord>>();
 
   /** Plugins that declare a code entry point, in installation order. */
   discover(plugins: readonly PluginRecord[]): DiscoveredExtension[] {
@@ -129,7 +135,9 @@ export class ExtensionRuntime {
 
   /** Activate a discovered plugin against a live agent. */
   async activate(agent: Agent, extension: DiscoveredExtension): Promise<void> {
-    if (this.activations.has(extension.pluginId)) {
+    const sessionKey = agent.sessionId ?? '';
+    const sessionActivations = this.sessionActivations(sessionKey);
+    if (sessionActivations.has(extension.pluginId)) {
       // Re-activating a live plugin would overwrite its hooksUnregister,
       // leaking the first activation's manifest hooks. Fail loudly.
       throw new Error(`Plugin "${extension.pluginId}" is already active`);
@@ -152,8 +160,13 @@ export class ExtensionRuntime {
     let handlerFaults = 0;
     const onHandlerFault = (): void => {
       handlerFaults += 1;
-      if (handlerFaults >= PLUGIN_CIRCUIT_TRIP_THRESHOLD && this.isActive(extension.pluginId)) {
-        void this.deactivate(extension.pluginId);
+      if (
+        handlerFaults >= PLUGIN_CIRCUIT_TRIP_THRESHOLD &&
+        this.isActive(extension.pluginId, sessionKey)
+      ) {
+        // Only this session's copy: another session may be running the same
+        // plugin fine, and a faulty handler is not proof its limb is broken.
+        void this.deactivate(extension.pluginId, sessionKey);
       }
     };
     // Plugins see a services view that stamps tool registrations with this
@@ -162,6 +175,7 @@ export class ExtensionRuntime {
     // ownership itself.
     const context: ExtensionContext = {
       services: withPluginToolOwnership(agent.services, extension.pluginId),
+      ui: createPluginUi(agent, extension.pluginId),
       events: createTrackedEventBus(agent.eventBus, subscriptions, onHandlerFault),
       config: extension.manifest.config,
       pluginId: extension.pluginId,
@@ -176,7 +190,7 @@ export class ExtensionRuntime {
       this.invalidate(extension.entryPoint);
       throw error;
     }
-    this.activations.set(extension.pluginId, {
+    sessionActivations.set(extension.pluginId, {
       module,
       entryPoint: extension.entryPoint,
       hooksUnregister,
@@ -186,15 +200,38 @@ export class ExtensionRuntime {
     });
   }
 
-  /** Deactivate a plugin: drop its hooks/subscriptions, then call its deactivate. */
-  async deactivate(pluginId: string): Promise<void> {
-    const activation = this.activations.get(pluginId);
-    if (activation === undefined) return;
+  /**
+   * Deactivate a plugin in one session, or everywhere when no session is given.
+   *
+   * Hosts that do not know the owning session (a global disable/remove, a
+   * capability sync unwind) pass `undefined` and hit every copy; an explicit
+   * session id only unwinds that one.
+   */
+  async deactivate(pluginId: string, sessionId?: string | undefined): Promise<void> {
+    const sessionKeys =
+      sessionId === undefined
+        ? [...this.activations.keys()]
+        : sessionId !== '' && this.activations.has(sessionId)
+          ? [sessionId]
+          : sessionId === ''
+            ? [...this.activations.keys()].filter((key) => key === '')
+            : [];
+    for (const sessionKey of sessionKeys) {
+      await this.deactivateInSession(sessionKey, pluginId);
+    }
+  }
+
+  /** Tear down one activation record; the plugin's own deactivate is isolated. */
+  private async deactivateInSession(sessionKey: string, pluginId: string): Promise<void> {
+    const sessionActivations = this.activations.get(sessionKey);
+    const activation = sessionActivations?.get(pluginId);
+    if (sessionActivations === undefined || activation === undefined) return;
     activation.hooksUnregister?.();
     // Release the bus handles as well: the bus outlives the activation, so a
     // handler left behind keeps firing into a plugin that is no longer active.
     releaseSubscriptions(activation.subscriptions);
-    this.activations.delete(pluginId);
+    sessionActivations.delete(pluginId);
+    if (sessionActivations.size === 0) this.activations.delete(sessionKey);
     // Drop the module cached for this entry point so a re-edit followed by a
     // re-activate imports the edited file instead of the stale module.
     this.invalidate(activation.entryPoint);
@@ -214,6 +251,7 @@ export class ExtensionRuntime {
     } catch (error) {
       activation.log?.warn('plugin deactivate failed', {
         pluginId,
+        sessionId: sessionKey === '' ? undefined : sessionKey,
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -226,19 +264,55 @@ export class ExtensionRuntime {
    * Deactivate every live plugin. Provided so a host can tear down all code
    * plugins in one call; each plugin's failure is isolated from the others.
    */
-  async deactivateAll(): Promise<void> {
-    // Snapshot the ids first: deactivate() removes each entry as it goes.
-    for (const pluginId of Array.from(this.activations.keys())) {
-      await this.deactivate(pluginId);
+  /**
+   * Tear down every plugin activated in one session.
+   *
+   * Called when a session closes: its bucket would otherwise outlive the
+   * agent, keeping `isActive(pluginId)` true and making the plugin centre show
+   * ● for a session nobody runs.
+   */
+  async deactivateSession(sessionId: string): Promise<void> {
+    const sessionActivations = this.activations.get(sessionId);
+    if (sessionActivations === undefined) return;
+    for (const pluginId of Array.from(sessionActivations.keys())) {
+      await this.deactivateInSession(sessionId, pluginId);
     }
   }
 
-  isActive(pluginId: string): boolean {
-    return this.activations.has(pluginId);
+  async deactivateAll(): Promise<void> {
+    // Snapshot first: deactivation removes entries (and empty sessions) as it goes.
+    for (const [sessionKey, plugins] of Array.from(this.activations.entries())) {
+      for (const pluginId of Array.from(plugins.keys())) {
+        await this.deactivateInSession(sessionKey, pluginId);
+      }
+    }
   }
 
-  activePluginIds(): readonly string[] {
-    return [...this.activations.keys()];
+  /** Whether the plugin is live in the given session (or anywhere, when omitted). */
+  isActive(pluginId: string, sessionId?: string | undefined): boolean {
+    if (sessionId !== undefined) return this.activations.get(sessionId)?.has(pluginId) === true;
+    for (const plugins of this.activations.values()) {
+      if (plugins.has(pluginId)) return true;
+    }
+    return false;
+  }
+
+  /** Live plugin ids for a session (or across all sessions, when omitted). */
+  activePluginIds(sessionId?: string | undefined): readonly string[] {
+    if (sessionId !== undefined) {
+      return [...(this.activations.get(sessionId)?.keys() ?? [])];
+    }
+    return [...new Set([...this.activations.values()].flatMap((plugins) => [...plugins.keys()]))];
+  }
+
+  /** Get-or-create the per-session bucket. */
+  private sessionActivations(sessionKey: string): Map<string, ActivationRecord> {
+    let bucket = this.activations.get(sessionKey);
+    if (bucket === undefined) {
+      bucket = new Map();
+      this.activations.set(sessionKey, bucket);
+    }
+    return bucket;
   }
 }
 

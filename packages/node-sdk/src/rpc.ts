@@ -819,6 +819,7 @@ export class SDKRpcClient {
     const rpc = await this.getRpc();
     return rpc.deactivatePlugin({
       pluginId: input.pluginId,
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
     });
   }
 
