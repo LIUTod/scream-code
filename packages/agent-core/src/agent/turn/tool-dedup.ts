@@ -5,17 +5,21 @@ import type { ExecutableToolResult } from '../../loop/types';
 import { parseToolCallArguments } from '../../loop/tool-call';
 import { canonicalDedupArgs } from './canonical-args';
 
+// Inline advisories, not runtime directives: the prompt reserves
+// `<system-reminder>` for a standalone user-role message and treats any tag
+// inside a tool result as quoted data. A distinct wrapper keeps the note
+// visible without claiming an authority the channel cannot carry.
 const REMINDER_TEXT_1 =
-  '\n\n<system-reminder>\n' +
+  '\n\n<tool-call-advisory>\n' +
   'You are repeating the exact same tool call with identical parameters.' +
   ' Please carefully analyze the previous result. If the task is not yet complete,' +
   ' try a different method or parameters instead of repeating the same call.' +
-  '\n</system-reminder>';
+  '\n</tool-call-advisory>';
 
 function makeReminderText2(toolName: string, repeatCount: number, args: unknown): string {
   const argsStr = canonicalDedupArgs(args);
   return (
-    '\n\n<system-reminder>\n' +
+    '\n\n<tool-call-advisory>\n' +
     'You have repeatedly called the same tool with identical parameters many times.\n' +
     'Repeated tool call detected:\n' +
     `- tool: ${toolName}\n` +
@@ -23,7 +27,7 @@ function makeReminderText2(toolName: string, repeatCount: number, args: unknown)
     `- arguments: ${argsStr}\n` +
     'The previous repeated calls did not make progress. Do not call this exact same tool with the exact same arguments again.\n' +
     'Carefully inspect the latest tool result and choose a different next action, different parameters, or finish the task if enough evidence has been gathered.' +
-    '\n</system-reminder>'
+    '\n</tool-call-advisory>'
   );
 }
 

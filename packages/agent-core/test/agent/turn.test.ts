@@ -401,7 +401,7 @@ describe('Agent turn flow', () => {
       content: [
         {
           type: 'text',
-          text: 'continue from hook',
+          text: '<hook_result hook_event="Stop">\ncontinue from hook\n</hook_result>',
         },
       ],
       toolCalls: [],
@@ -412,7 +412,7 @@ describe('Agent turn flow', () => {
       content: [
         {
           type: 'text',
-          text: 'continue from hook',
+          text: '<hook_result hook_event="Stop">\ncontinue from hook\n</hook_result>',
         },
       ],
       toolCalls: [],

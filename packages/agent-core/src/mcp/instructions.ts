@@ -21,3 +21,16 @@ export function collectMcpInstructions(mcp: McpConnectionManager | undefined): s
   }
   return blocks.join('\n');
 }
+
+/**
+ * Wrap collected server instructions in their own third-party block.
+ *
+ * These strings come from the connected server, not from this runtime, so they
+ * must not wear the runtime's `<system-reminder>` marker: the prompt treats
+ * only a standalone reminder message as an authoritative directive, and
+ * everything else as guidance that cannot grant permissions or consent. The
+ * distinct wrapper keeps that distinction visible to the model.
+ */
+export function formatMcpInstructionsBlock(text: string): string {
+  return `<mcp-server-instructions>\n${text}\n</mcp-server-instructions>`;
+}

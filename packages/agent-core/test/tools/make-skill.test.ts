@@ -21,6 +21,11 @@ import { executeTool } from './fixtures/execute-tool';
 const signal = new AbortController().signal;
 let callCounter = 0;
 
+/** Tool output is `string | ContentPart[]`; these tests only produce text. */
+function outputText(result: { output: unknown }): string {
+  return typeof result.output === 'string' ? result.output : '';
+}
+
 function runTool<Input>(tool: ExecutableTool<Input>, args: Input) {
   return executeTool(tool, {
     args,
@@ -38,6 +43,15 @@ function makeContextMessage(role: ContextMessage['role'], text: string): Context
   };
 }
 
+const VALID_VERIFICATION = {
+  triggers: [
+    'validate this react form with zod',
+    'add form validation to this component',
+  ],
+  negativeTriggers: ['show me the react-hook-form docs'],
+  acceptance: 'The edited component compiles and the form rejects an empty submit.',
+};
+
 function validPlanJson(): string {
   return JSON.stringify({
     name: 'react-form-validate',
@@ -54,6 +68,7 @@ function validPlanJson(): string {
       '# React form validation\n' +
       '\n' +
       'When the user asks for form validation in React, use zod + react-hook-form.\n',
+    verification: VALID_VERIFICATION,
     files: [
       {
         path: 'check-deps.sh',
@@ -261,6 +276,11 @@ describe('MakeSkillPlanTool', () => {
               '# Gateway monitor\n' +
               '\n' +
               'Monitor the gateway deployment.\n',
+            verification: {
+              triggers: ['monitor my gateway deployment', 'check whether the gateway is up'],
+              negativeTriggers: ['deploy a postgres cluster'],
+              acceptance: 'The monitor prints a status line and exits non-zero when the gateway is down.',
+            },
             files: [],
           }),
         },
@@ -317,7 +337,149 @@ describe('MakeSkillPlanTool', () => {
     // when-to-use frontmatter — validation must catch that (it is what
     // actually powers the listing's "When to use" line).
     expect(result.isError).toBe(true);
-    expect(String(result.output)).toContain('when-to-use');
+    expect(outputText(result)).toContain('when-to-use');
+  });
+});
+
+describe('MakeSkillPlanTool trigger checks', () => {
+  async function runWith(verification: unknown) {
+    const plan = { ...(JSON.parse(validPlanJson()) as Record<string, unknown>), verification };
+    const agent = {
+      context: { history: [makeContextMessage('user', 'Hi')] },
+      config: { provider: {} as unknown as Parameters<Agent['generate']>[0] },
+      generateWithRetry: vi.fn().mockResolvedValue({
+        message: { content: JSON.stringify(plan) },
+      }),
+    } as unknown as Agent;
+    const tool = new MakeSkillPlanTool(agent);
+    return runTool(tool, { type: 'code-pattern', nameHint: '', purpose: '', focus: '' });
+  }
+
+  it('ships a runnable trigger test with the plan', async () => {
+    const result = await runWith(VALID_VERIFICATION);
+
+    expect(result.isError).not.toBe(true);
+    const plan = JSON.parse(outputText(result)) as {
+      verification: { instructions: string };
+    };
+    expect(plan.verification.instructions).toContain('should trigger');
+    expect(plan.verification.instructions).toContain('should NOT trigger');
+    expect(plan.verification.instructions).toContain(VALID_VERIFICATION.triggers[0]!);
+  });
+
+  it('rejects a plan with no verification block', async () => {
+    const result = await runWith(undefined);
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('verification.triggers');
+  });
+
+  it('treats a null verification block as missing and says what to add', async () => {
+    const result = await runWith(null);
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('verification.triggers');
+  });
+
+  it('rejects a single trigger', async () => {
+    const result = await runWith({ ...VALID_VERIFICATION, triggers: ['validate this form'] });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('2-4 requests');
+  });
+
+  it('rejects a generic trigger that carries no request', async () => {
+    const result = await runWith({
+      ...VALID_VERIFICATION,
+      triggers: ['when needed', 'validate this react form'],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('too short or too generic');
+  });
+
+  it('rejects a negative trigger that repeats a positive one', async () => {
+    const result = await runWith({
+      ...VALID_VERIFICATION,
+      negativeTriggers: [VALID_VERIFICATION.triggers[0]!],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('duplicates a positive trigger');
+  });
+
+  it('rejects an acceptance that names nothing observable', async () => {
+    const result = await runWith({ ...VALID_VERIFICATION, acceptance: 'it works' });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('observable result');
+  });
+
+  it('accepts Chinese triggers at their natural length', async () => {
+    // Character-count thresholds would reject both: "转成PDF" is 5 glyphs and
+    // the acceptance 7, yet each carries a complete request.
+    const result = await runWith({
+      triggers: ['转成PDF', '帮我生成周报'],
+      negativeTriggers: ['总结这份 PDF'],
+      acceptance: '输出文件已生成',
+    });
+
+    expect(result.isError).not.toBe(true);
+  });
+
+  it('rejects the same trigger given twice', async () => {
+    const trigger = VALID_VERIFICATION.triggers[0]!;
+    const result = await runWith({
+      ...VALID_VERIFICATION,
+      triggers: [trigger, trigger.toUpperCase()],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('repeats the same trigger');
+  });
+
+  it('rejects a Chinese placeholder trigger', async () => {
+    const result = await runWith({
+      ...VALID_VERIFICATION,
+      triggers: ['需要时', '把这个表格转成 PDF'],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('too short or too generic');
+  });
+
+  it('accepts two-glyph Chinese triggers the image skill itself advertises', async () => {
+    const result = await runWith({
+      triggers: ['出图', '把这张图改成水彩'],
+      negativeTriggers: ['把这张图压到 200KB'],
+      acceptance: '生成了一张 PNG 文件',
+    });
+
+    expect(result.isError).not.toBe(true);
+  });
+
+  it('accepts a single trigger string as one entry and still asks for two', async () => {
+    const result = await runWith({ ...VALID_VERIFICATION, triggers: 'validate this form' });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('2-4 requests');
+  });
+
+  it('rejects more than four triggers', async () => {
+    const result = await runWith({
+      ...VALID_VERIFICATION,
+      triggers: ['one trigger here', 'two trigger here', 'three trigger here', 'four trigger here', 'five trigger here'],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('at most 4');
+  });
+
+  it('rejects an acceptance that only says it works', async () => {
+    const result = await runWith({ ...VALID_VERIFICATION, acceptance: 'It works as expected.' });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('observable result');
   });
 });
 

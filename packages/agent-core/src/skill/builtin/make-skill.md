@@ -154,6 +154,7 @@ $ARGUMENTS
 - Skill 名称和描述
 - 文件清单（至少包含 `SKILL.md`）
 - 适用场景
+- 触发检查（来自工具返回的 `verification`）：应该触发的请求、不该触发的近似请求、验收标准
 - 安装位置：`~/.scream-code/plugins/managed/<name>/`，可通过 `/plugin` 管理
 
 然后用 `AskUserQuestion` 询问：
@@ -181,6 +182,7 @@ $ARGUMENTS
 把结果告知用户，例如：
 
 - 成功：`Skill 已安装到 ~/.scream-code/plugins/managed/<name>/。新会话中可通过 /<name> 调用。`
+  随后把 `verification.instructions` 原文补一行，说明这是装完后要跑的触发检查：先说一句应该触发的请求，再说一句不该触发的近似请求。
 - 失败：说明错误原因，不要重试。
 
 ## 重要规则

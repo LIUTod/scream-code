@@ -1,5 +1,7 @@
 Generate or edit an image through the locally configured image API (OpenAI-compatible) and save the result as a PNG file. Returns the absolute path of the saved image.
 
+Use this for every request to create or change a picture; reach for drawing code (SVG, canvas, PIL, matplotlib) only when the user asks for code.
+
 - `mode=new`: text-to-image generation from `prompt`.
 - `mode=edit`: rewrites the image(s) listed in `imagePaths` (at least one required).
 - `mode=continue`: edits the last image produced in the session; extra `imagePaths` are fed in as additional references.

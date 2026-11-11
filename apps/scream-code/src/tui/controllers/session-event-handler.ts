@@ -1571,7 +1571,9 @@ export class SessionEventHandler {
     const request =
       `检测到可复用过程「${name}」${purposeText}。` +
       '请用 AskUserQuestion 工具询问用户是否将其保存为可复用技能（选项：生成 / 忽略）。' +
-      '用户选择「生成」后，用 MakeSkillPlanTool 生成该技能；选择「忽略」则直接说明已跳过。';
+      '用户选择「生成」后，用 MakeSkillPlanTool 生成该技能，再用 MakeSkillApply 落盘；' +
+      '落盘后把 plan.verification.instructions 原样告诉用户，并说明这是装完后要跑的触发检查。' +
+      '选择「忽略」则直接说明已跳过。';
     void session.prompt(request).catch(() => {
       // Fire-and-forget confirmation: a prompt failure (e.g. session closed)
       // is surfaced as a status hint so the user knows the candidate existed.

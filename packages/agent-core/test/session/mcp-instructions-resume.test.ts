@@ -4,7 +4,7 @@ import { join } from 'pathe';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { SDKSessionRPC } from '../../src/rpc';
-import { Session } from '../../src/session';
+import { Session, findMcpInstructionsBlock } from '../../src/session';
 import { testJian } from '../fixtures/test-jian';
 
 function createSessionRpc(): SDKSessionRPC {
@@ -62,4 +62,39 @@ describe('MCP instructions on resume', () => {
     expect(inject).toHaveBeenCalled();
     await resumed.close();
   }, 20_000);
+
+  it('seeds the dedup state from the replayed block and ignores unrelated messages', () => {
+    const block = '<mcp-server-instructions>\n- **docs**: prefer /docs\n</mcp-server-instructions>';
+    const message = (text: string, origin: unknown) => ({
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text }],
+      toolCalls: [],
+      origin,
+    });
+
+    expect(
+      findMcpInstructionsBlock([
+        message('hello', { kind: 'user' }),
+        message(block, { kind: 'injection', variant: 'mcp-instructions' }),
+        message('later user text', { kind: 'user' }),
+      ] as never),
+    ).toBe(block);
+
+    // Latest wins: a re-injected block after a server changed is the current one.
+    expect(
+      findMcpInstructionsBlock([
+        message(block, { kind: 'injection', variant: 'mcp-instructions' }),
+        message('<mcp-server-instructions>\nnew\n</mcp-server-instructions>', {
+          kind: 'injection',
+          variant: 'mcp-instructions',
+        }),
+      ] as never),
+    ).toBe('<mcp-server-instructions>\nnew\n</mcp-server-instructions>');
+
+    // Nothing to seed on a fresh session or when only other injections exist.
+    expect(findMcpInstructionsBlock([])).toBe('');
+    expect(
+      findMcpInstructionsBlock([message('plan mode', { kind: 'injection', variant: 'plan-mode' })] as never),
+    ).toBe('');
+  });
 });

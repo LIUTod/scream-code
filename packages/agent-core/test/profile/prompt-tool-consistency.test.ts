@@ -81,6 +81,14 @@ const SUBAGENT_PROMPT_ALLOWANCES = new Map<string, string>([
   ['python', 'verify role text uses it in command examples (`python3 -m py_compile`)'],
 ]);
 
+/**
+ * Classes that expose a tool-like `name` but are never offered to the model:
+ * the Python runner is reached through `RunScript`, not called by name.
+ */
+const NON_MODEL_TOOL_CLASSES = new Map<string, string>([
+  ['python', 'sandbox runner used by RunScript, has no model-facing schema'],
+]);
+
 const promptContext = {
   osEnv: {
     osKind: 'macOS',
@@ -156,6 +164,41 @@ describe('prompt ↔ tool consistency', () => {
     }
 
     expect(unknown).toEqual([]);
+  });
+
+  /**
+   * Construction is not exposure: `loopToolsFor` offers only names the active
+   * profile lists, so a class the registry builds but no profile enables is a
+   * tool the model can never call. The three MCP resource tools shipped that
+   * way — constructed, tested through their classes, and invisible in every
+   * request. Keep the two sets equal instead of trusting review to notice.
+   */
+  it('every constructed tool is enabled by at least one profile', () => {
+    const enabled = new Set<string>();
+    for (const profile of Object.values(DEFAULT_AGENT_PROFILES)) {
+      for (const name of profile?.tools ?? []) enabled.add(name);
+    }
+
+    const orphaned = [...registry]
+      .filter((name) => !enabled.has(name) && !NON_MODEL_TOOL_CLASSES.has(name))
+      .toSorted();
+
+    expect(orphaned).toEqual([]);
+  });
+
+  /**
+   * Image generation is a main-agent capability: only `agent.yaml` lists
+   * `ImageGenerate`, and only the main prompt may tell the model to use it.
+   * Subagents used to read the main wording, find no such tool, and improvise
+   * SVG/PIL output instead.
+   */
+  it('routes image generation to the main agent', () => {
+    const main = DEFAULT_AGENT_PROFILES['agent']!.systemPrompt(promptContext);
+    const subagent = DEFAULT_AGENT_PROFILES['designer']!.systemPrompt(promptContext);
+
+    expect(main).toContain('Image work stays in this conversation');
+    expect(subagent).not.toContain('Image work stays in this conversation');
+    expect(subagent).toContain('You have no `ImageGenerate` tool');
   });
 
   it('every prompt only names tools its agent can call', () => {

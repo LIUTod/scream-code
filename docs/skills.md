@@ -60,8 +60,11 @@ in `config.toml` merges every discovered skill instead of the project-scoped set
 ## Authoring a new skill
 
 1. Run `/make-skill` and answer the prompts, or write the `SKILL.md` yourself.
-2. `MakeSkillPlan` drafts a package (name, description, body, supporting files).
+2. `MakeSkillPlan` drafts a package (name, description, body, supporting files, and a trigger test).
 3. `MakeSkillApply` writes it into the plugin center, where `/plugin` manages it.
+4. Run the plan's trigger test once it is installed: `verification.instructions` names
+   requests that should fire the skill and a near miss that should not. A skill that
+   fires on the near miss is over-broad; one that ignores its own triggers is invisible.
 
 Skills are listed in the system prompt when the session starts, so a skill added
 mid-session needs a new session (or `/skill` refresh) to appear.

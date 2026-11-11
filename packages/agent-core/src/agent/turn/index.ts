@@ -19,6 +19,7 @@ import {
   type LoopTurnStopReason,
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
+import { renderHookResult } from '../../session/hooks/user-prompt';
 import { TURN_DEFAULTS } from './defaults';
 import { classifyToolResult } from './tool-failure-streak';
 
@@ -1018,7 +1019,7 @@ export class TurnFlow {
                 if (stopBlock !== undefined) {
                   stopHookContinuationUsed = true;
                   this.agent.context.appendUserMessage(
-                    [{ type: 'text', text: stopBlock.reason }],
+                    [{ type: 'text', text: renderHookResult('Stop', stopBlock.reason) }],
                     {
                       kind: 'system_trigger',
                       name: 'stop_hook',

@@ -132,6 +132,31 @@ describe('ToolCallComponent', () => {
     expect(expanded).not.toContain('task tools');
   });
 
+  it('hides an advisory-only body from the duplicate-call nudge', () => {
+    const advisory =
+      '<tool-call-advisory>\nThe same call was already made in the previous step.\n</tool-call-advisory>';
+    const component = new ToolCallComponent(
+      {
+        id: 'call_advisory',
+        name: 'Bash',
+        args: { command: 'echo hi' },
+      },
+      {
+        tool_call_id: 'call_advisory',
+        output: advisory,
+        is_error: false,
+      },
+      darkColors,
+    );
+
+    const collapsed = strip(component.render(100).join('\n'));
+    expect(collapsed).toContain(`${STATUS_BULLET}已使用 Bash`);
+    expect(collapsed).not.toContain('tool-call-advisory');
+
+    component.setExpanded(true);
+    expect(strip(component.render(100).join('\n'))).not.toContain('tool-call-advisory');
+  });
+
   it('hides <system-prefixed output even when the tool result is an error', () => {
     const component = new ToolCallComponent(
       {

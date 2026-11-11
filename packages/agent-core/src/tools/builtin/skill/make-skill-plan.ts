@@ -34,6 +34,23 @@ interface SkillPlan {
   readonly whenToUse: string;
   readonly content: string;
   readonly files: readonly { readonly path: string; readonly content: string }[];
+  readonly verification: PlanVerification;
+}
+
+/**
+ * Trigger checks that ship with the plan but not with the skill body.
+ *
+ * A generated skill is only worth keeping if it fires on the requests it was
+ * written for and stays quiet on near misses. The plan carries that test so the
+ * person who asked for the skill can run it in one sentence, and so a review of
+ * the skill has something falsifiable to check.
+ */
+interface PlanVerification {
+  readonly triggers: readonly string[];
+  readonly negativeTriggers: readonly string[];
+  readonly acceptance: string;
+  /** Filled by the tool from the three fields above; never authored by the model. */
+  readonly instructions: string;
 }
 
 const TEMPLATES: Record<MakeSkillPlanInput['type'], string> = {
@@ -53,6 +70,10 @@ The package must contain:
 - description: one sentence describing when to use this skill.
 - when-to-use: **required** — 1-2 sentences describing the specific situations/trigger conditions that should make the agent use this skill. Must include: (a) concrete trigger phrases/keywords the user might say (e.g. "convert", "PDF", "debug", "snapshot"), (b) the specific scenario or task type (e.g. "document conversion", "test debugging"), (c) avoid vague terms like "when needed" or "when appropriate". Use "When the user [action/request]..." or "When [task type]..." format. Examples: "when the user asks to convert a document to PDF", "when debugging a vitest snapshot failure", "when the user requests to deploy a model gateway". This drives the skill listing's "When to use" line, which is how the model decides to invoke the skill. Never leave it empty.
 - content: the complete Markdown body of SKILL.md, following the MANDATORY structure below.
+- verification: how to prove the skill earns its place. Required object:
+  - triggers: 2-4 short requests a real user would type that SHOULD invoke this skill (e.g. "convert this spreadsheet to a PDF"), written as the user says them — never as descriptions of the skill.
+  - negativeTriggers: 1-3 near-miss requests that must NOT invoke it: same topic area, different intent (for a PDF-conversion skill, "summarize this PDF").
+  - acceptance: one sentence naming an observable result that shows the skill worked (a file exists, a command passes, a section is present).
 - files: optional supporting files (e.g. scripts, data files) relative to the skill directory. Empty array if none.
 
 ### MANDATORY SKILL.md structure
@@ -160,7 +181,13 @@ export class MakeSkillPlanTool implements BuiltinTool<MakeSkillPlanInput> {
 
     const plan = parsePlanJson(rawText);
     validateSkillPlan(plan, args.nameHint);
-    return plan;
+    return {
+      ...plan,
+      verification: {
+        ...plan.verification,
+        instructions: buildVerificationInstructions(plan.verification),
+      },
+    };
   }
 }
 
@@ -246,6 +273,29 @@ function parsePlanJson(rawText: string): SkillPlan {
       description: z.string(),
       whenToUse: z.string(),
       content: z.string(),
+      verification: z.preprocess(
+        // `null` means "nothing to say" to most models; treat it as absent so
+        // the actionable "needs verification.triggers" error fires instead of a
+        // raw shape error.
+        (value) => value ?? undefined,
+        z
+          .object({
+            // A single string is the common near-miss; normalize it to a
+            // one-element list so the count check reports "needs 2-4" instead
+            // of dumping a zod issue.
+            triggers: z.preprocess(
+              (value) => (typeof value === 'string' ? [value] : value),
+              z.array(z.string()).default([]),
+            ),
+            negativeTriggers: z.preprocess(
+              (value) => (typeof value === 'string' ? [value] : value),
+              z.array(z.string()).default([]),
+            ),
+            acceptance: z.string().default(''),
+            instructions: z.string().default(''),
+          })
+          .default({ triggers: [], negativeTriggers: [], acceptance: '', instructions: '' }),
+      ),
       files: z
         .array(
           z.object({
@@ -319,4 +369,134 @@ function validateSkillPlan(plan: SkillPlan, nameHint: string): void {
       'Generated SKILL.md is missing the required "when-to-use" frontmatter field. Add 1-2 sentences describing the specific situations that should trigger this skill (it powers the skill listing\'s "When to use" line).',
     );
   }
+
+  // Last check on purpose: a plan that is already broken elsewhere should report
+  // that first, and the verification block is the least structural of the fields.
+  validateVerification(plan.verification);
+}
+
+/**
+ * Weighted length, not character count: a CJK request says as much in six
+ * glyphs as an English one does in twelve ("转成 PDF" vs "convert to PDF").
+ * Counting characters alone would reject every short Chinese trigger.
+ */
+const WIDE_CHAR =
+  /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/;
+
+function requestWeight(text: string): number {
+  let weight = 0;
+  for (const char of text) weight += WIDE_CHAR.test(char) ? 2 : 1;
+  return weight;
+}
+
+/** Below this the "request" is filler ("do it", "需要时"); two CJK glyphs weigh 4. */
+const MIN_TRIGGER_WEIGHT = 4;
+/** An acceptance has to name something observable: "it works" fails, "文件已生成" passes. */
+const MIN_ACCEPTANCE_WEIGHT = 10;
+const VAGUE_TRIGGER =
+  /^(when needed|when appropriate|as needed|do it|help me|run it|fix it|make it|n\/a|none|any|todo|tbd|需要时|按需|看情况|随便|暂无|测试|待定)$/i;
+
+/**
+ * Words that can pad any sentence without naming a result: after removing them
+ * (and punctuation) almost nothing may remain, or the acceptance is a promise
+ * nobody can check — "It works as expected." weighs 21 but says nothing.
+ */
+const VACUOUS_FILLER =
+  /\b(it|the|a|an|skill|works?|working|fine|ok|okay|good|as|expected|correctly|well|no|problems?|just|does|do|should|be)\b/gi;
+const CJK_FILLER = /没问题|能正常工作|正常工作|可以了|就行了|没毛病|正常|可用|能用/g;
+
+function isVacuousAcceptance(text: string): boolean {
+  const rest = text
+    .replaceAll(VACUOUS_FILLER, ' ')
+    .replaceAll(CJK_FILLER, ' ')
+    .replaceAll(/[\s.,;:!?'"`。，、；：！？（）()]/g, '');
+  return rest.length < 4;
+}
+
+function validateVerification(verification: PlanVerification): void {
+  const triggers = verification.triggers.map((item) => item.trim()).filter((item) => item.length > 0);
+  const negatives = verification.negativeTriggers
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  const acceptance = verification.acceptance.trim();
+
+  if (triggers.length < 2) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      'Generated skill plan needs verification.triggers with 2-4 requests a real user would type that should invoke this skill (e.g. "convert this spreadsheet to a PDF"). Descriptions of the skill do not count.',
+    );
+  }
+  if (triggers.length > 4) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      `Generated skill plan has ${String(triggers.length)} triggers; keep at most 4 so the trigger test stays runnable.`,
+    );
+  }
+  const uniqueTriggers = new Set(triggers.map((item) => item.toLowerCase()));
+  if (uniqueTriggers.size !== triggers.length) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      'Generated skill plan repeats the same trigger. Each trigger must be a different request a real user might send.',
+    );
+  }
+  const weakTrigger = triggers.find(
+    (item) => requestWeight(item) < MIN_TRIGGER_WEIGHT || VAGUE_TRIGGER.test(item),
+  );
+  if (weakTrigger !== undefined) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      `Trigger "${weakTrigger}" is too short or too generic to test with. Write the request the user would actually type, including what they would name (a file, a task, a symptom).`,
+    );
+  }
+
+  if (negatives.length === 0) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      'Generated skill plan needs verification.negativeTriggers with at least 1 near-miss request that must NOT invoke this skill — same topic area, different intent (for a PDF-conversion skill: "summarize this PDF").',
+    );
+  }
+  if (negatives.length > 3) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      `Generated skill plan has ${String(negatives.length)} negative triggers; keep at most 3.`,
+    );
+  }
+  const positiveSet = new Set(triggers.map((item) => item.toLowerCase()));
+  const duplicate = negatives.find((item) => positiveSet.has(item.toLowerCase()));
+  if (duplicate !== undefined) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      `Negative trigger "${duplicate}" duplicates a positive trigger. A near miss must have a different intent, not the same request.`,
+    );
+  }
+  const weakNegative = negatives.find(
+    (item) => requestWeight(item) < MIN_TRIGGER_WEIGHT || VAGUE_TRIGGER.test(item),
+  );
+  if (weakNegative !== undefined) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      `Negative trigger "${weakNegative}" is too short or too generic to be a useful near miss. Name a related request with a different intent.`,
+    );
+  }
+
+  if (requestWeight(acceptance) < MIN_ACCEPTANCE_WEIGHT || isVacuousAcceptance(acceptance)) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      'Generated skill plan needs verification.acceptance: one sentence naming an observable result that shows the skill worked (a file exists, a command passes, a section is present).',
+    );
+  }
+}
+
+function buildVerificationInstructions(verification: PlanVerification): string {
+  const quoted = (items: readonly string[]): string =>
+    items
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .map((item) => `"${item}"`)
+      .join(', ');
+  return (
+    `Test after install — should trigger: ${quoted(verification.triggers)}; ` +
+    `should NOT trigger: ${quoted(verification.negativeTriggers)}. ` +
+    `Acceptance: ${verification.acceptance.trim()}`
+  );
 }

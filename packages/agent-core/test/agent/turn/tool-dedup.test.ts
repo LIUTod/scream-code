@@ -82,7 +82,7 @@ describe('ToolCallDeduplicator', () => {
         dedup.endStep();
       }
       expect(typeof last!.output).toBe('string');
-      expect(last!.output as string).not.toContain('<system-reminder>');
+      expect(last!.output as string).not.toContain('<tool-call-advisory>');
     });
 
     it('injects reminder1 at exactly 3 consecutive', async () => {
@@ -93,7 +93,7 @@ describe('ToolCallDeduplicator', () => {
         last = await runOriginal(dedup, `c${String(i)}`, 'Read', { p: 1 }, okResult('R'));
         dedup.endStep();
       }
-      expect(last!.output as string).toContain('<system-reminder>');
+      expect(last!.output as string).toContain('<tool-call-advisory>');
       expect(last!.output as string).toContain('repeating the exact same tool call');
       expect(last!.output as string).not.toContain('repeated_times');
     });
@@ -106,7 +106,7 @@ describe('ToolCallDeduplicator', () => {
         last = await runOriginal(dedup, `c${String(i)}`, 'Read', { p: 1 }, okResult('R'));
         dedup.endStep();
       }
-      expect(last!.output as string).not.toContain('<system-reminder>');
+      expect(last!.output as string).not.toContain('<tool-call-advisory>');
     });
 
     it('injects reminder2 at exactly 5 consecutive', async () => {
@@ -117,7 +117,7 @@ describe('ToolCallDeduplicator', () => {
         last = await runOriginal(dedup, `c${String(i)}`, 'Read', { p: 1 }, okResult('R'));
         dedup.endStep();
       }
-      expect(last!.output as string).toContain('<system-reminder>');
+      expect(last!.output as string).toContain('<tool-call-advisory>');
       expect(last!.output as string).toContain('repeated_times: 5');
       expect(last!.output as string).toContain('tool: Read');
       expect(last!.output as string).toContain('arguments:');
@@ -131,7 +131,7 @@ describe('ToolCallDeduplicator', () => {
         last = await runOriginal(dedup, `c${String(i)}`, 'Read', { p: 1 }, okResult('R'));
         dedup.endStep();
       }
-      expect(last!.output as string).not.toContain('<system-reminder>');
+      expect(last!.output as string).not.toContain('<tool-call-advisory>');
     });
 
     it('injects reminder2 at exactly 8 consecutive', async () => {
@@ -142,7 +142,7 @@ describe('ToolCallDeduplicator', () => {
         last = await runOriginal(dedup, `c${String(i)}`, 'Read', { p: 1 }, okResult('R'));
         dedup.endStep();
       }
-      expect(last!.output as string).toContain('<system-reminder>');
+      expect(last!.output as string).toContain('<tool-call-advisory>');
       expect(last!.output as string).toContain('repeated_times: 8');
       expect(last!.output as string).toContain('tool: Read');
     });
@@ -163,7 +163,7 @@ describe('ToolCallDeduplicator', () => {
       dedup.beginStep();
       const last = await runOriginal(dedup, 'c1', 'Read', { p: 1 }, okResult('R'));
       dedup.endStep();
-      expect(last.output as string).not.toContain('<system-reminder>');
+      expect(last.output as string).not.toContain('<tool-call-advisory>');
     });
 
     it('same-step dups inherit reminder1 when streak triggers on original', async () => {
@@ -189,9 +189,9 @@ describe('ToolCallDeduplicator', () => {
       const finalDup = await dedup.finalizeResult('dup', 'Read', { p: 1 }, dupCached!);
       dedup.endStep();
 
-      expect(original.output as string).toContain('<system-reminder>');
+      expect(original.output as string).toContain('<tool-call-advisory>');
       expect(original.output as string).toContain('repeating the exact same tool call');
-      expect(finalDup.output as string).toContain('<system-reminder>');
+      expect(finalDup.output as string).toContain('<tool-call-advisory>');
       expect(finalDup.output as string).toContain('repeating the exact same tool call');
     });
 
@@ -207,7 +207,7 @@ describe('ToolCallDeduplicator', () => {
         dedup.checkSameStep(`dup${String(i)}`, 'Read', { p: 1 });
       }
       const final = await dedup.finalizeResult('orig', 'Read', { p: 1 }, okResult('R'));
-      expect(final.output as string).not.toContain('<system-reminder>');
+      expect(final.output as string).not.toContain('<tool-call-advisory>');
     });
   });
 
@@ -285,7 +285,7 @@ describe('ToolCallDeduplicator', () => {
       const final = await runOriginal(dedup, 'final', 'X', {}, errResult('boom'));
       dedup.endStep();
       expect(final.isError).toBe(true);
-      expect(final.output as string).toContain('<system-reminder>');
+      expect(final.output as string).toContain('<tool-call-advisory>');
     });
   });
 

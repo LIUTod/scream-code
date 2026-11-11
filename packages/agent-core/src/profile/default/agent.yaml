@@ -29,6 +29,13 @@ tools:
   # default): withheld tool schemas stay out of every request until the model
   # enables specific ones through this tool.
   - DiscoverMcpTools
+  # MCP resources and prompts. Read-only and scoped per server; each reports an
+  # empty or unavailable server list instead of failing the whole call. They
+  # live here because a constructed tool that no profile lists is never offered
+  # to the model (see the offered-surface guard in prompt-tool-consistency).
+  - ListMcpResources
+  - ListMcpResourceTemplates
+  - ReadMcpResource
   - CreateGoal
   - GetGoal
   - SetGoalBudget

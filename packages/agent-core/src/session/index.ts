@@ -11,6 +11,7 @@ import type { RuntimeSystemPrompt, ScreamConfig, SDKSessionRPC, SessionAgentProf
 import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
+import type { ContextMessage } from '../agent/context';
 import type { BackgroundManager } from '../agent/background';
 import { HookEngine, type HookDef } from './hooks';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
@@ -22,7 +23,7 @@ import {
   type McpServerEntry,
   type SessionMcpConfig,
 } from '../mcp';
-import { collectMcpInstructions } from '../mcp/instructions';
+import { collectMcpInstructions, formatMcpInstructionsBlock } from '../mcp/instructions';
 import type { EnabledPluginSessionStart } from '../plugin';
 import {
   DEFAULT_AGENT_PROFILES,
@@ -171,6 +172,25 @@ function readProfileToolNames(value: unknown): readonly string[] | undefined {
 
 const BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV = 'SCREAM_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT';
 
+/**
+ * Latest `<mcp-server-instructions>` block already present in a restored
+ * history, used to seed the resume-time dedup field. Blocks are injected as
+ * user-role messages with an `injection` origin, so identity comes from the
+ * origin, not from the wrapper text.
+ */
+export function findMcpInstructionsBlock(history: readonly ContextMessage[]): string {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (message?.origin?.kind !== 'injection') continue;
+    if (message.origin.variant !== 'mcp-instructions') continue;
+    const text = message.content
+      .map((part) => (part.type === 'text' ? part.text : ''))
+      .join('');
+    if (text.length > 0) return text;
+  }
+  return '';
+}
+
 export class Session {
   readonly rpc: SDKSessionRPC;
   readonly skills: SkillRegistry;
@@ -198,6 +218,8 @@ export class Session {
   private readonly mcpReady: Promise<void>;
   /** Coalesces a burst of MCP connect events into one instructions reminder. */
   private mcpInstructionsTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Last delivered MCP instructions block; comparing whole blocks keeps the
+   *  dedup exact and lets resume seed it from the replayed history. */
   private lastMcpInstructions = '';
   metadata: SessionMeta = {
     createdAt: new Date().toISOString(),
@@ -415,6 +437,10 @@ export class Session {
     // non-blocking instruction delivery: without this, MCP servers that describe
     // how to use their tools stay invisible after every resume.
     if (main !== undefined) {
+      // Resume replays the message but starts with an empty dedup field, so
+      // seed it from history: otherwise every resume appends the same
+      // third-party block again.
+      this.lastMcpInstructions = findMcpInstructionsBlock(main.context.history);
       void this.mcpReady.then(() => {
         this.injectMcpInstructions();
       });
@@ -870,14 +896,16 @@ export class Session {
 
   private injectMcpInstructions(): void {
     const text = collectMcpInstructions(this.mcp);
-    if (text.length === 0 || text === this.lastMcpInstructions) return;
+    if (text.length === 0) return;
+    const block = formatMcpInstructionsBlock(text);
+    if (block === this.lastMcpInstructions) return;
     const main = this.agents.get('main');
     // Record only once delivery is possible: a delivery attempt before the main
     // agent exists must be retried, not remembered as done.
     if (main === undefined) return;
-    this.lastMcpInstructions = text;
-    main.context.appendSystemReminder(
-      `<scream-mcp-instructions>\n${text}\n</scream-mcp-instructions>`,
+    this.lastMcpInstructions = block;
+    main.context.appendUserMessage(
+      [{ type: 'text', text: block }],
       { kind: 'injection', variant: 'mcp-instructions' },
     );
   }

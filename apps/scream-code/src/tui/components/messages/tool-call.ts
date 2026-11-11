@@ -42,6 +42,8 @@ const STREAMING_PROGRESS_INTERVAL_MS = 1000;
 const SUBAGENT_ELAPSED_INTERVAL_MS = 1000;
 const MAX_PROGRESS_LINE_CHARS = 10_000;
 const MAX_LIVE_OUTPUT_CHARS = 50_000;
+/** Tool-result bodies that begin with one of these tags are harness notices. */
+const HARNESS_NOTICE_PREFIXES = ['<system', '<tool-call-advisory'] as const;
 
 type SubagentTextKind = 'thinking' | 'text';
 
@@ -2046,10 +2048,12 @@ export class ToolCallComponent extends CachedContainer {
       return;
     }
 
-    // Outputs that start with a `<system…>` tag are harness-injected
-    // reminders piggy-backing on a tool result. They are noise for the
-    // user, so suppress the body while keeping the header chip intact.
-    if (result.output.trimStart().startsWith('<system')) {
+    // Outputs that start with a harness-owned tag are injected reminders
+    // piggy-backing on a tool result. They are noise for the user, so suppress
+    // the body while keeping the header chip intact. `<tool-call-advisory>` is
+    // the same kind of notice (cross-step duplicate-call nudge) under its own
+    // name, so the same rule applies.
+    if (HARNESS_NOTICE_PREFIXES.some((prefix) => result.output.trimStart().startsWith(prefix))) {
       return;
     }
 
