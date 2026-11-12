@@ -18,9 +18,30 @@
   <a href="README.zh.md">简体中文</a>
 </p>
 
-<p align="center">
-  <img width="2880" height="2880" alt="scream" src="https://github.com/user-attachments/assets/7268e848-b1b8-4540-9627-d21c94332229" />
-</p>
+### ❤️Sponsor
+
+<details open>
+<summary>Click to collapse</summary>
+
+<table>
+<tr>
+<td width="210" align="center" valign="middle"><a href="https://todapi.work"><img src="assets/sponsor-todapi.png" alt="todapi" width="190"></a></td>
+<td>
+
+<p><strong>todapi</strong> — a high-value API gateway.</p>
+<p>DeepSeek and other mainstream models from <strong>as low as 10% of list price</strong>, reached through one unified gateway: pay-as-you-go, one API key for multiple models. Powered by tier-one vendor resources with stable routes and strong value.</p>
+<ul>
+<li><strong>Price</strong>: DeepSeek and more from 10% of list price</li>
+<li><strong>Access</strong>: one gateway, one key — switching models no longer means switching providers</li>
+<li><strong>Get started</strong>: sign up at <a href="https://todapi.work">todapi.work</a></li>
+</ul>
+<p>Thanks to <a href="https://todapi.work">todapi</a> for sponsoring this project ❤️</p>
+
+</td>
+</tr>
+</table>
+
+</details>
 
 ---
 

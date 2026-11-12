@@ -17,9 +17,31 @@
   <a href="README.md">English</a> |
   <a href="README.zh.md">简体中文</a>
 </p>
-<p align="center">
-  <img width="1007" height="890" alt="企业微信20260909-170226@2x" src="https://github.com/user-attachments/assets/d004a561-845c-4d99-a99b-10527b85ce4b" />
-</p>
+
+### ❤️赞助商
+
+<details open>
+<summary>点击折叠</summary>
+
+<table>
+<tr>
+<td width="210" align="center" valign="middle"><a href="https://todapi.work"><img src="assets/sponsor-todapi.png" alt="todapi" width="190"></a></td>
+<td>
+
+<p><strong>todapi</strong> —— 高性价比的 API 网关服务。</p>
+<p>DeepSeek 等主流模型<strong>低至 1 折起</strong>，通过统一网关接入：按量计费、充值即用，一个 API Key 覆盖多个模型。使用一级渠道厂商资源，线路稳定，性价比高。</p>
+<ul>
+<li><strong>超低价格</strong>：DeepSeek 等模型低至官方价 1 折起</li>
+<li><strong>统一接入</strong>：一个网关、一个 Key，切换模型不用换服务商</li>
+<li><strong>即刻上手</strong>：前往 <a href="https://todapi.work">todapi.work</a> 注册即可使用</li>
+</ul>
+<p>感谢 <a href="https://todapi.work">todapi</a> 对本项目的赞助 ❤️</p>
+
+</td>
+</tr>
+</table>
+
+</details>
 
 ---
 
