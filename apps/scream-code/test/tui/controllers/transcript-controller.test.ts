@@ -533,7 +533,9 @@ describe('TranscriptController misc surface', () => {
     const welcome = controller.getWelcomeComponent();
     expect(welcome).toBeInstanceOf(WelcomeComponent);
     expect(state.transcriptContainer.children).toContain(welcome);
-    expect(welcome!.borderTitle).toBe('Scream Code');
+    // Borderless now: the mascot + wordmark carry the panel, no box glyphs.
+    welcome!.stopBreathing();
+    expect(welcome!.render(120).join('\n')).not.toContain('╭');
     expect(vi.mocked(state.editor.hasFirstInputFired)).toHaveBeenCalled();
     controller.stopWelcomeBreathing(); // must not throw after render
   });

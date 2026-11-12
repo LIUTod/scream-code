@@ -1,12 +1,13 @@
 /**
  * Welcome panel shown at the top of the TUI.
  *
- * Responsive layout:
- * - Wide terminal (≥87 cols): full SCREAM CODE ASCII art with per-char
- *   colouring (█ white, stroke breathing, others dim) + centred info line.
- * - Narrow terminal: compact logo face + centred info line.
+ * Responsive layout (borderless):
+ * - Wide terminal (≥55 cols): mascot face with rays of light spreading out,
+ *   then the SCREAM ASCII art (per-char colouring: █ white, stroke breathing,
+ *   others dim) + centred info line.
+ * - Narrow terminal: compact logo face with the same light rays + info line.
  *
- * The outer border uses the theme's breathing primary colour.
+ * Mascot, rays and logo strokes share the theme's breathing primary colour.
  */
 
 import type { Component, TUI } from '@liutod-scream/pi-tui';
@@ -18,24 +19,25 @@ import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
 import { BREATHE_CYCLE_MS, BREATHE_INTERVAL_MS, getBreathingFrame, resetBreathingClock } from '#/tui/utils/breathing-clock';
 
-// 24 hues × 5 interpolated steps = 120 frames × 40 ms ≈ 4.8 s cycle.
+// 24 hues × 5 interpolated steps = 120 palette entries. The breathing frame
+// walks the wheel in IMPACT_HUE_STEP jumps (see renderMascotRow) so every
+// colour change lands on a light impact instead of drifting continuously.
 const HUE_STOPS = 24;
 const SUB_STEPS = 5;
 
-const MIN_BOX_WIDTH = 50;
+const MIN_PANEL_WIDTH = 50;
 
-// Full SCREAM CODE art needs 85 columns of inner width (longest line).
-// With 2 border chars that means 87 terminal columns minimum.
-const FULL_LOGO_MIN_WIDTH = 87;
+// SCREAM art is 51 columns wide (longest line); keep a small margin.
+const FULL_LOGO_MIN_WIDTH = 55;
 
-// ── Full SCREAM CODE ASCII art ─────────────────────────────────────
+// ── SCREAM ASCII art (wordmark only) ───────────────────────────────
 const LOGO = [
-  '███████╗ ██████╗██████╗ ███████╗ █████╗ ███╗   ███╗  ██████╗ ██████╗ ██████╗ ███████╗',
-  '██╔════╝██╔════╝██╔══██╗██╔════╝██╔══██╗████╗ ████║ ██╔════╝██╔═══██╗██╔══██╗██╔════╝',
-  '███████╗██║     ██████╔╝█████╗  ███████║██╔████╔██║ ██║     ██║   ██║██║  ██║█████╗  ',
-  '╚════██║██║     ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║ ██║     ██║   ██║██║  ██║██╔══╝  ',
-  '███████║╚██████╗██║  ██║███████╗██║  ██║██║ ╚═╝ ██║ ╚██████╗╚██████╔╝██████╔╝███████╗',
-  '╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝',
+  '███████╗ ██████╗██████╗ ███████╗ █████╗ ███╗   ███╗',
+  '██╔════╝██╔════╝██╔══██╗██╔════╝██╔══██╗████╗ ████║',
+  '███████╗██║     ██████╔╝█████╗  ███████║██╔████╔██║',
+  '╚════██║██║     ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║',
+  '███████║╚██████╗██║  ██║███████╗██║  ██║██║ ╚═╝ ██║',
+  '╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝',
 ];
 
 const SHADOW_CHARS = new Set(['╚', '═', '╝', '║', '╔', '╗', '╠', '╣', '╦', '╩', '╬']);
@@ -109,10 +111,6 @@ function buildBreathingPalette(primaryHex: string, hueStops: number, subSteps: n
   return palette;
 }
 
-function padSpaces(n: number): string {
-  return ' '.repeat(Math.max(0, n));
-}
-
 function centerText(text: string, width: number): string {
   const visLen = visibleWidth(text);
   if (visLen >= width) return truncateToWidth(text, width, '…');
@@ -138,6 +136,72 @@ function renderLogoLine(line: string, boxColor: (s: string) => string, dim: (s: 
   return out;
 }
 
+/** Mix two #rrggbb colours (k=0 → from, k=1 → to). */
+function mixHex(from: string, to: string, k: number): string {
+  const [r1, g1, b1] = hexToRgb(from);
+  const [r2, g2, b2] = hexToRgb(to);
+  const t = Math.max(0, Math.min(1, k));
+  return rgbToHex(r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t);
+}
+
+// Light rays: quick flashes that expand outward from the mascot, then vanish.
+const RAY_LEN_MAX = 12;
+const RAY_PULSE = 24;   // breathing frames per flash (≈0.4 s)
+const RAY_PULSES = 4;   // flashes before the effect ends for good
+// One colour step per impact (impacts alternate between the two rows,
+// so they land every RAY_PULSE / 2 frames): 8 steps × 15 = full hue wheel.
+const IMPACT_HUE_STEP = 15;
+
+const easeOut = (x: number): number => 1 - (1 - Math.max(0, Math.min(1, x))) ** 3;
+
+/**
+ * One mascot row with symmetric light rays fanning outward.
+ * While breathing (`breatheFrame` >= 0) the rays flash in a few quick pulses
+ * that expand toward the edges and dissipate; when breathing has stopped
+ * (`breatheFrame` < 0) or the pulses are over, the rays are gone entirely.
+ */
+function renderMascotRow(
+  glyphs: string,
+  contentWidth: number,
+  breatheColor: string,
+  dimColor: string,
+  breatheFrame: number,
+  pulseOffset = 0,
+): string {
+  const mascotX = Math.floor((contentWidth - glyphs.length) / 2);
+  const leftAvail = Math.max(0, mascotX - 2);
+  const rightAvail = Math.max(0, contentWidth - (mascotX + glyphs.length) - 2);
+  const rayLen = Math.min(RAY_LEN_MAX, leftAvail, rightAvail);
+  const cells = new Array<string>(contentWidth).fill(' ');
+
+  for (let i = 0; i < glyphs.length; i++) {
+    cells[mascotX + i] = chalk.hex(breatheColor)(glyphs[i]!);
+  }
+
+  // Each row gets a full run of pulses: the offset row finishes its last
+  // flash instead of being cut mid-expansion when the shared window ends.
+  if (rayLen > 0 && breatheFrame >= 0 && breatheFrame < RAY_PULSE * RAY_PULSES + pulseOffset) {
+    const pulse = ((breatheFrame + pulseOffset) % RAY_PULSE) / RAY_PULSE;
+    if (pulse <= 0.72) {
+      const len = Math.max(1, Math.round(rayLen * easeOut(pulse / 0.72)));
+      for (let i = 0; i < len; i++) {
+        const head = i === len - 1;
+        const distFromHead = len - 1 - i;
+        const fade = len === 1 ? 0 : distFromHead / (len - 1);
+        const glyph = head ? '█' : distFromHead <= 3 ? '▓' : distFromHead <= 7 ? '▒' : '░';
+        const color = head
+          ? breatheColor
+          : mixHex(mixHex(breatheColor, dimColor, 0.1 + 0.9 * fade), dimColor, 0.25 * (pulse / 0.72));
+        const painted = chalk.hex(color)(glyph);
+        cells[mascotX - 2 - i] = painted;
+        cells[mascotX + glyphs.length + 1 + i] = painted;
+      }
+    }
+  }
+
+  return cells.join('');
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
 export class WelcomeComponent implements Component {
@@ -147,7 +211,6 @@ export class WelcomeComponent implements Component {
   private breatheTimer: ReturnType<typeof setInterval> | null = null;
   private breatheTimeout: ReturnType<typeof setTimeout> | null = null;
   private breathePalette: string[];
-  borderTitle: string | null = null;
 
   constructor(state: AppState, colors: ColorPalette, ui: TUI) {
     this.state = state;
@@ -185,16 +248,20 @@ export class WelcomeComponent implements Component {
 
   render(width: number): string[] {
     const breatheFrame = this.breatheTimer !== null ? getBreathingFrame() : 0;
+    // Colour steps once per impact: every light flash lands on a new hue
+    // (same cadence as the ray pulses, so colour and impact stay in sync).
+    const impactFrame = Math.min(breatheFrame, RAY_PULSE * RAY_PULSES - 1);
+    const paletteIndex =
+      (Math.floor(impactFrame / (RAY_PULSE / 2)) * IMPACT_HUE_STEP) % this.breathePalette.length;
     const breatheColor = this.breatheTimer !== null
-      ? (this.breathePalette[breatheFrame] ?? this.colors.primary)
+      ? (this.breathePalette[paletteIndex] ?? this.colors.primary)
       : this.colors.primary;
     const boxColor = chalk.hex(breatheColor);
     const dim = chalk.hex(this.colors.textDim);
     const white = chalk.hex('#FFFFFF');
 
-    const boxWidth = Math.max(MIN_BOX_WIDTH, width);
-    const innerWidth = boxWidth - 2;
-    const useFullLogo = boxWidth >= FULL_LOGO_MIN_WIDTH;
+    const contentWidth = Math.max(MIN_PANEL_WIDTH, width);
+    const useFullLogo = contentWidth >= FULL_LOGO_MIN_WIDTH;
 
     // Build info values.
     const isLoggedOut = !this.state.model;
@@ -223,69 +290,43 @@ export class WelcomeComponent implements Component {
       versionValue = dim(this.state.version);
     }
 
-    // Top border with centred title.
-    const borderTitle = this.borderTitle ?? '';
-    const contentWidth = boxWidth - 2;
-    let topBorder: string;
-    if (borderTitle) {
-      const titleVis = visibleWidth(borderTitle);
-      const titleText = `─ ${borderTitle} ─`;
-      const titleBlockVis = titleVis + 4;
-      const leftDash = Math.max(0, Math.floor((contentWidth - titleBlockVis) / 2));
-      const rightDash = Math.max(0, contentWidth - leftDash - titleBlockVis);
-      topBorder = boxColor('╭' + '─'.repeat(leftDash) + titleText + '─'.repeat(rightDash) + '╮');
-    } else {
-      topBorder = boxColor('╭' + '─'.repeat(contentWidth) + '╮');
-    }
-
     const lines: string[] = [''];
-    lines.push(topBorder);
 
     const separator = dim(' · ');
     const helpValue = dim(t('welcome.help_hint'));
 
     if (useFullLogo) {
-      // ── Full SCREAM CODE art layout ──────────────────────────────
-      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
+      // ── Mascot with spreading light rays, then the SCREAM art ─────
+      const frameIdx = this.breatheTimer !== null ? Math.floor(breatheFrame / 24) % LOGO_FRAMES.length : 0;
+      const frame = LOGO_FRAMES[frameIdx]!;
+      const animFrame = this.breatheTimer !== null ? breatheFrame : -1;
+      lines.push(renderMascotRow(frame[0]!, contentWidth, breatheColor, this.colors.textDim, animFrame));
+      lines.push(renderMascotRow(frame[1]!, contentWidth, breatheColor, this.colors.textDim, animFrame, RAY_PULSE / 2));
+      lines.push('');
 
       for (const line of LOGO) {
         const rendered = renderLogoLine(line, boxColor, dim, white);
-        lines.push(boxColor('│') + this.#fitToWidth(centerText(rendered, innerWidth), innerWidth) + boxColor('│'));
+        lines.push(centerText(rendered, contentWidth));
       }
 
-      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
-
-      const infoLine = centerText(versionValue + separator + modelValue + separator + likeValue + separator + helpValue, innerWidth);
-      lines.push(boxColor('│') + this.#fitToWidth(infoLine, innerWidth) + boxColor('│'));
-
-      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
+      lines.push('');
+      lines.push(centerText(versionValue + separator + modelValue + separator + likeValue + separator + helpValue, contentWidth));
+      lines.push('');
     } else {
       // ── Compact logo face layout (narrow terminal) ──────────────
       const frameIdx = this.breatheTimer !== null ? Math.floor(breatheFrame / 24) % LOGO_FRAMES.length : 0;
       const frame = LOGO_FRAMES[frameIdx]!;
+      const animFrame = this.breatheTimer !== null ? breatheFrame : -1;
 
-      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
-      lines.push(boxColor('│') + centerText(boxColor(frame[0]), innerWidth) + boxColor('│'));
-      lines.push(boxColor('│') + centerText(boxColor(frame[1]), innerWidth) + boxColor('│'));
-      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
+      lines.push(renderMascotRow(frame[0]!, contentWidth, breatheColor, this.colors.textDim, animFrame));
+      lines.push(renderMascotRow(frame[1]!, contentWidth, breatheColor, this.colors.textDim, animFrame, RAY_PULSE / 2));
+      lines.push('');
 
-      const infoLine = centerText(versionValue + separator + modelValue + separator + likeValue + separator + helpValue, innerWidth);
-      lines.push(boxColor('│') + this.#fitToWidth(infoLine, innerWidth) + boxColor('│'));
+      lines.push(centerText(versionValue + separator + modelValue + separator + likeValue + separator + helpValue, contentWidth));
 
-      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
+      lines.push('');
     }
-
-    lines.push(boxColor('╰' + '─'.repeat(innerWidth) + '╯'));
-    lines.push('');
 
     return lines;
-  }
-
-  #fitToWidth(str: string, width: number): string {
-    const visLen = visibleWidth(str);
-    if (visLen > width) {
-      return truncateToWidth(str, width, '…');
-    }
-    return str + padSpaces(width - visLen);
   }
 }

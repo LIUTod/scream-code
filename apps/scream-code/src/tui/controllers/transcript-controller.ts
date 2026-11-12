@@ -509,7 +509,6 @@ export class TranscriptController {
       state.theme.colors,
       state.ui,
     );
-    welcome.borderTitle = 'Scream Code';
     this.welcomeComponent = welcome;
     // Once the user has typed anything (even a single character), breathing
     // stays off forever — even across session switches.  This prevents the
