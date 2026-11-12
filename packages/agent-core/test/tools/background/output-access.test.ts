@@ -93,7 +93,13 @@ describe('BackgroundProcessManager — readOutput / getOutputPath', () => {
 
   it('readOutput prefers disk over the live ring buffer when persisted output exists', async () => {
     const taskId = manager.register(immediateProcess(0, 'ring-only\n'), 'echo', 'demo');
-    await waitForLiveOutput(manager, taskId, 'ring-only');
+    // Drain both write queues deterministically (same reasoning as the ghost
+    // test below): `wait` drains persistWriteQueue so the task is marked as
+    // having a persisted log, and `flushOutput` drains outputWriteQueue so
+    // output.log is on disk. On a fast run the task's own flush raced the
+    // read below, and readOutput fell back to the ring buffer.
+    await manager.wait(taskId);
+    await manager.flushOutput(taskId);
     await appendTaskOutput(sessionDir, taskId, 'disk-only\n');
 
     const out = await manager.readOutput(taskId);
