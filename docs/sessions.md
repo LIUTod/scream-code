@@ -33,7 +33,7 @@ append-only record stream.
 
 ## Compaction
 
-Three layers, all automatic:
+Three layers, all automatic (unless `loopControl.compactionMode = "off"`):
 
 - **Micro** — keeps the most recent 20 messages (bounded to 40k tokens) and
   truncates older ones.
@@ -46,6 +46,15 @@ Three layers, all automatic:
 
 The summary is marked unverified: re-check anything it asserts before acting on
 it. Configurable via `loopControl.compactionTriggerRatio` (0.5–0.99).
+
+**Off mode** — `loopControl.compactionMode = "off"` for unattended and IM
+sessions that must not stall on a compaction LLM call: micro and auto
+compaction are disabled entirely (the context read paths never advance the
+micro cutoff behind the caller's back, and a context-overflow error surfaces
+instead of triggering recovery). At the 90% blocking threshold the model gets
+a one-time wrap-up reminder per episode instead of being blocked; the
+provider's own context limit remains the hard backstop. `/compact` still works
+manually.
 
 ## Switching and concurrency
 

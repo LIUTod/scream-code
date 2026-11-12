@@ -268,6 +268,9 @@ export class Agent {
     );
     this.fullCompaction = new FullCompaction(this, options.compactionStrategy);
     this.microCompaction = new MicroCompaction(this);
+    // loop_control.compaction_mode = "off" turns micro off entirely: the
+    // context read paths must not advance the cutoff behind the caller's back.
+    this.microCompaction.setEnabled(this.screamConfig?.loopControl?.compactionMode !== 'off');
 
     // ── Group 3: core session services (context/config/turn/injection/…) ─────
     // context is the heart: it owns history/token gauge and is consumed by

@@ -123,6 +123,11 @@ export const LoopControlSchema = z.object({
   // prevents runaway loops where the model neither completes nor blocks the
   // goal. Set to 0 to disable the default guard.
   maxGoalTurns: z.number().int().min(0).optional(),
+  // 'auto' (default): auto-compact when the context budget triggers.
+  // 'off': never auto-compact (unattended/IM sessions that must not stall on a
+  // compaction LLM call). At the blocking threshold the model gets a one-time
+  // wrap-up warning instead; manual /compact still works in both modes.
+  compactionMode: z.enum(['auto', 'off']).optional(),
 });
 
 export type LoopControl = z.infer<typeof LoopControlSchema>;

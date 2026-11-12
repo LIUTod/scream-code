@@ -425,7 +425,9 @@ Several capabilities are off by default or reachable only through a command. You
 |---|---|---|
 | The same multi-step setup has been rebuilt two or three times | `/make-skill` turns it into a reusable skill | The setup cost repeats every time |
 | Work needs Python state across steps, or recursive decomposition | `/rlm` gives a persistent Python kernel whose `rlm()` spawns real sub-agents | Every Bash call restarts the interpreter |
-| A long conversation has reached a natural break | `/compact` summarises older turns now | The engine auto-compacts at 85% of the window anyway; choosing the moment avoids a pause mid-task |
+| A long conversation has reached a natural break | `/compact` summarises older turns now | The engine auto-compacts when it can (85% of the window) — unless
+`loop_control.compaction_mode = "off"` is set, in which case run `/compact`
+manually when the context gauge gets high.; choosing the moment avoids a pause mid-task |
 | The same class of tool call keeps getting denied for a reason that is genuinely safe to allow | extend the `permission.rules` allow-list in `config.toml` | Each denial costs a round trip |
 | The user asks why a run behaved a certain way | `/trace` shows what actually happened | Cheaper and more reliable than re-deriving it |
 | The user wants to compare agent behaviours | `/eval` runs the end-to-end health check | Anecdotes are not measurements |

@@ -215,6 +215,7 @@ function findSupersededPaths(
  */
 export class MicroCompaction {
   private cutoff = 0;
+  private enabled = true;
   readonly config: MicroCompactionConfig;
 
   constructor(
@@ -222,6 +223,18 @@ export class MicroCompaction {
     config?: Partial<MicroCompactionConfig>,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /**
+   * `loop_control.compaction_mode = "off"` turns micro off entirely. Micro is
+   * compaction too — it irreversibly replaces old tool results with markers —
+   * so the context read paths (`messages` / `messagesForLLM`, which call
+   * `detect()` on every request) must not advance the cutoff behind the
+   * caller's back, and `estimateSavings` must read 0 so the off-mode gauge
+   * stays on raw tokens.
+   */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
   }
 
   /** Reset the internal cutoff line (e.g. after a full compaction). */
@@ -240,7 +253,7 @@ export class MicroCompaction {
 
   /** Check whether micro-compaction is warranted and advance the cutoff. */
   detect(): void {
-    if (!flags.enabled('micro-compaction')) return;
+    if (!this.enabled || !flags.enabled('micro-compaction')) return;
     const config = this.config;
     const { history } = this.agent.context;
     const maxContextTokens = this.agent.config.modelCapabilities.max_context_tokens;
@@ -288,6 +301,7 @@ export class MicroCompaction {
    * notice regardless of size, since they carry no actionable information.
    */
   compact(messages: readonly ContextMessage[]): readonly ContextMessage[] {
+    if (!this.enabled) return messages;
     const config = this.config;
     const superseded = findSupersededPaths(messages, this.cutoff);
     const toolNames = buildToolCallNameMap(messages);
@@ -341,6 +355,7 @@ export class MicroCompaction {
    * whether it still needs to run after Micro has been applied.
    */
   estimateSavings(messages: readonly ContextMessage[]): number {
+    if (!this.enabled) return 0;
     const { beforeTokens, afterTokens } = this.measureEffect(messages, this.cutoff);
     return beforeTokens - afterTokens;
   }

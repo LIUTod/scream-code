@@ -859,6 +859,13 @@ Stage 2: Full  (one LLM)   → LLM summarizes old messages, triggers at >= 85% o
 Stage 3: Block (safety net) → blocks the turn until compaction completes, triggers at >= 90% of the window
 ```
 
+- **Off mode**: `loop_control.compaction_mode = "off"` disables Stage 1 and the
+  auto parts of Stage 2/3 entirely (`MicroCompaction.setEnabled(false)` gates
+  the context read paths; `checkAutoCompaction`/`afterStep` no-op; the block
+  threshold becomes a one-time wrap-up warning). Context overflow in off mode
+  surfaces as an error instead of triggering `handleOverflowError`. Manual
+  `/compact` still runs the full pipeline (its micro stage no-ops).
+
 - **Predictive trigger**: estimates next-step token growth and proactively compacts before overflow, rather than waiting for it to happen.
 - **Circuit breaker**: 3 consecutive compaction failures → auto-compaction disabled for the current turn, auto-resets next turn.
 - **Timeout**: `block()` waits up to 120 seconds for compaction, cancels and notifies the user on timeout.

@@ -248,6 +248,14 @@ export class FullCompaction {
   } | null = null;
   protected _compactedHistory: CompactedHistory[] = [];
   protected readonly strategy: CompactionStrategy;
+  /** `loop_control.compaction_mode = "off"`: no micro and no auto compaction.
+   *  At the blocking threshold the model gets a one-time wrap-up warning per
+   *  episode instead of being stalled on a compaction LLM call; the warning
+   *  re-arms once the context shrinks back under the same threshold. The
+   *  provider's own context limit remains the hard backstop. Manual /compact
+   *  still works (it bypasses `checkAutoCompaction`). */
+  private readonly autoCompactionDisabled: boolean;
+  private warnedAtBlockThreshold = false;
 
   constructor(
     protected readonly agent: Agent,
@@ -267,6 +275,7 @@ export class FullCompaction {
             DEFAULT_COMPACTION_CONFIG.triggerRatio,
         }
       );
+    this.autoCompactionDisabled = agent.screamConfig?.loopControl?.compactionMode === 'off';
   }
 
   get isCompacting(): boolean {
@@ -395,6 +404,13 @@ export class FullCompaction {
   }
 
   async handleOverflowError(signal: AbortSignal, error: unknown) {
+    if (this.autoCompactionDisabled) {
+      // Off mode: the provider's context limit is the declared hard backstop.
+      // Surface the overflow error — it already tells the user to trim context
+      // or run /compact — instead of stalling the turn on a compaction LLM
+      // call the user disabled.
+      throw error;
+    }
     if (this.reactiveAttempted) {
       throw error;
     }
@@ -431,13 +447,32 @@ export class FullCompaction {
   }
 
   async beforeStep(signal: AbortSignal): Promise<void> {
+    // The turn loop checks the abort signal after hooks run; an abort landing
+    // in that window must not persist anything (the warning path below writes
+    // to history).
+    signal.throwIfAborted();
+    const effectiveTokens = this.effectiveTokenCount;
+
+    if (this.autoCompactionDisabled) {
+      // Off mode: no micro (it drops old tool results irreversibly) and no
+      // auto compaction. The one-time wrap-up warning fires when the context
+      // reaches the blocking threshold, and re-arms once the context shrinks
+      // back under the same threshold — so a later turn in the same session
+      // warns again instead of staying silent forever.
+      if (this.strategy.shouldBlock(effectiveTokens)) {
+        this.warnAtBlockThreshold(effectiveTokens);
+      } else {
+        this.warnedAtBlockThreshold = false;
+      }
+      return;
+    }
+
     // Stage 1: Run micro compaction first (free, no LLM call).
     // detect() advances the internal cutoff when token usage >= 50%.
     this.agent.microCompaction.detect();
 
     // Stage 2: Check if full compaction is still needed, accounting for
     // the token savings micro compaction already provides.
-    const effectiveTokens = this.effectiveTokenCount;
 
     const isReactiveTrigger = this.strategy.shouldCompact(effectiveTokens) &&
       effectiveTokens >= this.lowWaterMark;
@@ -459,6 +494,22 @@ export class FullCompaction {
     }
   }
 
+  /** One-shot wrap-up warning for off mode, re-armed once back under trigger. */
+  private warnAtBlockThreshold(effectiveTokens: number): void {
+    if (this.warnedAtBlockThreshold) return;
+    this.warnedAtBlockThreshold = true;
+    const window = this.agent.config.modelCapabilities.max_context_tokens;
+    const percent =
+      window > 0 ? Math.min(100, Math.round((effectiveTokens / window) * 100)) : null;
+    const share =
+      percent !== null ? `about ${String(percent)}% of the model context window` : 'past the blocking threshold';
+    this.agent.context.appendSystemReminder(
+      `Context is at ${share} and auto-compaction is disabled for this session. ` +
+        'Wrap up the current task soon and hand back a concise result — start no new heavy work.',
+      { kind: 'injection', variant: 'compaction-off-warning' },
+    );
+  }
+
   /** Conservative estimate of max output tokens for one API call. */
   private get estimatedMaxOutputTokens(): number {
     const ctx = this.agent.config.modelCapabilities.max_context_tokens;
@@ -478,6 +529,7 @@ export class FullCompaction {
   }
 
   async afterStep(): Promise<void> {
+    if (this.autoCompactionDisabled) return;
     if (this.strategy.checkAfterStep) {
       this.checkAutoCompaction(false);
     }
@@ -485,6 +537,7 @@ export class FullCompaction {
   }
 
   private checkAutoCompaction(throwOnLimit: boolean = true): boolean {
+    if (this.autoCompactionDisabled) return false;
     if (this.compacting) return true;
     const effectiveTokens = this.effectiveTokenCount;
     if (!this.strategy.shouldCompact(effectiveTokens)) return false;
