@@ -75,6 +75,9 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
   readonly name: string = 'WolfPack';
   readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(WolfPackToolInputSchema);
+  // Spawns a pack of subagents and waits for all of them; the batch may
+  // legitimately outlast any fixed deadline.
+  readonly longRunning = true;
 
   constructor(
     private readonly subagentHost: SessionSubagentHost,

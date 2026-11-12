@@ -266,9 +266,10 @@ export interface ToolResultEvent {
    * Machine-readable classification of an error result — see
    * `ExecutableToolErrorResult.code`. Consumers branch on this instead of
    * matching `output` prose; absent on success results and on records written
-   * before the field existed.
+   * before the field existed. `'timeout'` is the loop-enforced execution
+   * deadline (a tool defect), distinct from `'aborted'` (a user decision).
    */
-  readonly code?: 'aborted' | 'failed' | 'blocked' | undefined;
+  readonly code?: 'aborted' | 'failed' | 'blocked' | 'timeout' | undefined;
   /** Abort attribution for `code: 'aborted'` — see
    *  `ExecutableToolErrorResult.abortReason`. */
   readonly abortReason?: string | undefined;

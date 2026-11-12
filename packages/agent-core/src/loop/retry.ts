@@ -1,6 +1,7 @@
 import { sleep } from '@antfu/utils';
 import {
   APIProviderRateLimitError,
+  APIStreamFormatError,
   ChatProviderError,
   calculateRateLimitBackoffMs,
 } from '@scream-code/ltod';
@@ -26,6 +27,13 @@ export const DEFAULT_MAX_RETRY_ATTEMPTS = 10;
 // not burn the full 10-attempt budget (≈2-3 min) waiting for nothing.
 // With the 30s quota backoff this totals ≈1 minute before surfacing.
 export const QUOTA_RETRY_ATTEMPTS = 3;
+
+// Malformed provider streams (spliced tool-call indices, deltas for a closed
+// block) are retryable — one spliced chunk does not make the request bad —
+// but a gateway that *always* mangles its tool-call streams never gets
+// healthier by re-issuing. Three attempts ride out a transient splice; a
+// persistent one fails fast instead of burning the full 10-attempt budget.
+export const STREAM_FORMAT_RETRY_ATTEMPTS = 3;
 
 const BASE_DELAY_MS = 500;
 // Per-attempt backoff cap (32s). The default 10-attempt ramp reaches the
@@ -84,7 +92,9 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
       const attemptLimit =
         error instanceof APIProviderRateLimitError && error.reason === 'QUOTA_EXHAUSTED'
           ? Math.min(QUOTA_RETRY_ATTEMPTS, maxAttempts)
-          : maxAttempts;
+          : error instanceof APIStreamFormatError
+            ? Math.min(STREAM_FORMAT_RETRY_ATTEMPTS, maxAttempts)
+            : maxAttempts;
 
       if (attempt >= attemptLimit || !input.llm.isRetryableError(error)) {
         logRequestFailure(input, error, attempt, attemptLimit);

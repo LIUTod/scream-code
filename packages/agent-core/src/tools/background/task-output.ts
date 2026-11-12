@@ -70,6 +70,9 @@ export class TaskOutputTool implements BuiltinTool<TaskOutputInput> {
   readonly name = 'TaskOutput' as const;
   readonly description: string = TASK_OUTPUT_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(TaskOutputInputSchema);
+  // block=true waits up to 3600s for a background task; the tool manages its
+  // own wait budget and honours the abort signal.
+  readonly longRunning = true;
 
   constructor(private readonly manager: BackgroundProcessManager) {}
 

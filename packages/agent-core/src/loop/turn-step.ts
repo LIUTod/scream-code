@@ -51,6 +51,12 @@ export interface ExecuteLoopStepDeps {
     (usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>;
   readonly hasPendingSteer?: (() => boolean) | undefined;
   /**
+   * Generic execution deadline per tool call, in milliseconds. `undefined`
+   * falls back to the built-in default; tools declaring `longRunning` are
+   * exempt regardless of this value.
+   */
+  readonly toolDeadlineMs?: number | undefined;
+  /**
    * Attribution for the pending steer (see RunTurnInput.pendingSteerKind):
    * `'parent-interject'` makes an interrupted tool report the parent-agent
    * wording instead of the user-cancellation one.
@@ -128,6 +134,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     hasPendingSteer: deps.hasPendingSteer,
     pendingSteerKind: deps.pendingSteerKind,
     toolCallBlockIndex: { value: 0 },
+    toolDeadlineMs: deps.toolDeadlineMs,
   };
 
   await dispatchEvent({

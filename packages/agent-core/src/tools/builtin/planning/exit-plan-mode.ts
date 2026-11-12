@@ -83,6 +83,8 @@ export class ExitPlanModeTool implements BuiltinTool<ExitPlanModeInput> {
   readonly name = 'ExitPlanMode' as const;
   readonly description: string = DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(ExitPlanModeInputSchema);
+  // Blocks on plan approval, which waits for the user's decision.
+  readonly longRunning = true;
 
   constructor(private readonly agent: Agent) {}
 

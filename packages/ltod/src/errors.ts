@@ -190,6 +190,23 @@ export class APIFinishReasonError extends ChatProviderError {
   }
 }
 
+/**
+ * The provider stream was structurally malformed at the wire level — e.g. a
+ * tool-call argument delta naming an index that was never opened, or deltas
+ * targeting a block that already closed. This is upstream breakage (gateways
+ * that splice or reindex streams), not a malformed request: the request that
+ * produced it is identical to the ones that work, so
+ * {@link isRetryableGenerateError} classifies it as retryable and the loop
+ * bounds those retries so a persistently broken gateway fails fast instead of
+ * burning the whole step budget.
+ */
+export class APIStreamFormatError extends ChatProviderError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'APIStreamFormatError';
+  }
+}
+
 export function isRetryableGenerateError(error: unknown): boolean {
   if (error instanceof APIConnectionError || error instanceof APITimeoutError) {
     return true;
@@ -200,6 +217,13 @@ export function isRetryableGenerateError(error: unknown): boolean {
   if (error instanceof APIFinishReasonError) {
     // In-band stream failure reported through the terminal finish reason:
     // upstream breakage, not a malformed request — retry the step.
+    return true;
+  }
+  if (error instanceof APIStreamFormatError) {
+    // Structurally malformed stream (unknown tool-call index, deltas for a
+    // closed block): upstream breakage, not a malformed request. Bounded
+    // retries — a gateway that always splices its tool-call streams never
+    // becomes healthy by re-issuing.
     return true;
   }
   if (error instanceof APIProviderRateLimitError) {

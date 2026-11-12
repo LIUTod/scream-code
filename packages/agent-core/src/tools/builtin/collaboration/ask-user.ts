@@ -83,6 +83,9 @@ export class AskUserQuestionTool implements BuiltinTool<AskUserQuestionInput> {
   readonly name = 'AskUserQuestion' as const;
   readonly description: string = DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(AskUserQuestionInputSchema);
+  // Blocks on a human answering; in an unattended session that can take
+  // arbitrarily long and is not a tool defect.
+  readonly longRunning = true;
 
   constructor(private readonly agent: Agent) {}
 

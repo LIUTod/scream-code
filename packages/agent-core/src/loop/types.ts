@@ -130,12 +130,15 @@ export interface ExecutableToolErrorResult {
    * - `'failed'` — the tool ran and threw.
    * - `'blocked'` — a permission policy or guard refused the call before it
    *   ran.
+   * - `'timeout'` — the loop-enforced execution deadline fired and the tool
+   *   ignored the abort request. Distinct from `'aborted'` because it is a
+   * tool defect (it counts toward the failure streak), not a user decision.
    *
    * Optional: a tool's own error result carries no code, and records written
    * before this field existed have none either — consumers must treat
    * `undefined` as "unclassified" rather than as a fourth state.
    */
-  readonly code?: 'aborted' | 'failed' | 'blocked' | undefined;
+  readonly code?: 'aborted' | 'failed' | 'blocked' | 'timeout' | undefined;
   /**
    * Human-readable abort attribution, taken from `AbortSignal.reason`
    * (stringified). Present only alongside `code: 'aborted'`, and omitted when
@@ -232,6 +235,14 @@ export type ToolExecution = RunnableToolExecution | ExecutableToolErrorResult;
 
 export interface ExecutableTool<Input = unknown> extends Tool {
   resolveExecution(input: Input): ToolExecution | Promise<ToolExecution>;
+  /**
+   * The tool manages its own lifetime and must not be cut short by the loop's
+   * generic execution deadline: a subagent host can legitimately run for
+   * hours, and a blocking user prompt (question, plan approval) can wait
+   * indefinitely for the person. Such tools are still expected to honour the
+   * turn's abort signal.
+   */
+  readonly longRunning?: boolean;
 }
 
 /**

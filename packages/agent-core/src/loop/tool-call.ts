@@ -45,6 +45,20 @@ import type {
 } from './types';
 
 const GRACE_TIMEOUT_MS = 2_000;
+
+/**
+ * Generic execution deadline for tool calls.
+ *
+ * Most tools are bounded by their own timers (Bash foreground 300s, MCP hard
+ * 60s, the sandbox 60s), and a well-behaved tool ends when its work ends — but
+ * a tool that never resolves and never checks the signal would hold the turn
+ * forever, because the grace timeout only arms *after* an abort. The deadline
+ * aborts the call's own signal (never the turn's) and, if the tool still
+ * ignores it, resolves the call with a synthetic timeout error after the
+ * grace window. Tools that manage their own lifetime (subagent host, blocking
+ * user prompts) declare `longRunning` and are exempt.
+ */
+const TOOL_DEADLINE_MS = 300_000;
 const STEER_POLL_INTERVAL_MS = 150;
 const TOOL_OUTPUT_EMPTY = 'Tool output is empty.';
 const TOOL_OUTPUT_NON_TEXT = 'Tool returned non-text content.';
@@ -149,8 +163,13 @@ export interface ToolCallStepContext {
   readonly tools?: readonly ExecutableTool[] | undefined;
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
-  readonly dispatchEvent: LoopEventDispatcher;
-  readonly llm: LLM;
+  /**
+   * Generic execution deadline per tool call. `undefined` and `<= 0` fall back
+   * to the built-in default; tools declaring `longRunning` are exempt
+   * regardless.
+   */
+  readonly toolDeadlineMs?: number | undefined;
+  readonly dispatchEvent: LoopEventDispatcher;  readonly llm: LLM;
   readonly signal: AbortSignal;
   readonly turnId: string;
   readonly currentStep: number;
@@ -181,6 +200,13 @@ interface RunnableToolCall {
   readonly toolName: string;
   readonly tool: ExecutableTool;
   readonly args: unknown;
+  /**
+   * The argument JSON failed to parse and was reconstructed by balancing
+   * brackets/quotes after a mid-call stream break. The values that reached the
+   * tool are the best effort, not the model's actual words — the result
+   * carries a note so the model can verify or re-issue.
+   */
+  readonly argsRepaired?: true;
 }
 
 interface RejectedToolCall {
@@ -511,13 +537,20 @@ function preflightToolCall(
       output: `Invalid args for tool "${toolName}": ${validationError}`,
     };
   }
-  return { kind: 'runnable', toolCall, toolName, tool, args: parsedArgs.data };
+  return {
+    kind: 'runnable',
+    toolCall,
+    toolName,
+    tool,
+    args: parsedArgs.data,
+    argsRepaired: parsedArgs.repaired === true ? true : undefined,
+  };
 }
 
 export function parseToolCallArguments(
   raw: string | null,
 ):
-  | { readonly success: true; readonly data: unknown }
+  | { readonly success: true; readonly data: unknown; readonly repaired?: true }
   | { readonly success: false; readonly error: string } {
   if (raw === null || raw.length === 0) {
     return { success: true, data: {} };
@@ -527,7 +560,10 @@ export function parseToolCallArguments(
   } catch (error) {
     const repaired = repairTruncatedJson(raw);
     try {
-      return { success: true, data: JSON.parse(repaired) as unknown };
+      // `repaired` is load-bearing: the caller appends a note to the tool
+      // result so the model knows the values it just ran on were reconstructed
+      // after a mid-call stream break, not sent verbatim.
+      return { success: true, data: JSON.parse(repaired) as unknown, repaired: true };
     } catch {
       return { success: false, error: errorMessage(error) };
     }
@@ -925,7 +961,33 @@ async function runRunnableToolCall(
   // (an interrupted command included) is classified here, because only this
   // path knows whether the step's signal is what cut the call short. The catch
   // above already reports a throw from the tool itself as `failed`.
-  return makeToolResult(call, effectiveArgs, tagAbortedToolResult(toolResult, signal));
+  return makeToolResult(
+    call,
+    effectiveArgs,
+    appendArgsRepairedNote(tagAbortedToolResult(toolResult, signal), call.argsRepaired === true),
+  );
+}
+
+/**
+ * Append the reconstruction note to a tool result whose arguments came from a
+ * repaired (mid-call broken) argument stream.
+ *
+ * The note rides in the result *output* — the channel the model reads — so the
+ * model learns that the values it just ran on are the balancer's best effort,
+ * not its own words, and can verify or re-issue. Tool-authored error results
+ * get the note too: the repair happened before the tool ran, so its verdict
+ * about the run does not remove the doubt about the inputs.
+ */
+function appendArgsRepairedNote(result: ExecutableToolResult, argsRepaired: boolean): ExecutableToolResult {
+  if (!argsRepaired) return result;
+  const note =
+    '[note] Tool arguments were reconstructed from a truncated provider stream: the stream broke mid-call. ' +
+    'The call ran with reconstructed values — verify the effect and re-issue the call with explicit arguments if it looks wrong.';
+  const output = result.output;
+  if (typeof output === 'string') {
+    return { ...result, output: `${output}${output.length > 0 ? '\n' : ''}${note}` };
+  }
+  return { ...result, output: [...output, { type: 'text', text: note }] };
 }
 
 async function finalizePendingToolResult(
@@ -1001,33 +1063,88 @@ async function executeTool(
 
   signal.throwIfAborted();
 
-  const executePromise = execution.execute({
-    turnId,
-    toolCallId: toolCall.id,
-    metadata,
-    signal,
-    // Nested tool calls (script sandbox) re-enter this same pipeline with the
-    // model-visible recording suppressed; see `executeNestedToolCall`.
-    runNestedToolCall: {
-      tools: (step.tools ?? []).filter((tool) => tool.name !== toolName),
-      run: (request) => executeNestedToolCall(step, toolName, request),
-    },
-    onUpdate: (update) => {
-      if (signal.aborted) return;
-      dispatchEvent({
-        type: 'tool.progress',
-        toolCallId: toolCall.id,
-        update,
-      });
-    },
-  });
-  return raceExecuteWithGraceTimeout(executePromise, signal, toolName);
+  // Per-call controller: the generic deadline aborts only this call, never the
+  // turn. The turn's signal propagates in, so a turn-level abort still reaches
+  // the tool through the same signal the tool observes.
+  const callController = new AbortController();
+  const propagateTurnAbort = (): void => {
+    if (!callController.signal.aborted) {
+      callController.abort(signal.reason ?? new Error('turn aborted'));
+    }
+  };
+  if (signal.aborted) {
+    propagateTurnAbort();
+  } else {
+    signal.addEventListener('abort', propagateTurnAbort, { once: true });
+  }
+
+  // Deadline is armed unless the tool manages its own lifetime. `didFire`
+  // lets the grace path distinguish "deadline hit, tool ignored it" from
+  // "turn aborted while the tool ran".
+  const deadlineExempt =
+    (step.tools ?? []).find((tool) => tool.name === toolName)?.longRunning ?? false;
+  // `?? ` does not reject `0`; a host passing `toolDeadlineMs: 0` means "I
+  // have no opinion", not "abort every call the instant it starts".
+  const deadlineMs =
+    step.toolDeadlineMs !== undefined && step.toolDeadlineMs > 0
+      ? step.toolDeadlineMs
+      : TOOL_DEADLINE_MS;
+  const deadlineState = { fired: false };
+  const deadlineTimer =
+    deadlineExempt
+      ? undefined
+      : setTimeout(() => {
+          // Only a deadline that *performs* the abort counts as the first
+          // cause. If the turn aborted first — a stop or steer landing in the
+          // final grace window before the timer fires — marking `fired` here
+          // would charge the user's own interrupt to the tool's failure
+          // streak, which is exactly the misattribution the abort-attribution
+          // guards exist to prevent.
+          if (callController.signal.aborted) return;
+          deadlineState.fired = true;
+          callController.abort(new Error(`execution deadline (${String(deadlineMs)}ms)`));
+        }, deadlineMs);
+
+  try {
+    const executePromise = execution.execute({
+      turnId,
+      toolCallId: toolCall.id,
+      metadata,
+      signal: callController.signal,
+      // Nested tool calls (script sandbox) re-enter this same pipeline with the
+      // model-visible recording suppressed; see `executeNestedToolCall`.
+      runNestedToolCall: {
+        tools: (step.tools ?? []).filter((tool) => tool.name !== toolName),
+        run: (request) => executeNestedToolCall(step, toolName, request),
+      },
+      onUpdate: (update) => {
+        if (callController.signal.aborted) return;
+        dispatchEvent({
+          type: 'tool.progress',
+          toolCallId: toolCall.id,
+          update,
+        });
+      },
+    });
+    return await raceExecuteWithGraceTimeout(executePromise, callController.signal, toolName, {
+      ms: deadlineMs,
+      didFire: () => deadlineState.fired,
+    });
+  } finally {
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+    try {
+      signal.removeEventListener('abort', propagateTurnAbort);
+    } catch {
+      // Some AbortSignal polyfills do not implement removeEventListener.
+    }
+  }
 }
 
 async function raceExecuteWithGraceTimeout(
   executePromise: Promise<ExecutableToolResult>,
   signal: AbortSignal,
   toolName: string,
+  deadline: { readonly ms: number; readonly didFire: () => boolean } | undefined,
 ): Promise<ExecutableToolResult> {
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
@@ -1035,6 +1152,19 @@ async function raceExecuteWithGraceTimeout(
   const graceSentinel: Promise<ExecutableToolResult> = new Promise((resolve) => {
     const armTimer = (): void => {
       graceTimer = setTimeout(() => {
+        if (deadline !== undefined && deadline.didFire()) {
+          resolve({
+            output:
+              `Tool "${toolName}" exceeded its ${String(deadline.ms)}ms execution deadline and ` +
+              'did not respond to the abort request — the call ended here.',
+            isError: true,
+            // A deadline hit is a tool defect, not a user decision: classified
+            // as `timeout` so the failure streak counts it (an `aborted`
+            // result would be attributed to the user and ignored).
+            code: 'timeout',
+          });
+          return;
+        }
         const abortReason = abortReasonText(signal);
         resolve({
           output: `Tool "${toolName}" aborted by grace timeout (${String(GRACE_TIMEOUT_MS)}ms)`,

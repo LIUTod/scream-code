@@ -46,6 +46,7 @@ export const ErrorCodes = {
   PROVIDER_AUTH_ERROR: 'provider.auth_error',
   PROVIDER_CONNECTION_ERROR: 'provider.connection_error',
   PROVIDER_TIMEOUT: 'provider.timeout',
+  PROVIDER_STREAM_ERROR: 'provider.stream_error',
 
   GOAL_OBJECTIVE_EMPTY: 'goal.objective_empty',
   GOAL_OBJECTIVE_TOO_LONG: 'goal.objective_too_long',
@@ -301,6 +302,13 @@ export const SCREAM_ERROR_INFO = {
     retryable: true,
     public: true,
     action: 'Retry the request; raise the client timeout if it keeps expiring.',
+  },
+  'provider.stream_error': {
+    title: 'Provider stream format error',
+    retryable: true,
+    public: true,
+    action:
+      'Retry the request — the provider stream broke mid-message. If it recurs, the gateway is mangling tool-call streams.',
   },
 
   'goal.objective_empty': {

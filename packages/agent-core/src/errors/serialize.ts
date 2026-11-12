@@ -1,6 +1,7 @@
 import {
   APIConnectionError,
   APIStatusError,
+  APIStreamFormatError,
   APITimeoutError,
   ChatProviderError,
 } from '@scream-code/ltod';
@@ -99,6 +100,18 @@ export function toScreamErrorPayload(error: unknown): ScreamErrorPayload {
       message: error.message,
       name: error.name,
       retryable: SCREAM_ERROR_INFO[ErrorCodes.PROVIDER_CONNECTION_ERROR].retryable,
+    };
+  }
+
+  // Stream-format breakage gets its own code rather than folding into
+  // api_error: the retryable flag differs (retryable, with a bounded budget),
+  // and consumers key retry UI off the code.
+  if (error instanceof APIStreamFormatError) {
+    return {
+      code: ErrorCodes.PROVIDER_STREAM_ERROR,
+      message: error.message,
+      name: error.name,
+      retryable: SCREAM_ERROR_INFO[ErrorCodes.PROVIDER_STREAM_ERROR].retryable,
     };
   }
 

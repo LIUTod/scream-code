@@ -2,6 +2,7 @@ import {
   APIConnectionError,
   APIProviderRateLimitError,
   APIStatusError,
+  APIStreamFormatError,
   APITimeoutError,
   emptyUsage,
   isRetryableGenerateError,
@@ -11,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { ErrorCodes, ScreamError } from '#/errors';
 import type { LoopEvent, LoopEventDispatcher, LoopStepRetryingEvent } from '#/loop/events';
 import type { LLM, LLMChatParams, LLMChatResponse } from '#/loop/llm';
-import { chatWithRetry, QUOTA_RETRY_ATTEMPTS } from '#/loop/retry';
+import { chatWithRetry, QUOTA_RETRY_ATTEMPTS, STREAM_FORMAT_RETRY_ATTEMPTS } from '#/loop/retry';
 
 function okResponse(): LLMChatResponse {
   return { toolCalls: [], usage: emptyUsage() };
@@ -121,6 +122,50 @@ describe('chatWithRetry: quota-style 429s', () => {
       name: 'APIProviderRateLimitError',
     });
     expect(calls).toBe(QUOTA_RETRY_ATTEMPTS);
+  });
+});
+
+describe('chatWithRetry: malformed provider streams', () => {
+  function splicedStreamError(): APIStreamFormatError {
+    return new APIStreamFormatError(
+      'Received a tool call argument delta for unknown index 7. Provider: X, model: Y',
+    );
+  }
+
+  it('retries a spliced stream and succeeds when the retry arrives intact', async () => {
+    let calls = 0;
+    const llm: LLM = {
+      systemPrompt: '',
+      modelName: 'mock',
+      isRetryableError: (e) => isRetryableGenerateError(e),
+      async chat(): Promise<LLMChatResponse> {
+        calls += 1;
+        if (calls === 1) throw splicedStreamError();
+        return okResponse();
+      },
+    };
+
+    const response = await chatWithRetry(makeInput(llm, new AbortController().signal));
+    expect(response.toolCalls).toEqual([]);
+    expect(calls).toBe(2);
+  });
+
+  it('gives up after a bounded number of stream-format attempts instead of burning the step budget', async () => {
+    let calls = 0;
+    const llm: LLM = {
+      systemPrompt: '',
+      modelName: 'mock',
+      isRetryableError: (e) => isRetryableGenerateError(e),
+      async chat(): Promise<LLMChatResponse> {
+        calls += 1;
+        throw splicedStreamError();
+      },
+    };
+
+    await expect(chatWithRetry(makeInput(llm, new AbortController().signal))).rejects.toMatchObject({
+      name: 'APIStreamFormatError',
+    });
+    expect(calls).toBe(STREAM_FORMAT_RETRY_ATTEMPTS);
   });
 });
 
@@ -240,6 +285,13 @@ describe('chatWithRetry: step.retrying classification', () => {
   it('classifies a connection drop as provider.connection_error', async () => {
     const event = await retryEventFor(new APIConnectionError('terminated'));
     expect(event.errorCode).toBe(ErrorCodes.PROVIDER_CONNECTION_ERROR);
+  });
+
+  it('classifies a spliced tool-call stream as provider.stream_error', async () => {
+    const event = await retryEventFor(
+      new APIStreamFormatError('Received a tool call argument delta for unknown index 7'),
+    );
+    expect(event.errorCode).toBe(ErrorCodes.PROVIDER_STREAM_ERROR);
   });
 
   it('classifies a 429 as provider.rate_limit and keeps the status code', async () => {

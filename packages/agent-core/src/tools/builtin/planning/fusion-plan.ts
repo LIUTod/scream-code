@@ -67,6 +67,9 @@ export class FusionPlanTool implements BuiltinTool<FusionPlanInput> {
   readonly name = 'FusionPlan' as const;
   readonly description: string = DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(FusionPlanInputSchema);
+  // Awaits a fan-out of planning subagents plus a synthesis pass; the batch
+  // can legitimately outlast any fixed deadline.
+  readonly longRunning = true;
 
   constructor(private readonly agent: Agent) {}
 

@@ -1,4 +1,4 @@
-import { APIEmptyResponseError } from './errors';
+import { APIEmptyResponseError, APIStreamFormatError } from './errors';
 import {
   getStreamFirstItemTimeoutMs,
   getStreamIdleTimeoutMs,
@@ -166,7 +166,7 @@ export async function generate(
         }
         continue;
       }
-      throw new Error(
+      throw new APIStreamFormatError(
         `Received a tool call argument delta for unknown index ${JSON.stringify(part.index)}. ` +
           `Provider: ${provider.name}, model: ${provider.modelName}`,
       );

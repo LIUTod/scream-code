@@ -6,6 +6,7 @@ import {
   APIOrphanedToolCallError,
   APIProviderRateLimitError,
   APIStatusError,
+  APIStreamFormatError,
   APITimeoutError,
   ChatProviderError,
   isOrphanedToolCallError,
@@ -148,6 +149,18 @@ describe('isRetryableGenerateError', () => {
     ).toBe(false);
     expect(isRetryableGenerateError(new Error('boom'))).toBe(false);
     expect(isRetryableGenerateError('boom')).toBe(false);
+  });
+
+  it('retries structurally malformed streams (upstream breakage, not a bad request)', () => {
+    const error = new APIStreamFormatError(
+      'Received a tool call argument delta for unknown index 7. Provider: X, model: Y',
+    );
+    expect(error).toBeInstanceOf(ChatProviderError);
+    expect(error.name).toBe('APIStreamFormatError');
+    expect(isRetryableGenerateError(error)).toBe(true);
+    // A plain wrapped Error with the same message stays non-retryable: only
+    // the typed class carries the "upstream stream breakage" verdict.
+    expect(isRetryableGenerateError(new Error(error.message))).toBe(false);
   });
 
   it('retries every rate-limit 429, including quota-exhausted messages', () => {

@@ -183,6 +183,9 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
   readonly name: string = 'Agent';
   readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(AgentToolInputSchema);
+  // A subagent can legitimately run for hours (long tasks, IM sessions); the
+  // turn abort signal remains the way to stop it early.
+  readonly longRunning = true;
   private readonly allowBackground: boolean;
 
   constructor(

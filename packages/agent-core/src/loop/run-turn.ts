@@ -54,6 +54,13 @@ export interface RunTurnInput {
   readonly log?: Logger | undefined;
   readonly maxSteps?: number | undefined;
   readonly maxRetryAttempts?: number;
+  /**
+   * Generic execution deadline per tool call, in milliseconds. `undefined`
+   * falls back to the built-in default (`TOOL_DEADLINE_MS`); values `<= 0` are
+   * treated the same way; tools declaring `longRunning` are exempt regardless
+   * of this value.
+   */
+  readonly toolDeadlineMs?: number | undefined;
   readonly recordStepUsage?:
     | ((usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>)
     | undefined;
@@ -144,6 +151,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         currentStep: steps,
         finalStep,
         maxRetryAttempts,
+        toolDeadlineMs: input.toolDeadlineMs,
         recordUsage: recordStepUsage,
         hasPendingSteer: input.hasPendingSteer,
         pendingSteerKind: input.pendingSteerKind,
