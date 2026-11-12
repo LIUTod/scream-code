@@ -1,4 +1,3 @@
-import chalk from 'chalk';
 import { truncateToWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 

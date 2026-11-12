@@ -172,7 +172,7 @@ function renderMascotRow(
   const leftAvail = Math.max(0, mascotX - 2);
   const rightAvail = Math.max(0, contentWidth - (mascotX + glyphs.length) - 2);
   const rayLen = Math.min(RAY_LEN_MAX, leftAvail, rightAvail);
-  const cells = new Array<string>(contentWidth).fill(' ');
+  const cells = Array.from({ length: contentWidth }, () => ' ');
 
   for (let i = 0; i < glyphs.length; i++) {
     cells[mascotX + i] = chalk.hex(breatheColor)(glyphs[i]!);
@@ -300,8 +300,8 @@ export class WelcomeComponent implements Component {
       const frameIdx = this.breatheTimer !== null ? Math.floor(breatheFrame / 24) % LOGO_FRAMES.length : 0;
       const frame = LOGO_FRAMES[frameIdx]!;
       const animFrame = this.breatheTimer !== null ? breatheFrame : -1;
-      lines.push(renderMascotRow(frame[0]!, contentWidth, breatheColor, this.colors.textDim, animFrame));
-      lines.push(renderMascotRow(frame[1]!, contentWidth, breatheColor, this.colors.textDim, animFrame, RAY_PULSE / 2));
+      lines.push(renderMascotRow(frame[0], contentWidth, breatheColor, this.colors.textDim, animFrame));
+      lines.push(renderMascotRow(frame[1], contentWidth, breatheColor, this.colors.textDim, animFrame, RAY_PULSE / 2));
       lines.push('');
 
       for (const line of LOGO) {
@@ -318,8 +318,8 @@ export class WelcomeComponent implements Component {
       const frame = LOGO_FRAMES[frameIdx]!;
       const animFrame = this.breatheTimer !== null ? breatheFrame : -1;
 
-      lines.push(renderMascotRow(frame[0]!, contentWidth, breatheColor, this.colors.textDim, animFrame));
-      lines.push(renderMascotRow(frame[1]!, contentWidth, breatheColor, this.colors.textDim, animFrame, RAY_PULSE / 2));
+      lines.push(renderMascotRow(frame[0], contentWidth, breatheColor, this.colors.textDim, animFrame));
+      lines.push(renderMascotRow(frame[1], contentWidth, breatheColor, this.colors.textDim, animFrame, RAY_PULSE / 2));
       lines.push('');
 
       lines.push(centerText(versionValue + separator + modelValue + separator + likeValue + separator + helpValue, contentWidth));
