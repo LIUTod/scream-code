@@ -635,6 +635,19 @@ export class ActivityGroupComponent extends Container {
       }
       this.bodyContainer.addChild(this.thinkingSummaryRow(segment, width, isLast));
     });
+    if (this.running && shown.length < budget) {
+      // Reserve the full collapsed height while the turn runs: slots the
+      // timeline has not filled yet render as blank rows below the steps, so
+      // the block reaches its settled height with its first step and every
+      // later step swaps a row's content in place instead of pushing the
+      // transcript below it down. A running turn then never jostles the page
+      // once per step; the block settles to its real height when the turn ends.
+      // A Spacer, not a Text: Text renders blank content as zero rows, and the
+      // slot must hold its row.
+      for (let index = shown.length; index < budget; index += 1) {
+        this.bodyContainer.addChild(new Spacer(1));
+      }
+    }
   }
 
   /**

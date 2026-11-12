@@ -141,6 +141,36 @@ describe('ActivityGroupComponent', () => {
     expect(lines[3]).not.toContain('tok');
   });
 
+  it('reserves the full collapsed height while running so steps swap in place', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(makeTool('t1', 'Bash', { command: 'ls -la' }), 1);
+    const first = render(group);
+    expect(first).toHaveLength(ACTIVITY_GROUP_COLLAPSED_LINES + 1);
+    // Slots the timeline has not filled yet render as blank rows below the steps.
+    expect(first[2]).toContain('Bash');
+    expect(first.slice(3).every((line) => line.trim().length === 0)).toBe(true);
+
+    group.attachTool(makeTool('t2', 'Edit', { file_path: '/workspace/a.ts' }), 2);
+    const second = render(group);
+    expect(second).toHaveLength(ACTIVITY_GROUP_COLLAPSED_LINES + 1);
+    // The filled row kept its content and its position: appending a step swapped
+    // one row's content in place instead of pushing the block taller. Only the
+    // branch glyph may flip (└→├) — a within-row change, never a row move.
+    expect(second[2]?.slice(5)).toBe(first[2]?.slice(5));
+    expect(second[2]).not.toBe(first[2]);
+    expect(second[3]).toContain('Edit');
+  });
+
+  it('settles the reserved block to its real height when the turn ends', () => {
+    const group = makeGroup();
+    group.setRunning(false);
+
+    const lines = nonEmpty(render(group));
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain(t('activitygroup.done'));
+  });
+
   it('keeps a background task notice on the timeline as a normal step', () => {
     const group = new ActivityGroupComponent(darkColors, undefined);
     group.appendThinking('先起一个后台任务', false);
