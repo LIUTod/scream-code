@@ -84,6 +84,7 @@ function createMockHost(): SessionEventHost {
         error: 'red',
         warning: 'yellow',
         textMuted: 'gray',
+        success: 'green',
       },
     },
     todoPanel: {
@@ -105,6 +106,7 @@ function createMockHost(): SessionEventHost {
     requireSession: vi.fn(),
     showCollabActivity: vi.fn(),
     showReminderActivity: vi.fn(),
+    showMcpActivity: vi.fn(),
     clearStatusActivity: vi.fn(),
     setAppState: vi.fn((patch) => {
       Object.assign(state.appState, patch);
@@ -2270,6 +2272,42 @@ describe('liveness stamp for the status-bar wave', () => {
     );
 
     expect(host.state.lastActivityAt).toBe(1234);
+  });
+
+  it('routes MCP server status to the status-row notice instead of a transcript row', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const sendQueued = vi.fn();
+    const connected = {
+      type: 'mcp.server.status',
+      agentId: 'main',
+      server: { name: 'chrome-devtools', transport: 'stdio', status: 'connected', toolCount: 33 },
+    } as unknown as Event;
+
+    handler.handleEvent(connected, sendQueued);
+    expect(host.showMcpActivity).toHaveBeenCalledWith('MCP chrome-devtools · 33 tools', 'green');
+    expect(host.showStatus).not.toHaveBeenCalled();
+
+    // Replayed duplicates of the same status are dropped, not re-announced.
+    handler.handleEvent(connected, sendQueued);
+    expect(host.showMcpActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps MCP failures in the transcript (they need user action)', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        type: 'mcp.server.status',
+        agentId: 'main',
+        server: { name: 'figma', transport: 'stdio', status: 'failed', toolCount: 0, error: 'boom' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.showMcpActivity).not.toHaveBeenCalled();
+    expect(host.showStatus).toHaveBeenCalledTimes(1);
   });
 
   it('still stamps live tool output', () => {

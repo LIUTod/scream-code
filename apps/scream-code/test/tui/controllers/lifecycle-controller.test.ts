@@ -142,6 +142,33 @@ describe('LifecycleController', () => {
       controller.stopActivityAnimation();
     });
 
+    it('shows an MCP notice in its own slot and clears it after the 3s TTL', () => {
+      vi.useFakeTimers();
+      const ui = { requestRender: vi.fn() };
+      const controller = new LifecycleController(makeHost(ui));
+
+      controller.showMcpActivity('MCP chrome-devtools · 33 tools', '#79EB00');
+      expect(controller.getMcpActivity()).toEqual({
+        text: 'MCP chrome-devtools · 33 tools',
+        color: '#79EB00',
+      });
+      expect(ui.requestRender).toHaveBeenCalled();
+
+      vi.advanceTimersByTime(2_999);
+      expect(controller.getMcpActivity()).not.toBeNull();
+      vi.advanceTimersByTime(1);
+      expect(controller.getMcpActivity()).toBeNull();
+
+      // Newest wins — a burst of servers never stacks on the row.
+      controller.showMcpActivity('MCP figma · 5 tools', '#79EB00');
+      controller.showMcpActivity('MCP figma connecting…', '#6b7280');
+      expect(controller.getMcpActivity()).toEqual({ text: 'MCP figma connecting…', color: '#6b7280' });
+
+      // A session switch drops every transient chip, MCP notice included.
+      controller.clearStatusActivity();
+      expect(controller.getMcpActivity()).toBeNull();
+    });
+
     it('renders the status row with one chip grammar', () => {
       vi.useFakeTimers();
       const previousLevel = chalk.level;

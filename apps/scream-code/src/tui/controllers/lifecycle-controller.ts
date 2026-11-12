@@ -104,6 +104,11 @@ const COLLAB_ACTIVITY_TTL_MS = 8_000;
 /** How long a scheduled-task reminder stays: longer than the collaboration
  *  chip because a cron fire is time-sensitive and must not slip by. */
 const REMINDER_ACTIVITY_TTL_MS = 10_000;
+/** How long an MCP server notice stays on the status bar (own slot, transient
+ *  by design — startup connect chatter must not occupy the transcript).
+ *  Short on purpose: the notice appears once loading finishes and clears
+ *  quickly instead of parking on the row. */
+const MCP_ACTIVITY_TTL_MS = 3_000;
 /** Footer git badge freshness window; the deferred read refreshes past it. */
 const GIT_DIFF_TTL_MS = 15_000;
 /** Window after a command-driven line write during which the poll stands down. */
@@ -145,6 +150,11 @@ export class LifecycleController {
    *  a collaboration request can never evict a fired reminder. */
   private reminderActivity: { text: string; color: string } | null = null;
   private reminderTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Single-slot MCP server notice (connect / connecting / disabled). Own slot
+   *  for the same reason: a burst of server statuses must never evict a
+   *  collaboration request or a fired reminder. */
+  private mcpActivity: { text: string; color: string } | null = null;
+  private mcpTimer: ReturnType<typeof setTimeout> | undefined;
   /** Sum all four token buckets into the session's total token consumption. */
   private static sumTokens(usage: TokenUsage): number {
     return usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation + usage.output;
@@ -752,6 +762,7 @@ export class LifecycleController {
               pulseWave: loader,
               reminder: () => this.getReminderActivity(),
               activity: () => this.getCollabActivity(),
+              notice: () => this.getMcpActivity(),
             }),
           );
         }
@@ -784,6 +795,7 @@ export class LifecycleController {
             labelColor: state.theme.colors.textDim,
             reminder: () => this.getReminderActivity(),
             activity: () => this.getCollabActivity(),
+            notice: () => this.getMcpActivity(),
           }),
         );
         if (tip !== undefined) this.startTipRotation();
@@ -878,6 +890,28 @@ export class LifecycleController {
     return this.reminderActivity;
   }
 
+  /**
+   * Shows an MCP server notice on the status row (connected / connecting /
+   * disabled). Single slot, newest wins, expires after `MCP_ACTIVITY_TTL_MS`;
+   * the row reads it live, so no rebuild (and no wave reset) is involved.
+   * The colour is chosen by the caller (success / muted).
+   */
+  showMcpActivity(text: string, color: string): void {
+    this.mcpActivity = { text, color };
+    if (this.mcpTimer !== undefined) clearTimeout(this.mcpTimer);
+    this.mcpTimer = setTimeout(() => {
+      this.mcpTimer = undefined;
+      this.mcpActivity = null;
+      this.host.state.ui?.requestRender();
+    }, MCP_ACTIVITY_TTL_MS);
+    this.host.state.ui?.requestRender();
+  }
+
+  /** Live getter consumed by the status row on every render. */
+  getMcpActivity(): { text: string; color: string } | null {
+    return this.mcpActivity;
+  }
+
   /** Drops every transient chip (session switch, shutdown). */
   clearStatusActivity(): void {
     if (this.collabTimer !== undefined) {
@@ -890,6 +924,11 @@ export class LifecycleController {
       this.reminderTimer = undefined;
     }
     this.reminderActivity = null;
+    if (this.mcpTimer !== undefined) {
+      clearTimeout(this.mcpTimer);
+      this.mcpTimer = undefined;
+    }
+    this.mcpActivity = null;
   }
 
   /**

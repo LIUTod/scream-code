@@ -43,8 +43,6 @@ import type {
   WarningEvent,
 } from '@scream-code/scream-code-sdk';
 
-import { MoonLoader } from '../components/chrome/moon-loader';
-import { StatusMessageComponent } from '../components/messages/status-message';
 import { MAIN_AGENT_ID } from '../constant/scream-tui';
 import {
   appendSessionHeaderHint,
@@ -219,6 +217,11 @@ export interface SessionEventHost {
    * collaboration request cannot evict it. Optional for headless hosts.
    */
   showReminderActivity?(text: string, tone: 'fired' | 'missed'): void;
+  /**
+   * One-line MCP server notice above the editor (connecting / connected /
+   * disabled). Own slot + its own TTL; optional for headless hosts.
+   */
+  showMcpActivity?(text: string, color: string): void;
   /** Drops every transient chip on the status row (session switch). */
   clearStatusActivity?(): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
@@ -297,7 +300,6 @@ export class SessionEventHandler {
   private readonly providerLatencyWindow = 3;
   renderedSkillActivationIds: Set<string> = new Set();
   renderedMcpServerStatusKeys: Map<string, string> = new Map();
-  mcpServerStatusSpinners: Map<string, MoonLoader> = new Map();
   /**
    * `SendSubagentMessage` tool call → target agent id. Needed at result time
    * because `SubagentSlots.onMessagingEnd()` deletes its own mapping, and a
@@ -327,7 +329,6 @@ export class SessionEventHandler {
     this.recentSubagentInstances.length = 0;
     this.renderedSkillActivationIds.clear();
     this.renderedMcpServerStatusKeys.clear();
-    this.stopAllMcpServerStatusSpinners();
     // Drop queued skill candidates and the per-session prompt dedupe set when
     // the session changes, so a candidate queued in one session can never be
     // prompted into a different session.
@@ -392,10 +393,17 @@ export class SessionEventHandler {
       hidden.push(server);
     }
     if (hidden.length > 0) {
-      host.showStatus(
-        formatMcpStartupStatusSummary(hidden, visible.length),
-        host.state.theme.colors.textMuted,
+      const summary = formatMcpStartupStatusSummary(hidden, visible.length);
+      // Diagnostics that need action must survive the chip TTL — a failed or
+      // auth-blocked server outside the visible set keeps its transcript row.
+      const needsTranscript = hidden.some(
+        (server) => server.status === 'failed' || server.status === 'needs-auth',
       );
+      if (needsTranscript) {
+        host.showStatus(summary, host.state.theme.colors.textMuted);
+      } else {
+        host.showMcpActivity?.(summary, host.state.theme.colors.textMuted);
+      }
     }
   }
 
@@ -454,20 +462,6 @@ export class SessionEventHandler {
       case 'todo.updated': this.handleTodoUpdated(event); break;
       default: break;
     }
-  }
-
-  stopAllMcpServerStatusSpinners(): void {
-    const { state } = this.host;
-    const children = state.transcriptContainer.children;
-    for (const spinner of this.mcpServerStatusSpinners.values()) {
-      spinner.stop();
-      const idx = children.indexOf(spinner);
-      if (idx >= 0) children.splice(idx, 1);
-    }
-    if (this.mcpServerStatusSpinners.size > 0) {
-      state.transcriptContainer.invalidate();
-    }
-    this.mcpServerStatusSpinners.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -1299,6 +1293,12 @@ export class SessionEventHandler {
     this.host.showStatus(t('handler.warning_prefix', { message: event.message }), this.host.state.theme.colors.warning);
   }
 
+  /**
+   * MCP server status goes to the status row above the editor — a transient
+   * notice with its own TTL (same design as the collaboration ticker), not a
+   * permanent transcript row. Failures / auth requests stay in the transcript
+   * because they need user action and must not vanish after a few seconds.
+   */
   private renderMcpServerStatus(server: McpServerStatusSnapshot): void {
     const { state } = this.host;
     const key = mcpServerStatusKey(server);
@@ -1309,68 +1309,26 @@ export class SessionEventHandler {
     switch (server.status) {
       case 'connected': {
         const toolStr = `${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}`;
-        const message = `MCP server "${server.name}" connected · ${toolStr} (${server.transport})`;
-        this.finalizeMcpServerStatusRow(server.name, message, colors.success);
+        this.host.showMcpActivity?.(`MCP ${server.name} · ${toolStr}`, colors.success);
         return;
       }
+      case 'pending':
+        this.host.showMcpActivity?.(t('handler.mcp_server_connecting', { name: server.name }), colors.textMuted);
+        return;
+      case 'disabled':
+        this.host.showMcpActivity?.(t('handler.mcp_server_disabled', { name: server.name }), colors.textMuted);
+        return;
       case 'failed': {
         const message = t('handler.mcp_server_failed', { name: server.name, error: server.error !== undefined ? `: ${server.error}` : '' });
-        this.finalizeMcpServerStatusRow(server.name, message, colors.error);
+        this.host.showStatus(message, colors.error);
         return;
       }
       case 'needs-auth': {
         const message = t('handler.mcp_server_needs_auth', { name: server.name });
-        this.finalizeMcpServerStatusRow(server.name, message, colors.warning);
+        this.host.showStatus(message, colors.warning);
         return;
       }
-      case 'disabled':
-        this.finalizeMcpServerStatusRow(
-          server.name,
-          t('handler.mcp_server_disabled', { name: server.name }),
-          colors.textMuted,
-        );
-        return;
-      case 'pending':
-        this.showMcpServerStatusSpinner(server.name);
-        return;
     }
-  }
-
-  private showMcpServerStatusSpinner(name: string): void {
-    const { state } = this.host;
-    const label = t('handler.mcp_server_connecting', { name });
-    const existing = this.mcpServerStatusSpinners.get(name);
-    if (existing !== undefined) {
-      existing.setLabel(label);
-      return;
-    }
-    const tint = (s: string): string => chalk.hex(state.theme.colors.textMuted)(s);
-    const spinner = new MoonLoader(state.ui, tint, label);
-    state.transcriptContainer.addChild(spinner);
-    this.mcpServerStatusSpinners.set(name, spinner);
-    state.ui.requestRender();
-  }
-
-  private finalizeMcpServerStatusRow(name: string, message: string, color: string): void {
-    const { state } = this.host;
-    const spinner = this.mcpServerStatusSpinners.get(name);
-    if (spinner === undefined) {
-      this.host.showStatus(message, color);
-      return;
-    }
-    spinner.stop();
-    const container = state.transcriptContainer;
-    const children = container.children;
-    const idx = children.indexOf(spinner);
-    if (idx >= 0) {
-      children.splice(idx, 1);
-      container.addChild(new StatusMessageComponent(message, state.theme.colors, color));
-      container.invalidate();
-    } else {
-      container.addChild(new StatusMessageComponent(message, state.theme.colors, color));
-    }
-    this.mcpServerStatusSpinners.delete(name);
-    state.ui.requestRender();
   }
 
   private handleSkillActivated(event: SkillActivatedEvent): void {

@@ -525,7 +525,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     clearRuntimeMarker(getDataDir());
     await this.closeSession();
     await this.harness.close();
-    this.sessionEventHandler.stopAllMcpServerStatusSpinners();
     this.state.ui.stop();
     if (this.onExit) {
       await this.onExit(exitCode);
@@ -769,6 +768,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   /** Scheduled-task reminder above the editor (`⏰ 定时任务已触发：…`). */
   showReminderActivity(text: string, tone: 'fired' | 'missed'): void {
     this.lifecycleController.showReminderActivity(text, tone);
+  }
+
+  /** MCP server notice above the editor (connecting / connected / disabled). */
+  showMcpActivity(text: string, color: string): void {
+    this.lifecycleController.showMcpActivity(text, color);
   }
 
   /** Drops every transient chip on the status row (session switch). */
@@ -1081,7 +1085,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   clearTranscriptAndRedraw(): void {
-    this.sessionEventHandler.stopAllMcpServerStatusSpinners();
     // Clear goal panel timer/refs to prevent stale timer firing on new session.
     clearGoalState();
     clearInfoPanelState(this.state);

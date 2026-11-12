@@ -177,4 +177,49 @@ describe('StatusBarPaneComponent', () => {
     expect(lines.length).toBe(1);
     expect(lines[0]!.includes('Waiting...')).toBe(true);
   });
+
+  it('appends the MCP notice chip after the collaboration ticker', () => {
+    const pane = new StatusBarPaneComponent({
+      mode: 'tool',
+      label: '重连中 2/10',
+      pulseWave: fakeWave(),
+      activity: activity('coder 向 Scream 求助中！'),
+      notice: activity('MCP chrome-devtools · 33 tools'),
+    });
+    const line = strip(pane.render(160)[0] ?? '');
+    expect(line).toBe(' ⬝  重连中 2/10  coder 向 Scream 求助中！  MCP chrome-devtools · 33 tools');
+  });
+
+  it('renders the MCP notice alone while idle and re-reads it live', () => {
+    let chip: { text: string; color?: string } | null = null;
+    const pane = new StatusBarPaneComponent({ mode: 'idle', label: '', notice: () => chip });
+    // An empty notice leaves the row silent.
+    expect(pane.render(80)).toEqual([]);
+
+    chip = { text: 'MCP chrome-devtools · 33 tools', color: '#79EB00' };
+    expect(strip(pane.render(120)[0] ?? '')).toBe(' MCP chrome-devtools · 33 tools');
+
+    chip = { text: 'MCP figma connecting…' };
+    expect(strip(pane.render(120)[0] ?? '')).toContain('figma');
+  });
+
+  it('keeps the idle tip visible when an MCP notice arrives', () => {
+    // The startup tip is onboarding copy — a transient MCP notice appends
+    // after it instead of pushing it away.
+    const pane = new StatusBarPaneComponent({
+      mode: 'idle',
+      label: '💡 Tips：输入消息开始对话',
+      notice: activity('MCP chrome-devtools · 33 tools'),
+    });
+    const line = strip(pane.render(120)[0] ?? '');
+    expect(line).toContain('Tips：输入消息开始对话');
+    expect(line).toContain('MCP chrome-devtools · 33 tools');
+
+    // Narrow row: the tip yields width first, the notice always keeps its
+    // slot, and the line stays within the viewport.
+    const narrow = strip(pane.render(80)[0] ?? '');
+    expect(narrow).toContain('MCP chrome-devtools · 33 tools');
+    expect(narrow).toContain('Tips');
+    expect(visibleWidth(narrow)).toBeLessThanOrEqual(80);
+  });
 });
