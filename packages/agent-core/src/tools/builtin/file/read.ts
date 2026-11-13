@@ -4,12 +4,18 @@ import type { Jian, StatResult } from '@scream-code/jian';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
+import type { LspClient } from '../../../lsp/client';
+import { formatOutlineEntry } from '../../../lsp/client';
+// Type-only: read.ts must not pull the registry (and its transitive imports)
+// into the value graph, keeping the file tools independent of the LSP stack.
+import type { LspRegistry } from '../../../lsp/registry';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { MEDIA_SNIFF_BYTES, detectFileType } from '../../support/file-type';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { RepetitionGuard } from '../../support/repetition-guard';
 import { byteLength, truncateToBytes } from '../../support/result-builder';
 import { listDirectory } from '../../support/list-directory';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
@@ -27,6 +33,13 @@ export const MAX_LINE_BYTES: number = 2048;
 export const MAX_BYTES: number = 100 * 1024;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
+
+/** Files shorter than this never pay for an LSP outline — the footer is for long files only. */
+const OUTLINE_MIN_TOTAL_LINES = 400;
+/** Cap on outline entries surfaced in the read footer. */
+const OUTLINE_FOOTER_MAX_ENTRIES = 40;
+/** Bound the per-instance (path, mtime) outline cache so long sessions don't grow it unbounded. */
+const OUTLINE_CACHE_MAX_ENTRIES = 64;
 
 const PositiveLineOffsetSchema = z.number().int().min(1);
 const TailLineOffsetSchema = z.number().int().min(-MAX_LINES).max(-1);
@@ -86,7 +99,27 @@ interface FinishReadResultInput {
   readonly startLine: number;
   readonly totalLines: number;
   readonly requestedLines: number;
+  /**
+   * The raw `args.path` exactly as the caller spelled it. The repetition
+   * guard keys on this raw string (not the resolved safe path) so the
+   * compaction elision site — which only sees the model's arguments —
+   * builds the identical key and its `forget` actually matches.
+   */
+  readonly rawPath: string;
+  /**
+   * The pre-window line offset as requested (positive for forward reads,
+   * negative for tail reads). Part of the repetition fingerprint: the same
+   * file read from a different offset is a different fetch, not a repeat.
+   */
+  readonly lineOffset: number;
   readonly anchor: string;
+  /**
+   * Lazily-resolved LSP declaration outline for this file ('' when there is
+   * nothing to show). A provider, not prebuilt text: the gate below depends
+   * on totalLines, which is only known once the read loop has run, and a
+   * provider keeps short reads free of any LSP work.
+   */
+  readonly outlineFooter?: () => Promise<string>;
 }
 
 function truncateLine(line: string, maxBytes: number): string {
@@ -191,9 +224,14 @@ export class ReadTool implements BuiltinTool<ReadInput> {
   readonly name = 'Read' as const;
   readonly description = READ_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(ReadInputSchema);
+  /** (path → mtime + outline footer) memoization; see resolveOutlineFooter. */
+  private readonly outlineCache = new Map<string, { mtimeMs: number; footer: Promise<string> }>();
   constructor(
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
+    private readonly lspRegistry?: LspRegistry,
+    /** Session-scoped repetition counter; absent when constructed outside an Agent (tests, ad-hoc). */
+    private readonly repetitionGuard?: RepetitionGuard,
   ) {}
 
   async resolveExecution(args: ReadInput): Promise<ToolExecution> {
@@ -306,6 +344,15 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       const requestedLines = args.n_lines ?? MAX_LINES;
       const effectiveLimit = Math.min(requestedLines, MAX_LINES);
 
+      // Declaration-outline footer: built here where `stat` is in scope (it
+      // is the cache key) but kept lazy — the totalLines gate lives in
+      // finishReadResult, so reads that cannot carry the footer never pay for
+      // an LSP roundtrip or a second file read.
+      const outlineFooter =
+        this.lspRegistry !== undefined
+          ? (): Promise<string> => this.resolveOutlineFooter(safePath, stat, signal)
+          : undefined;
+
       if (lineOffset < 0) {
         return await this.readTail(
           safePath,
@@ -314,6 +361,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
           effectiveLimit,
           requestedLines,
           signal,
+          outlineFooter,
         );
       }
       return await this.readForward(
@@ -323,6 +371,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
         effectiveLimit,
         requestedLines,
         signal,
+        outlineFooter,
       );
     } catch (error) {
       // An abort must not be swallowed into a retryable-looking result: the
@@ -347,6 +396,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     effectiveLimit: number,
     requestedLines: number,
     signal?: AbortSignal,
+    outlineFooter?: () => Promise<string>,
   ): Promise<ExecutableToolResult> {
     const selectedEntries: ReadLineEntry[] = [];
     const flags: LineEndingFlags = { hasCrLf: false, hasLf: false, hasLoneCr: false };
@@ -432,7 +482,10 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       startLine: renderedLines.length > 0 ? lineOffset : 0,
       totalLines: currentLineNo,
       requestedLines,
+      rawPath: displayPath,
+      lineOffset,
       anchor,
+      outlineFooter,
     });
   }
 
@@ -443,6 +496,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     effectiveLimit: number,
     requestedLines: number,
     signal?: AbortSignal,
+    outlineFooter?: () => Promise<string>,
   ): Promise<ExecutableToolResult> {
     const tailCount = Math.abs(lineOffset);
     const entries: ReadLineEntry[] = [];
@@ -517,11 +571,14 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       startLine: renderedCandidates[0]?.entry.lineNo ?? 0,
       totalLines: currentLineNo,
       requestedLines,
+      rawPath: displayPath,
+      lineOffset,
       anchor,
+      outlineFooter,
     });
   }
 
-  private finishReadResult(input: FinishReadResultInput): ExecutableToolResult {
+  private async finishReadResult(input: FinishReadResultInput): Promise<ExecutableToolResult> {
     const message = this.finishMessage(input);
     // Scan the returned window (not the whole file) for merge conflict
     // markers so the agent is warned before editing a conflicted file. Strip
@@ -533,8 +590,132 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       return tabIdx === -1 ? l : l.slice(tabIdx + 1);
     });
     const notice = formatConflictNotice(scanConflictLines(rawLines, input.startLine));
-    const fullMessage = notice.length > 0 ? `${message} ${notice}` : message;
+    // Declaration outline: appended to the same <system> message chain as the
+    // conflict notice, keeping ReadGroup's `</system>\s*$` end-anchor valid.
+    // Only long files with content in the window trigger the LSP work.
+    const outlineFooter =
+      this.lspRegistry !== undefined &&
+      input.outlineFooter !== undefined &&
+      input.totalLines >= OUTLINE_MIN_TOTAL_LINES &&
+      input.renderedLines.length > 0
+        ? await input.outlineFooter()
+        : '';
+    // Repetition notice goes LAST in the chain: still inside the single
+    // <system>…</system> block (the block itself stays the output's tail), so
+    // ReadGroup's end-anchor regex keeps matching.
+    const repetitionNotice = this.recordRepetition(input);
+    const fullMessage = [message, notice, outlineFooter, repetitionNotice]
+      .filter((part) => part.length > 0)
+      .join(' ');
     return { output: this.finishOutput(input.renderedLines, fullMessage) };
+  }
+
+  /**
+   * Count this read against the session repetition guard and return the
+   * notice text ('' when there is nothing to say). The fingerprint covers the
+   * requested window (offset + effective limit) plus the whole-file content
+   * anchor, so an identical read counts up while a re-read after an edit
+   * (different anchor) or a different window resets the count. Only the
+   * notice is produced — the content lines and isError are never altered.
+   */
+  private recordRepetition(input: FinishReadResultInput): string {
+    const guard = this.repetitionGuard;
+    if (guard === undefined) return '';
+    const effectiveLimit = Math.min(input.requestedLines, MAX_LINES);
+    const fingerprint = `${String(input.lineOffset)}:${String(effectiveLimit)}:${input.anchor}`;
+    const { count, level } = guard.record(
+      RepetitionGuard.readKey(input.rawPath),
+      fingerprint,
+    );
+    if (level === 0) return '';
+    if (level === 1) {
+      return `Note: this window is identical to the previous read (anchor ${input.anchor}); the file has not changed.`;
+    }
+    return `Note: you have re-read identical content ${String(count)} times and the file has not changed. Stop re-reading: use line_offset for a different window, or Edit to change the file.`;
+  }
+
+  /**
+   * Resolve the outline footer for a read, memoized on (path, mtime) so
+   * repeated reads of an unchanged file pay for the outline once. Failures
+   * are uncached and skipped with an empty footer — the footer is
+   * opportunistic and must never alter or break a read. AbortError is the
+   * one error that propagates: the catch in `execution` re-throws it for the
+   * runtime's aborted-tool path, mirroring the read loop's signal handling.
+   */
+  private async resolveOutlineFooter(
+    safePath: string,
+    stat: StatResult,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const registry = this.lspRegistry;
+    if (registry === undefined) return '';
+    // jian reports mtime in seconds; key the cache in milliseconds.
+    const mtimeMs = stat.stMtime * 1000;
+    const cached = this.outlineCache.get(safePath);
+    let footerPromise =
+      cached !== undefined && cached.mtimeMs === mtimeMs ? cached.footer : undefined;
+    if (footerPromise === undefined) {
+      footerPromise = this.computeOutlineFooter(safePath, signal);
+      this.outlineCache.set(safePath, { mtimeMs, footer: footerPromise });
+      if (this.outlineCache.size > OUTLINE_CACHE_MAX_ENTRIES) {
+        const oldest = this.outlineCache.keys().next().value;
+        if (oldest !== undefined) this.outlineCache.delete(oldest);
+      }
+    }
+    try {
+      return await footerPromise;
+    } catch (error) {
+      // Do not memoize failures: the next read retries instead of being
+      // permanently stuck without a footer. The identity guard keeps a newer
+      // entry (mtime changed mid-flight) from being evicted here.
+      const entry = this.outlineCache.get(safePath);
+      if (entry !== undefined && entry.footer === footerPromise) {
+        this.outlineCache.delete(safePath);
+      }
+      if (signal?.aborted) throw error;
+      return '';
+    }
+  }
+
+  /**
+   * Build the outline footer text, or '' when there is nothing to show: no
+   * active client (this never cold-starts one — see activeClientFor),
+   * unsupported language, unreadable file, empty outline, or any server-side
+   * failure. didOpen keeps the server's view in sync with the on-disk file
+   * the same way the Edit tool does before querying.
+   */
+  private async computeOutlineFooter(safePath: string, signal?: AbortSignal): Promise<string> {
+    const registry = this.lspRegistry;
+    if (registry === undefined) return '';
+    signal?.throwIfAborted();
+    let client: LspClient | undefined;
+    try {
+      client = await registry.activeClientFor(safePath, this.workspace.workspaceDir);
+    } catch (error) {
+      // AbortError propagates (see resolveOutlineFooter); anything else is a
+      // skipped footer, never a failed read.
+      if (signal?.aborted) throw error;
+      return '';
+    }
+    if (client === undefined) return '';
+    try {
+      const content = await this.jian.readText(safePath);
+      const languageId = registry.languageIdForPath(safePath);
+      if (languageId === undefined) return '';
+      client.didOpen(safePath, content, languageId);
+      const outline = await client.documentSymbol(safePath);
+      if (outline.length === 0) return '';
+      const shown = outline
+        .slice(0, OUTLINE_FOOTER_MAX_ENTRIES)
+        .map(formatOutlineEntry)
+        .join(' · ');
+      return outline.length > OUTLINE_FOOTER_MAX_ENTRIES
+        ? `Declarations (first ${String(OUTLINE_FOOTER_MAX_ENTRIES)} of ${String(outline.length)}): ${shown} Full outline: LSP document_symbols.`
+        : `Declarations (${String(outline.length)}): ${shown}`;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return '';
+    }
   }
 
   private finishOutput(renderedLines: readonly string[], message: string): string {

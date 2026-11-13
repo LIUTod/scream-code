@@ -3,6 +3,8 @@ import type { ContentPart } from '@scream-code/ltod';
 import type { Agent } from '..';
 import type { ContextMessage } from '../context';
 import { flags } from '../../flags';
+import { RepetitionGuard } from '../../tools/support/repetition-guard';
+import { GrepInputSchema } from '../../tools/builtin/file/grep';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 
 export interface MicroCompactionConfig {
@@ -128,18 +130,24 @@ function extractTextContent(content: readonly ContentPart[]): string {
   return text;
 }
 
-/** Build a toolCallId -> tool-name map by scanning assistant messages. */
-function buildToolCallNameMap(
+/** A tool call resolved by id: name plus the raw persisted arguments JSON. */
+interface ToolCallRef {
+  readonly name: string;
+  readonly argumentsJson: string | null;
+}
+
+/** Build a toolCallId -> tool-call (name + arguments) map by scanning assistant messages. */
+function buildToolCallIndex(
   messages: readonly ContextMessage[],
-): Map<string, string> {
-  const names = new Map<string, string>();
+): Map<string, ToolCallRef> {
+  const calls = new Map<string, ToolCallRef>();
   for (const msg of messages) {
     if (msg.role !== 'assistant') continue;
     for (const tc of msg.toolCalls) {
-      names.set(tc.id, tc.name);
+      calls.set(tc.id, { name: tc.name, argumentsJson: tc.arguments });
     }
   }
-  return names;
+  return calls;
 }
 
 /**
@@ -304,7 +312,7 @@ export class MicroCompaction {
     if (!this.enabled) return messages;
     const config = this.config;
     const superseded = findSupersededPaths(messages, this.cutoff);
-    const toolNames = buildToolCallNameMap(messages);
+    const toolCalls = buildToolCallIndex(messages);
     const result: ContextMessage[] = [];
     let i = 0;
     for (const msg of messages) {
@@ -316,11 +324,20 @@ export class MicroCompaction {
         isOld &&
         isTool &&
         toolCallId !== undefined &&
-        isZeroMatchSearchResult(toolNames.get(toolCallId), msg.content);
+        isZeroMatchSearchResult(toolCalls.get(toolCallId)?.name, msg.content);
       const isOversizedTruncatable =
         isOld &&
         isTool &&
         estimateTokensForMessages([msg]) >= config.minContentTokens;
+      // The result is about to be replaced by a marker, which tells the model
+      // the content is gone and it may re-fetch — so a subsequent identical
+      // re-read/search must not count as repetition. Repeated compact() runs
+      // recompute the same elision, but forget is idempotent, so re-firing
+      // here is a no-op.
+      if ((isUseless || isZeroMatch || isOversizedTruncatable) && toolCallId !== undefined) {
+        const call = toolCalls.get(toolCallId);
+        if (call !== undefined) this.forgetRepetitionKeys(call.name, call.argumentsJson);
+      }
       if (isUseless) {
         result.push({
           ...msg,
@@ -360,6 +377,47 @@ export class MicroCompaction {
     return beforeTokens - afterTokens;
   }
 
+  /**
+   * Clear the repetition guard's count for every key a just-elided result
+   * could have fed. When micro-compaction replaces a Read/ReadGroup/Grep
+   * result with a marker, the model is told the content is gone and may
+   * legitimately re-fetch it — counting that re-fetch as repetition would
+   * punish the correct behavior, so the key is forgotten. The key must be
+   * built exactly the way the live tools build it: the raw `args.path`
+   * string for reads (compaction has no workspace context to
+   * canonicalize with), the canonicalized argument object for Grep.
+   *
+   * False exemptions are harmless (a forgotten count merely misses one
+   * escalation); false counting is the bug this avoids, so reads forget on
+   * any elision of their result. Unidentifiable calls skip forgetting.
+   */
+  private forgetRepetitionKeys(
+    toolName: string,
+    argumentsJson: string | null,
+  ): void {
+    // Tests construct MicroCompaction with a stub agent that has no guard.
+    const guard = this.agent.repetitionGuard;
+    if (guard === undefined) return;
+    const args = parseToolCallArguments(argumentsJson);
+    if (toolName === 'Read' || toolName === 'ReadGroup') {
+      for (const path of extractReadFilePaths(toolName, args)) {
+        guard.forget(RepetitionGuard.readKey(path));
+      }
+      return;
+    }
+    if (toolName === 'Grep' && args !== undefined) {
+      // Reparse through the Grep schema before canonicalizing: the live tool
+      // keys on its zod-parsed args (unknown model-emitted fields stripped),
+      // so the forget key must be built from the same stripped shape — an
+      // extra raw field would hash differently and silently fail the
+      // exemption the elision is meant to grant.
+      const parsed = GrepInputSchema.safeParse(args);
+      if (parsed.success) {
+        guard.forget(RepetitionGuard.grepKey(JSON.stringify(parsed.data)));
+      }
+    }
+  }
+
   private measureEffect(
     messages: readonly ContextMessage[],
     cutoff: number,
@@ -370,7 +428,7 @@ export class MicroCompaction {
     let truncatedToolResultCount = 0;
     let beforeTokens = 0;
     let afterTokens = 0;
-    const toolNames = buildToolCallNameMap(messages);
+    const toolCalls = buildToolCallIndex(messages);
     for (let i = 0; i < messages.length && i < cutoff; i++) {
       const message = messages[i];
       if (message?.role !== 'tool' || message.toolCallId === undefined) continue;
@@ -378,7 +436,7 @@ export class MicroCompaction {
       const contentTokens = estimateTokensForMessages([message]);
       const isUseless = message.useless === true;
       const isZeroMatch = isZeroMatchSearchResult(
-        toolNames.get(message.toolCallId),
+        toolCalls.get(message.toolCallId)?.name,
         message.content,
       );
       if (!isUseless && !isZeroMatch && contentTokens < this.config.minContentTokens) continue;

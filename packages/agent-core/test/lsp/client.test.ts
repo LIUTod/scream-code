@@ -445,3 +445,202 @@ describe('LspClient.stop()', () => {
     expect((client as unknown as { started: boolean }).started).toBe(false);
   });
 });
+
+describe('LspClient typed wrappers (hover / typeDefinition / implementation / documentSymbol / codeActions)', () => {
+  // Request ids: start() consumes id 1 for `initialize` (answered by method),
+  // so each wrapper test's first real request carries id 2.
+  function startedClientWith(resultForId2: unknown): Promise<{
+    client: LspClient;
+    process: JianProcess;
+    sentMessages: { id: number; method: string; params: unknown }[];
+  }> {
+    const { process, sentMessages } = createFakeProcess(new Map([[2, resultForId2]]));
+    const client = new LspClient(['server'], '/workspace', createFakeJian(process));
+    return client.start().then(() => ({ client, process, sentMessages }));
+  }
+
+  it('hover normalizes MarkupContent and returns the range', async () => {
+    const { client, sentMessages } = await startedClientWith({
+      contents: { kind: 'markdown', value: '# Heading' },
+      range: { start: { line: 2, character: 3 }, end: { line: 2, character: 9 } },
+    });
+
+    const hover = await client.hover('/workspace/a.ts', 2, 3);
+
+    expect(hover).toEqual({
+      contents: '# Heading',
+      range: { start: { line: 2, character: 3 }, end: { line: 2, character: 9 } },
+    });
+    expect(sentMessages.find((m) => m.method === 'textDocument/hover')).toMatchObject({
+      params: { textDocument: { uri: 'file:///workspace/a.ts' }, position: { line: 2, character: 3 } },
+    });
+    await client.stop();
+  });
+
+  it('hover returns null when the server has nothing', async () => {
+    const { client } = await startedClientWith(null);
+    expect(await client.hover('/workspace/a.ts', 0, 0)).toBeNull();
+    await client.stop();
+  });
+
+  it('hover normalizes MarkedString[] into fenced blocks and text', async () => {
+    const { client } = await startedClientWith({
+      contents: [
+        { language: 'ts', value: 'const x = 1' },
+        'plain prose',
+        { kind: 'plaintext', value: 'second prose' },
+      ],
+    });
+
+    const hover = await client.hover('/workspace/a.ts', 1, 2);
+
+    expect(hover).toEqual({
+      contents: '```ts\nconst x = 1\n```\n\nplain prose\n\nsecond prose',
+      range: undefined,
+    });
+    await client.stop();
+  });
+
+  it('typeDefinition wraps a single Location and normalizes null to []', async () => {
+    const location = {
+      uri: 'file:///workspace/a.ts',
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+    };
+    const single = await startedClientWith(location);
+    expect(await single.client.typeDefinition('/workspace/a.ts', 4, 5)).toEqual([location]);
+    expect(
+      single.sentMessages.find((m) => m.method === 'textDocument/typeDefinition'),
+    ).toMatchObject({
+      params: { textDocument: { uri: 'file:///workspace/a.ts' }, position: { line: 4, character: 5 } },
+    });
+    await single.client.stop();
+
+    const empty = await startedClientWith(null);
+    expect(await empty.client.typeDefinition('/workspace/a.ts', 0, 0)).toEqual([]);
+    await empty.client.stop();
+  });
+
+  it('implementation passes a Location array through unchanged', async () => {
+    const locations = [
+      {
+        uri: 'file:///workspace/impl.ts',
+        range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } },
+      },
+    ];
+    const { client, sentMessages } = await startedClientWith(locations);
+    expect(await client.implementation('/workspace/a.ts', 2, 0)).toEqual(locations);
+    expect(sentMessages.find((m) => m.method === 'textDocument/implementation')).toMatchObject({
+      params: { textDocument: { uri: 'file:///workspace/a.ts' }, position: { line: 2, character: 0 } },
+    });
+    await client.stop();
+  });
+
+  it('documentSymbol flattens hierarchical DocumentSymbol results with depth', async () => {
+    const range = (line: number): unknown => ({
+      start: { line, character: 0 },
+      end: { line, character: 1 },
+    });
+    const { client } = await startedClientWith([
+      {
+        name: 'Foo',
+        kind: 5,
+        range: range(2),
+        children: [
+          { name: 'bar', kind: 6, range: range(3) },
+          { name: 'Baz', kind: 5, range: range(6), children: [{ name: 'qux', kind: 8, range: range(7) }] },
+        ],
+      },
+      { name: 'CONST', kind: 14, range: range(9) },
+    ]);
+
+    expect(await client.documentSymbol('/workspace/a.ts')).toEqual([
+      { name: 'Foo', kind: 5, line: 2, depth: 0 },
+      { name: 'bar', kind: 6, line: 3, depth: 1 },
+      { name: 'Baz', kind: 5, line: 6, depth: 1 },
+      { name: 'qux', kind: 8, line: 7, depth: 2 },
+      { name: 'CONST', kind: 14, line: 9, depth: 0 },
+    ]);
+    await client.stop();
+  });
+
+  it('documentSymbol handles flat SymbolInformation responses via location', async () => {
+    const { client, sentMessages } = await startedClientWith([
+      {
+        name: 'helper',
+        kind: 12,
+        location: {
+          uri: 'file:///workspace/a.ts',
+          range: { start: { line: 7, character: 0 }, end: { line: 7, character: 6 } },
+        },
+      },
+    ]);
+
+    expect(await client.documentSymbol('/workspace/a.ts')).toEqual([
+      { name: 'helper', kind: 12, line: 7, depth: 0 },
+    ]);
+    expect(sentMessages.find((m) => m.method === 'textDocument/documentSymbol')).toMatchObject({
+      params: { textDocument: { uri: 'file:///workspace/a.ts' } },
+    });
+    await client.stop();
+  });
+
+  it('documentSymbol normalizes null to []', async () => {
+    const { client } = await startedClientWith(null);
+    expect(await client.documentSymbol('/workspace/a.ts')).toEqual([]);
+    await client.stop();
+  });
+
+  it('codeActions preserves titles, kinds, edits and response-order indices', async () => {
+    const edit = {
+      changes: {
+        'file:///workspace/a.ts': [
+          { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } }, newText: 'x' },
+        ],
+      },
+    };
+    const { client, sentMessages } = await startedClientWith([
+      { title: 'Fix spelling', kind: 'quickfix', edit },
+      { title: 'Run tests' },
+    ]);
+
+    const actions = await client.codeActions('/workspace/a.ts', 0, 0, 20, 0);
+
+    expect(actions).toEqual([
+      { title: 'Fix spelling', kind: 'quickfix', edit, index: 0 },
+      { title: 'Run tests', kind: undefined, edit: undefined, index: 1 },
+    ]);
+    expect(sentMessages.find((m) => m.method === 'textDocument/codeAction')).toMatchObject({
+      params: {
+        textDocument: { uri: 'file:///workspace/a.ts' },
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 20, character: 0 },
+        },
+        context: { diagnostics: [] },
+      },
+    });
+    await client.stop();
+  });
+
+  it('codeActions never sends a server-side only hint, keeping indexes full-list-relative', async () => {
+    const { client, sentMessages } = await startedClientWith(null);
+
+    expect(await client.codeActions('/workspace/a.ts', 1, 2, 3, 4)).toEqual([]);
+    expect(sentMessages.find((m) => m.method === 'textDocument/codeAction')).toMatchObject({
+      params: {
+        range: { start: { line: 1, character: 2 }, end: { line: 3, character: 4 } },
+        context: { diagnostics: [] },
+      },
+    });
+    // No `only` key at all: a server honoring it would pre-filter the list
+    // and make the `index` addresses subset-relative, breaking apply_action
+    // when a later call repeats or drops the `kinds` filter.
+    const context = (
+      sentMessages.find((m) => m.method === 'textDocument/codeAction')?.params as {
+        context: Record<string, unknown>;
+      }
+    ).context;
+    expect('only' in context).toBe(false);
+    await client.stop();
+  });
+});

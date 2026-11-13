@@ -207,3 +207,63 @@ describe('LspRegistry', () => {
     expect(again).toBeUndefined();
   });
 });
+
+describe('LspRegistry.activeClientFor', () => {
+  it('returns undefined and never spawns when nothing was started', async () => {
+    const jian = createFakeJian(createFakeProcess());
+    const startSpy = vi.spyOn(jian, 'exec');
+    const registry = new LspRegistry(jian);
+
+    expect(await registry.activeClientFor('/workspace/a.ts', '/workspace')).toBeUndefined();
+
+    expect(startSpy).not.toHaveBeenCalled();
+    await registry.stopAll();
+  });
+
+  it('returns the already-started client for the exact workspace key', async () => {
+    const jian = createFakeJian(createFakeProcess());
+    const startSpy = vi.spyOn(jian, 'exec');
+    const registry = new LspRegistry(jian);
+    const started = await registry.getClient('/workspace/a.ts', '/workspace');
+
+    expect(await registry.activeClientFor('/workspace/a.ts', '/workspace')).toBe(started);
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    await registry.stopAll();
+  });
+
+  it('awaits an in-flight start from another caller without spawning again', async () => {
+    const jian = createFakeJian(createFakeProcess());
+    const startSpy = vi.spyOn(jian, 'exec');
+    const registry = new LspRegistry(jian);
+
+    // Another caller initiated the start; the promise is cached mid-flight.
+    const inFlight = registry.getClient('/workspace/a.ts', '/workspace');
+    const active = await registry.activeClientFor('/workspace/a.ts', '/workspace');
+
+    expect(active).toBe(await inFlight);
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    await registry.stopAll();
+  });
+
+  it('falls back to scanning the cache when no workspaceRoot is given', async () => {
+    const jian = createFakeJian(createFakeProcess());
+    const registry = new LspRegistry(jian);
+    const started = await registry.getClient('/workspace/a.ts', '/workspace');
+
+    expect(await registry.activeClientFor('/workspace/other.ts')).toBe(started);
+    await registry.stopAll();
+  });
+
+  it('returns undefined for unsupported extensions and after stopAll', async () => {
+    const jian = createFakeJian(createFakeProcess());
+    const startSpy = vi.spyOn(jian, 'exec');
+    const registry = new LspRegistry(jian);
+    await registry.getClient('/workspace/a.ts', '/workspace');
+
+    expect(await registry.activeClientFor('/workspace/a.unknown-ext', '/workspace')).toBeUndefined();
+
+    await registry.stopAll();
+    expect(await registry.activeClientFor('/workspace/a.ts', '/workspace')).toBeUndefined();
+    expect(startSpy).toHaveBeenCalledTimes(1);
+  });
+});

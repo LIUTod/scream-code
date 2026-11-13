@@ -2,6 +2,9 @@ import type { Jian } from '@scream-code/jian';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
+// Type-only: ReadGroup only forwards the registry and repetition guard to its
+// inner ReadTool.
+import type { LspRegistry } from '../../../lsp/registry';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type {
   ExecutableToolContext,
@@ -12,6 +15,7 @@ import type {
 import { renderPrompt } from '../../../utils/render-prompt';
 import { literalRulePattern } from '../../support/rule-match';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { RepetitionGuard } from '../../support/repetition-guard';
 import { partitionExistingPaths } from '../../support/suffix-match';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { formatConflictNotice, scanConflictLines } from './conflict-detect';
@@ -122,11 +126,22 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
   constructor(
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
+    private readonly lspRegistry?: LspRegistry,
+    /** Session-scoped repetition counter, shared with plain Read so grouped reads count in the same ladder. */
+    private readonly repetitionGuard?: RepetitionGuard,
   ) {}
 
   async resolveExecution(args: ReadGroupInput): Promise<ToolExecution> {
     const paths = args.paths.slice(0, MAX_READ_GROUP_FILES);
-    const readTool = new ReadTool(this.jian, this.workspace);
+    // The inner ReadTool shares this group's LSP registry and repetition
+    // guard, so grouped reads carry the same declaration-outline footer and
+    // count toward the same re-read ladder as single reads.
+    const readTool = new ReadTool(
+      this.jian,
+      this.workspace,
+      this.lspRegistry,
+      this.repetitionGuard,
+    );
 
     // path-access rejection (sensitive / relative-outside) is detected here
     // synchronously — it throws PathSecurityError which we turn into an
@@ -253,7 +268,7 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
       grouped.set(ext, group);
     }
 
-    const sortedExts = [...grouped.keys()].sort();
+    const sortedExts = [...grouped.keys()].toSorted();
     const parts: string[] = [];
     let hasError = false;
     for (const ext of sortedExts) {

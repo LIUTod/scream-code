@@ -19,6 +19,8 @@
 
 import type { Readable } from 'node:stream';
 
+import { createHash } from 'node:crypto';
+
 import type { Jian, JianProcess } from '@scream-code/jian';
 import { normalize } from 'pathe';
 import { z } from 'zod';
@@ -32,6 +34,7 @@ import { resolvePathAccessPath } from '../../policies/path-access';
 import type { PathClass } from '../../policies/path-access';
 import { isSensitiveFile, SENSITIVE_DOT_VARIANT_SUFFIXES } from '../../policies/sensitive';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { RepetitionGuard } from '../../support/repetition-guard';
 import { ensureRgPath, rgUnavailableMessage } from '../../support/rg-locator';
 import { isRegexSyntaxError, sanitizeRgPattern } from '../../support/rg-pattern-sanitize';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
@@ -174,6 +177,8 @@ export class GrepTool implements BuiltinTool<GrepInput> {
   constructor(
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
+    /** Session-scoped repetition counter; absent when constructed outside an Agent (tests, ad-hoc). */
+    private readonly repetitionGuard?: RepetitionGuard,
   ) {}
 
   async resolveExecution(args: GrepInput): Promise<ToolExecution> {
@@ -381,6 +386,28 @@ export class GrepTool implements BuiltinTool<GrepInput> {
 
     const builder = new ToolResultBuilder();
     builder.write(combined);
+    // Repetition signal, recorded on the success path only (errors and aborts
+    // return earlier and are never counted). The fingerprint hashes the final
+    // visible output BEFORE the note is appended, so the note itself cannot
+    // change the next run's fingerprint. The key covers every argument
+    // (canonicalized), so any change — pattern, path, mode, limits — resets
+    // the count instead of escalating.
+    if (this.repetitionGuard !== undefined) {
+      const fingerprint = createHash('sha256').update(combined).digest('hex').slice(0, 8);
+      const { count, level } = this.repetitionGuard.record(
+        RepetitionGuard.grepKey(JSON.stringify(args)),
+        fingerprint,
+      );
+      if (level === 1) {
+        sideChannelMessages.push(
+          `Note: identical results were returned for this search ${String(count)} times in a row. Refine the pattern/path instead of re-running the same search.`,
+        );
+      } else if (level === 2) {
+        sideChannelMessages.push(
+          `Note: identical results were returned for this search ${String(count)} times. Refine the pattern/path instead of re-running the same search.`,
+        );
+      }
+    }
     const result = await builder.ok(sideChannelMessages.join('\n'));
     const display = buildSearchResultsDisplay(args, limited, mode, contentIncludesLineNumbers);
     if (display === undefined) return result;

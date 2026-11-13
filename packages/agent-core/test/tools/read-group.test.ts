@@ -1,6 +1,7 @@
 import type { Jian } from '@scream-code/jian';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { LspRegistry } from '../../src/lsp/registry';
 import { ReadGroupTool, ReadGroupInputSchema } from '../../src/tools/builtin/file/read-group';
 import type { ReadGroupInput } from '../../src/tools/builtin/file/read-group';
 import { createFakeJian } from './fixtures/fake-jian';
@@ -306,5 +307,48 @@ describe('ReadGroupTool', () => {
     }
     const result = ReadGroupInputSchema.safeParse({ paths });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('ReadGroupTool — LSP registry threading', () => {
+  it('threads the lsp registry through so grouped reads carry the outline footer', async () => {
+    // The footer only applies to files of at least 400 lines.
+    const content = Array.from({ length: 410 }, (_, i) => `line ${String(i + 1)}`).join('\n');
+    const client = {
+      didOpen: vi.fn(),
+      documentSymbol: vi.fn().mockResolvedValue([{ name: 'Foo', kind: 5, line: 2, depth: 0 }]),
+    };
+    const registry = {
+      activeClientFor: vi.fn().mockResolvedValue(client),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+    } as unknown as LspRegistry;
+    // jianWithFiles has no readText; the outline build needs one.
+    const jian = createFakeJian({
+      ...jianWithFiles({ '/workspace/big.ts': content }),
+      readText: vi.fn<Jian['readText']>().mockResolvedValue(content),
+    });
+    const tool = new ReadGroupTool(jian, { workspaceDir: '/workspace', additionalDirs: [] }, registry);
+
+    const result = await executeTool(tool, context({ paths: ['/workspace/big.ts'] }));
+
+    expect(result.isError).toBeFalsy();
+    const output = typeof result.output === 'string' ? result.output : '';
+    expect(output).toContain('Declarations (1): Class Foo — 3');
+    expect(client.didOpen).toHaveBeenCalledWith('/workspace/big.ts', content, 'typescript');
+  });
+
+  it('leaves grouped reads unchanged when no registry is passed', async () => {
+    const content = Array.from({ length: 410 }, (_, i) => `line ${String(i + 1)}`).join('\n');
+    const jian = createFakeJian({
+      ...jianWithFiles({ '/workspace/big.ts': content }),
+      readText: vi.fn<Jian['readText']>().mockResolvedValue(content),
+    });
+    const tool = new ReadGroupTool(jian, { workspaceDir: '/workspace', additionalDirs: [] });
+
+    const result = await executeTool(tool, context({ paths: ['/workspace/big.ts'] }));
+
+    expect(result.isError).toBeFalsy();
+    const output = typeof result.output === 'string' ? result.output : '';
+    expect(output).not.toContain('Declarations');
   });
 });

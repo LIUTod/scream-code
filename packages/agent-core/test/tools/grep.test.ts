@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type GrepInput, GrepInputSchema, GrepTool } from '../../src/tools/builtin/file/grep';
 import { SENSITIVE_DOT_VARIANT_SUFFIXES } from '../../src/tools/policies/sensitive';
+import { RepetitionGuard } from '../../src/tools/support/repetition-guard';
 import { ensureRgPath } from '../../src/tools/support/rg-locator';
 import type { WorkspaceConfig } from '../../src/tools/support/workspace';
 import { createFakeJian, toolContentString } from './fixtures/fake-jian';
@@ -2021,5 +2022,47 @@ describe('SIGTERM grace timer cleanup', () => {
     } finally {
       vi.restoreAllMocks();
     }
+  });
+});
+
+describe('GrepTool repetition notice', () => {
+  it('notices repeated identical results and resets on different arguments', async () => {
+    // Fresh process per call: the readable stream is single-consumption, and
+    // this test runs the search several times.
+    const exec = vi.fn(async () => processWithOutput('/workspace/src/a.ts\n'));
+    const guard = new RepetitionGuard();
+    const tool = new GrepTool(createFakeJian({ exec }), workspace, guard);
+
+    const first = await executeTool(tool, context({ pattern: 'hit' }));
+    expect((first as { message?: string }).message ?? '').not.toContain('Note: identical');
+
+    const second = await executeTool(tool, context({ pattern: 'hit' }));
+    expect((second as { message?: string }).message).toContain(
+      'Note: identical results were returned for this search 2 times in a row. Refine the pattern/path instead of re-running the same search.',
+    );
+
+    // Any argument change (pattern here) has its own fresh ladder.
+    const changed = await executeTool(tool, context({ pattern: 'other' }));
+    expect((changed as { message?: string }).message ?? '').not.toContain('Note: identical');
+
+    // The 'hit' ladder is per-key state and continues across the interleaved
+    // different search: this is its third identical run.
+    const afterReset = await executeTool(tool, context({ pattern: 'hit' }));
+    expect((afterReset as { message?: string }).message).toContain(
+      'Note: identical results were returned for this search 3 times in a row',
+    );
+  });
+
+  it('leaves the visible output untouched and keeps isError false', async () => {
+    const exec = vi.fn(async () => processWithOutput('/workspace/src/a.ts\n'));
+    const guard = new RepetitionGuard();
+    const tool = new GrepTool(createFakeJian({ exec }), workspace, guard);
+
+    await executeTool(tool, context({ pattern: 'hit' }));
+    const second = await executeTool(tool, context({ pattern: 'hit' }));
+
+    expect(second.isError).toBeFalsy();
+    expect(second.output).toBe('src/a.ts');
+    expect((second as { message?: string }).message).toContain('Note: identical results');
   });
 });

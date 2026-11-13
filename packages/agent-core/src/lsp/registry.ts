@@ -95,6 +95,44 @@ export class LspRegistry {
   }
 
   /**
+   * Return a client for the path's file type ONLY when one is already
+   * started (or currently being started by another caller) — never cold-start
+   * a server. The cached promise is awaited: an in-flight start counts as
+   * active because this caller did not initiate it. This is the hook for
+   * opportunistic consumers (the Read outline footer) that must stay free of
+   * startup cost and must never make a read fail.
+   *
+   * With `workspaceRoot` the lookup is the exact getClient key; without it
+   * the cache is scanned for the first started client running the same
+   * server command. A failed start is not an active client: the rejection is
+   * swallowed and undefined is returned.
+   */
+  async activeClientFor(path: string, workspaceRoot?: string): Promise<LspClient | undefined> {
+    if (this.stopping) return undefined;
+    const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
+    const config = LANGUAGE_SERVERS[ext];
+    if (config === undefined) return undefined;
+    const commandKey = config.command.join(' ');
+    let promise: Promise<LspClient> | undefined;
+    if (workspaceRoot !== undefined) {
+      promise = this.clients.get(`${workspaceRoot}\0${commandKey}`);
+    } else {
+      for (const [key, cached] of this.clients) {
+        if (key.endsWith(`\0${commandKey}`)) {
+          promise = cached;
+          break;
+        }
+      }
+    }
+    if (promise === undefined) return undefined;
+    try {
+      return await promise;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Get a client suitable for workspace-wide operations (e.g. `workspace/symbol`)
    * that do not target a specific file. Reuses an already-started client when
    * one exists; otherwise starts the first configured server. Returns undefined

@@ -1,6 +1,8 @@
 import type { Jian } from '@scream-code/jian';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { LspClient, LspSymbolOutline } from '../../src/lsp/client';
+import type { LspRegistry } from '../../src/lsp/registry';
 import {
   MAX_BYTES,
   MAX_LINE_BYTES,
@@ -9,8 +11,10 @@ import {
   ReadInputSchema,
   ReadTool,
 } from '../../src/tools/builtin/file/read';
+import { ReadGroupTool, type ReadGroupInput } from '../../src/tools/builtin/file/read-group';
 import { computeAnchor, toModelTextView } from '../../src/tools/builtin/file/line-endings';
 import { MEDIA_SNIFF_BYTES } from '../../src/tools/support/file-type';
+import { RepetitionGuard } from '../../src/tools/support/repetition-guard';
 import type { WorkspaceConfig } from '../../src/tools/support/workspace';
 import { createFakeJian, PERMISSIVE_WORKSPACE, toolContentString } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
@@ -78,6 +82,28 @@ function toolWithContent(content: string, workspace: WorkspaceConfig = PERMISSIV
       readText: vi.fn<Jian['readText']>().mockResolvedValue(content),
     }),
     workspace,
+  );
+}
+
+/** ReadTool wired to a repetition guard, over content that can change between reads (simulating an edit). */
+function guardedToolWithMutableContent(getContent: () => string, guard: RepetitionGuard) {
+  return new ReadTool(
+    createFakeJian({
+      stat: vi.fn<Jian['stat']>().mockResolvedValue(REGULAR_FILE_STAT),
+      readBytes: vi.fn<Jian['readBytes']>().mockImplementation(async (_path, n) => {
+        const bytes = Buffer.from(getContent(), 'utf8');
+        return n === undefined ? bytes : bytes.subarray(0, n);
+      }),
+      readLines: vi.fn<Jian['readLines']>().mockImplementation(async function* readLines() {
+        for (const line of linesFromContent(getContent())) {
+          yield line;
+        }
+      }),
+      readText: vi.fn<Jian['readText']>().mockImplementation(async () => getContent()),
+    }),
+    PERMISSIVE_WORKSPACE,
+    undefined,
+    guard,
   );
 }
 
@@ -957,6 +983,49 @@ describe('ReadTool suffix-match recovery', () => {
     );
   });
 
+  it('counts a suffix-resolved retry under the raw requested path', async () => {
+    const guard = new RepetitionGuard();
+    const recordSpy = vi.spyOn(guard, 'record');
+    const tool = new ReadTool(
+      fakeJianWithGlob(['/workspace/src/utils/foo.ts'], ['/workspace/src/tils/foo.ts']),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+      undefined,
+      guard,
+    );
+    const notice =
+      "[Path '/workspace/src/tils/foo.ts' not found; resolved to '/workspace/src/utils/foo.ts' via suffix match]";
+
+    const first = await executeTool(tool, context({ path: '/workspace/src/tils/foo.ts' }));
+    expect(toolContentString(first)).toContain('recovered content');
+    // The resolution notice is prepended exactly once, above the content and
+    // outside the <system> block; the first read is still silent on repetition.
+    expect(toolContentString(first).split(notice)).toHaveLength(2);
+    expect(toolContentString(first).startsWith(`${notice}\n`)).toBe(true);
+    expect(toolContentString(first)).not.toContain('Note: this window');
+
+    const second = await executeTool(tool, context({ path: '/workspace/src/tils/foo.ts' }));
+    const output = toolContentString(second);
+    // The notice still appears exactly once, prepended and outside the
+    // <system> block even on the retry that carries a repetition note.
+    expect(output.split(notice)).toHaveLength(2);
+    expect(output.startsWith(`${notice}\n`)).toBe(true);
+    // Second identical fetch of the same RAW path → the repetition note
+    // appears (count 2): both guard records keyed on the raw args.path,
+    // never on the suffix-resolved absolute path.
+    expect(output).toContain('Note: this window is identical to the previous read');
+    expect(recordSpy.mock.calls.map((call) => call[0])).toEqual([
+      'read:/workspace/src/tils/foo.ts',
+      'read:/workspace/src/tils/foo.ts',
+    ]);
+    expect(recordSpy.mock.results.map((result) => result.value)).toEqual([
+      { count: 1, level: 0 },
+      { count: 2, level: 1 },
+    ]);
+    // The <system> block remains the output tail.
+    expect(output).toMatch(/<system>.*<\/system>\s*$/);
+    expect(output).toMatch(/<system>.*Note: this window is identical.*<\/system>\s*$/);
+  });
+
   it('does not resolve when multiple suffix matches exist', async () => {
     const tool = new ReadTool(
       fakeJianWithGlob(
@@ -1002,5 +1071,307 @@ describe('ReadTool suffix-match recovery', () => {
 
     expect(result).toMatchObject({ isError: true });
     expect(result.output).toContain('does not exist');
+  });
+});
+
+describe('ReadTool — LSP declaration outline footer', () => {
+  // The footer only applies to long files (≥ OUTLINE_MIN_TOTAL_LINES lines),
+  // so every fixture here crosses that threshold.
+  const BIG_FILE_CONTENT = Array.from({ length: 410 }, (_, i) => `line ${String(i + 1)}`).join('\n');
+  const BIG_OUTLINE: LspSymbolOutline[] = [
+    { name: 'Foo', kind: 5, line: 2, depth: 0 },
+    { name: 'bar', kind: 6, line: 30, depth: 1 },
+  ];
+
+  function fakeRegistryWith(client: unknown): LspRegistry {
+    return {
+      activeClientFor: vi.fn().mockResolvedValue(client),
+      languageIdForPath: vi.fn().mockReturnValue(client === undefined ? undefined : 'typescript'),
+    } as unknown as LspRegistry;
+  }
+
+  function fakeLspClient(outline: LspSymbolOutline[] | Error): LspClient {
+    return {
+      didOpen: vi.fn(),
+      documentSymbol: vi.fn().mockImplementation(() =>
+        outline instanceof Error ? Promise.reject(outline) : Promise.resolve(outline),
+      ),
+    } as unknown as LspClient;
+  }
+
+  function toolWithContentAndRegistry(
+    content: string,
+    registry?: LspRegistry,
+    overrides: { readText?: Jian['readText']; stat?: Jian['stat'] } = {},
+  ): ReadTool {
+    const bytes = Buffer.from(content, 'utf8');
+    return new ReadTool(
+      createFakeJian({
+        stat: overrides.stat ?? vi.fn<Jian['stat']>().mockResolvedValue(REGULAR_FILE_STAT),
+        readBytes: vi.fn<Jian['readBytes']>().mockImplementation(async (_path, n) => {
+          return n === undefined ? bytes : bytes.subarray(0, n);
+        }),
+        readLines: vi.fn<Jian['readLines']>().mockImplementation(readLinesFromContent(content)),
+        readText: overrides.readText ?? vi.fn<Jian['readText']>().mockResolvedValue(content),
+      }),
+      PERMISSIVE_WORKSPACE,
+      registry,
+    );
+  }
+
+  function fullReadStatus(totalLines: number): string {
+    return `${String(totalLines)} lines read from file starting from line 1. Total lines in file: ${String(totalLines)}. End of file reached.`;
+  }
+
+  function renderedContent(content: string): string {
+    return content
+      .split('\n')
+      .map((line, i) => `${String(i + 1)}\t${line}`)
+      .join('\n');
+  }
+
+  function expectedOutputWithoutFooter(content: string, totalLines: number): string {
+    return withReadStatus(renderedContent(content), fullReadStatus(totalLines), content);
+  }
+
+  // The footer rides the same message chain as the conflict notice, i.e.
+  // AFTER the `Anchor: …` suffix that finishMessage emits last.
+  function expectedOutputWithFooter(content: string, totalLines: number, footer: string): string {
+    const anchor = computeAnchor(toModelTextView(content).text);
+    const note = `<system>${fullReadStatus(totalLines)} Anchor: ${anchor} ${footer}</system>`;
+    return `${renderedContent(content)}\n${note}`;
+  }
+
+  it('appends the declaration outline to the status block for a long file with an active client', async () => {
+    const client = fakeLspClient(BIG_OUTLINE);
+    const tool = toolWithContentAndRegistry(BIG_FILE_CONTENT, fakeRegistryWith(client));
+
+    const result = await executeTool(tool, context({ path: '/tmp/big.ts' }));
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toBe(
+      expectedOutputWithFooter(
+        BIG_FILE_CONTENT,
+        410,
+        'Declarations (2): Class Foo — 3 · Method bar — 31',
+      ),
+    );
+    expect(client.didOpen).toHaveBeenCalledWith('/tmp/big.ts', BIG_FILE_CONTENT, 'typescript');
+  });
+
+  it('stays byte-identical when the registry is absent', async () => {
+    const tool = toolWithContentAndRegistry(BIG_FILE_CONTENT, undefined);
+
+    const result = await executeTool(tool, context({ path: '/tmp/big.ts' }));
+
+    expect(result.output).toBe(expectedOutputWithoutFooter(BIG_FILE_CONTENT, 410));
+  });
+
+  it('skips the outline entirely when no LSP client is active', async () => {
+    const readText = vi.fn<Jian['readText']>().mockResolvedValue(BIG_FILE_CONTENT);
+    const tool = toolWithContentAndRegistry(BIG_FILE_CONTENT, fakeRegistryWith(undefined), { readText });
+
+    const result = await executeTool(tool, context({ path: '/tmp/big.ts' }));
+
+    expect(result.output).toBe(expectedOutputWithoutFooter(BIG_FILE_CONTENT, 410));
+    expect(readText).not.toHaveBeenCalled();
+  });
+
+  it('does not trigger any LSP work for files under the outline threshold', async () => {
+    const content = Array.from({ length: 50 }, (_, i) => `line ${String(i + 1)}`).join('\n');
+    const client = fakeLspClient(BIG_OUTLINE);
+    const registry = fakeRegistryWith(client);
+    const tool = toolWithContentAndRegistry(content, registry);
+
+    const result = await executeTool(tool, context({ path: '/tmp/small.ts' }));
+
+    expect(result.output).toBe(expectedOutputWithoutFooter(content, 50));
+    expect(registry.activeClientFor).not.toHaveBeenCalled();
+    expect(client.didOpen).not.toHaveBeenCalled();
+  });
+
+  it('caps the footer at 40 entries and points at LSP document_symbols for the rest', async () => {
+    const outline: LspSymbolOutline[] = Array.from({ length: 45 }, (_, i) => ({
+      name: `sym${String(i)}`,
+      kind: 12,
+      line: i,
+      depth: 0,
+    }));
+    const tool = toolWithContentAndRegistry(BIG_FILE_CONTENT, fakeRegistryWith(fakeLspClient(outline)));
+
+    const result = await executeTool(tool, context({ path: '/tmp/big.ts' }));
+
+    const expected =
+      `Declarations (first 40 of 45): ` +
+      outline
+        .slice(0, 40)
+        .map((entry) => `Function ${entry.name} — ${String(entry.line + 1)}`)
+        .join(' · ') +
+      ' Full outline: LSP document_symbols.';
+    expect(result.output).toContain(expected);
+    expect(result.output).not.toContain('Function sym40');
+  });
+
+  it('stays byte-identical when the outline comes back empty', async () => {
+    const tool = toolWithContentAndRegistry(BIG_FILE_CONTENT, fakeRegistryWith(fakeLspClient([])));
+
+    const result = await executeTool(tool, context({ path: '/tmp/big.ts' }));
+
+    expect(result.output).toBe(expectedOutputWithoutFooter(BIG_FILE_CONTENT, 410));
+  });
+
+  it('skips the footer silently when documentSymbol fails', async () => {
+    const tool = toolWithContentAndRegistry(
+      BIG_FILE_CONTENT,
+      fakeRegistryWith(fakeLspClient(new Error('server exploded'))),
+    );
+
+    const result = await executeTool(tool, context({ path: '/tmp/big.ts' }));
+
+    expect(result.output).toBe(expectedOutputWithoutFooter(BIG_FILE_CONTENT, 410));
+  });
+
+  it('memoizes the outline on (path, mtime) and recomputes when mtime changes', async () => {
+    let mtime = 0;
+    const readText = vi.fn<Jian['readText']>().mockResolvedValue(BIG_FILE_CONTENT);
+    const stat = vi.fn<Jian['stat']>().mockImplementation(async () => {
+      return { ...REGULAR_FILE_STAT, stMtime: mtime };
+    });
+    const client = fakeLspClient(BIG_OUTLINE);
+    const tool = toolWithContentAndRegistry(BIG_FILE_CONTENT, fakeRegistryWith(client), {
+      readText,
+      stat,
+    });
+
+    await executeTool(tool, context({ path: '/tmp/big.ts' }));
+    await executeTool(tool, context({ path: '/tmp/big.ts' }));
+    expect(client.documentSymbol).toHaveBeenCalledTimes(1);
+    expect(readText).toHaveBeenCalledTimes(1);
+
+    mtime = 5;
+    await executeTool(tool, context({ path: '/tmp/big.ts' }));
+    expect(client.documentSymbol).toHaveBeenCalledTimes(2);
+    expect(readText).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates an abort raised while building the outline', async () => {
+    const controller = new AbortController();
+    const readText = vi.fn<Jian['readText']>().mockImplementation(async () => {
+      controller.abort();
+      const error = new Error('The operation was aborted');
+      error.name = 'AbortError';
+      throw error;
+    });
+    const tool = toolWithContentAndRegistry(
+      BIG_FILE_CONTENT,
+      fakeRegistryWith(fakeLspClient(BIG_OUTLINE)),
+      { readText },
+    );
+
+    await expect(
+      executeTool(tool, { ...context({ path: '/tmp/big.ts' }), signal: controller.signal }),
+    ).rejects.toThrow();
+  });
+});
+
+describe('ReadTool repetition notice', () => {
+  it('stays silent on the first read and notes the identical window on repeats', async () => {
+    const guard = new RepetitionGuard();
+    const tool = guardedToolWithMutableContent(() => 'a\nb\nc', guard);
+
+    const first = await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    expect(toolContentString(first)).not.toContain('Note: this window is identical');
+
+    const second = await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    expect(toolContentString(second)).toContain(
+      'Note: this window is identical to the previous read',
+    );
+    // The note stays inside the <system> block, which remains the output tail.
+    expect(toolContentString(second)).toMatch(
+      /<system>.*Note: this window is identical.*<\/system>\s*$/,
+    );
+
+    const third = await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    expect(toolContentString(third)).toContain(
+      'Note: this window is identical to the previous read',
+    );
+    expect(toolContentString(third)).not.toContain('re-read identical content');
+  });
+
+  it('escalates to the stop re-reading notice after the fourth identical read', async () => {
+    const guard = new RepetitionGuard();
+    const tool = guardedToolWithMutableContent(() => 'a\nb\nc', guard);
+    for (let i = 0; i < 4; i += 1) {
+      await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    }
+
+    const fifth = await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    expect(toolContentString(fifth)).toContain('you have re-read identical content 5 times');
+  });
+
+  it('switches to the stop re-reading notice exactly on the fourth identical read', async () => {
+    const guard = new RepetitionGuard();
+    const tool = guardedToolWithMutableContent(() => 'a\nb\nc', guard);
+    for (let i = 0; i < 2; i += 1) {
+      await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    }
+
+    // count 3: still the gentle level-1 wording.
+    const third = await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    expect(toolContentString(third)).toContain(
+      'Note: this window is identical to the previous read',
+    );
+    expect(toolContentString(third)).not.toContain('Stop re-reading');
+
+    // count 4: the ladder flips to level 2 — the hard notice names the count
+    // and points at line_offset/Edit, and stays inside the <system> block
+    // (which remains the output tail).
+    const fourth = await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    expect(toolContentString(fourth)).toContain('you have re-read identical content 4 times');
+    expect(toolContentString(fourth)).toContain(
+      'use line_offset for a different window, or Edit to change the file.',
+    );
+    expect(toolContentString(fourth)).toMatch(/<system>.*re-read identical content.*<\/system>\s*$/);
+  });
+
+  it('resets the count when the file changed between reads', async () => {
+    const guard = new RepetitionGuard();
+    let content = 'v1';
+    const tool = guardedToolWithMutableContent(() => content, guard);
+    await executeTool(tool, context({ path: '/tmp/a.txt' }));
+
+    content = 'v2';
+    const afterEdit = await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    expect(toolContentString(afterEdit)).not.toContain('Note: this window is identical');
+
+    const repeat = await executeTool(tool, context({ path: '/tmp/a.txt' }));
+    expect(toolContentString(repeat)).toContain('Note: this window is identical');
+  });
+
+  it('shares the guard with ReadGroup so counts accumulate across both tools', async () => {
+    const guard = new RepetitionGuard();
+    const content = 'a\nb\nc';
+    const bytes = Buffer.from(content, 'utf8');
+    const jian = createFakeJian({
+      stat: vi.fn<Jian['stat']>().mockResolvedValue(REGULAR_FILE_STAT),
+      readBytes: vi.fn<Jian['readBytes']>().mockImplementation(async (_path, n) => {
+        return n === undefined ? bytes : bytes.subarray(0, n);
+      }),
+      readLines: vi.fn<Jian['readLines']>().mockImplementation(readLinesFromContent(content)),
+      readText: vi.fn<Jian['readText']>().mockResolvedValue(content),
+    });
+    const readTool = new ReadTool(jian, PERMISSIVE_WORKSPACE, undefined, guard);
+    await executeTool(readTool, context({ path: '/tmp/a.txt' }));
+
+    const groupTool = new ReadGroupTool(jian, PERMISSIVE_WORKSPACE, undefined, guard);
+    const group = await executeTool(groupTool, {
+      turnId: '0',
+      toolCallId: 'call_readgroup',
+      args: { paths: ['/tmp/a.txt'] } satisfies ReadGroupInput,
+      signal,
+    });
+    // The grouped read is the second identical fetch of this file: the inner
+    // ReadTool's repetition notice surfaces inside the group's output.
+    expect(toolContentString(group)).toContain('Note: this window is identical');
   });
 });

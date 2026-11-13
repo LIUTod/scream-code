@@ -18,6 +18,7 @@ import type { EnabledPluginSessionStart } from '#/plugin';
 
 import { resolveScreamHome } from '../config/path';
 import { computeDelayMs, retryBackoffDelays } from '../loop/retry';
+import { RepetitionGuard } from '../tools/support/repetition-guard';
 
 import type { McpConnectionManager } from '../mcp';
 import { systemPromptForRequest } from '../profile';
@@ -206,6 +207,8 @@ export class Agent {
   readonly knowledgeStore: KnowledgeStore | undefined;
   readonly sessionMemory: SessionMemory;
   readonly workingSet: WorkingSet;
+  /** Session-scoped read/search repetition counter, handed to the file tools. */
+  readonly repetitionGuard: RepetitionGuard;
   readonly dreamTracker: DreamTracker;
   readonly replayBuilder: ReplayBuilder;
 
@@ -313,6 +316,9 @@ export class Agent {
         : Promise.resolve();
     this.sessionMemory = new SessionMemory(this);
     this.workingSet = new WorkingSet();
+    // Session-scoped: every Agent (including subagents) owns one, so
+    // repetition counts never leak across agent boundaries.
+    this.repetitionGuard = new RepetitionGuard();
     // Resolve through the authoritative home resolver rather than falling back
     // to '' — an empty home would put the state file in the current working
     // directory, i.e. in whatever project the session happens to run in.

@@ -8,20 +8,65 @@ import { isWithinWorkspace, resolvePathAccessPath } from '../policies/path-acces
 import { toInputJsonSchema } from '../support/input-schema';
 import type { WorkspaceConfig } from '../support/workspace';
 import type { LspRegistry } from '../../lsp/registry';
-import { formatDiagnostic, formatLocation } from '../../lsp/client';
+import type { LspWorkspaceEdit } from '../../lsp/client';
+import { formatDiagnostic, formatLocation, formatOutlineEntry } from '../../lsp/client';
 import { applyWorkspaceEdit, formatWorkspaceEditPreview } from '../../lsp/edits';
+
+/** document_symbols listing cap; the trailer reports how many were hidden. */
+const OUTLINE_LIST_CAP = 200;
+/** Whole-document default for code_actions: an end line past any real file. */
+const WHOLE_DOCUMENT_END_LINE = Number.MAX_SAFE_INTEGER;
+
+interface LspRange {
+  readonly start: { readonly line: number; readonly character: number };
+  readonly end: { readonly line: number; readonly character: number };
+}
+
+/** `1:5-1:12` style range label (1-based, matching formatLocation/formatDiagnostic). */
+function formatRange(range: LspRange): string {
+  return `${String(range.start.line + 1)}:${String(range.start.character + 1)}-${String(range.end.line + 1)}:${String(range.end.character + 1)}`;
+}
+
+/** First text edit's range in a workspace edit — a stable hint for where an action applies. */
+function firstEditRange(edit: LspWorkspaceEdit | undefined): LspRange | undefined {
+  if (edit === undefined) return undefined;
+  if (edit.changes !== undefined) {
+    for (const uri of Object.keys(edit.changes)) {
+      const first = edit.changes[uri]?.[0];
+      if (first !== undefined) return first.range;
+    }
+  }
+  if (edit.documentChanges !== undefined) {
+    for (const change of edit.documentChanges) {
+      const first = change.edits[0];
+      if (first !== undefined) return first.range;
+    }
+  }
+  return undefined;
+}
 
 export const LspInputSchema = z.object({
   path: z
     .string()
     .optional()
     .describe(
-      "Path to the source file. Required for references/definition/diagnostics/rename; NOT used for 'symbols'. Relative paths resolve against the working directory; a path outside the working directory must be absolute.",
+      "Path to the source file. Required for every operation except 'symbols' (which is workspace-wide). Relative paths resolve against the working directory; a path outside the working directory must be absolute.",
     ),
   operation: z
-    .enum(['symbols', 'references', 'definition', 'diagnostics', 'rename'])
+    .enum([
+      'symbols',
+      'document_symbols',
+      'references',
+      'definition',
+      'type_definition',
+      'implementation',
+      'hover',
+      'diagnostics',
+      'code_actions',
+      'rename',
+    ])
     .describe(
-      "LSP operation to perform: 'symbols' (search workspace symbols by name), 'references', 'definition', 'diagnostics', or 'rename'.",
+      "LSP operation to perform: 'symbols' (search workspace symbols by name), 'document_symbols' (flattened outline of one file), 'references', 'definition', 'type_definition', 'implementation', 'hover', 'diagnostics', 'code_actions' (list quick fixes / refactorings), or 'rename'.",
     ),
   query: z
     .string()
@@ -34,13 +79,15 @@ export const LspInputSchema = z.object({
     .int()
     .min(1)
     .optional()
-    .describe('1-based line number for references/definition/rename.'),
+    .describe('1-based line number for references/definition/hover/type_definition/implementation/rename.'),
   character: z
     .number()
     .int()
     .min(0)
     .optional()
-    .describe('0-based column/character offset for references/definition/rename.'),
+    .describe(
+      '0-based column/character offset for references/definition/hover/type_definition/implementation/rename.',
+    ),
   include_declaration: z
     .boolean()
     .optional()
@@ -57,6 +104,48 @@ export const LspInputSchema = z.object({
     .describe(
       "For 'rename': when true, apply the rename to disk across all affected files. When false (default), return a preview of the changes without writing. Pass true only after previewing.",
     ),
+  start_line: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "For 'code_actions': 0-based start line of the range the actions apply to (defaults to 0 — whole document).",
+    ),
+  start_character: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("For 'code_actions': 0-based character offset of the range start (defaults to 0)."),
+  end_line: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "For 'code_actions': 0-based end line of the range (defaults past the end of the document — whole document).",
+    ),
+  end_character: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("For 'code_actions': 0-based character offset of the range end (defaults to 0)."),
+  kinds: z
+    .string()
+    .optional()
+    .describe(
+      "For 'code_actions': comma-separated LSP action kinds to keep, e.g. 'refactor,quickfix'. Matching is prefix-based, so 'refactor' also keeps 'refactor.extract'.",
+    ),
+  apply_action: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "For 'code_actions': the index (from a previous code_actions listing) of the action to apply to disk. Omit to list actions without writing. Use the same path/range/kinds as the listing call so indices match. Only rename and code_actions with apply_action write files.",
+    ),
 });
 
 export type LspInput = z.infer<typeof LspInputSchema>;
@@ -64,19 +153,22 @@ export type LspInput = z.infer<typeof LspInputSchema>;
 /**
  * LSP tool — code intelligence via language servers.
  *
- * Supports references, go-to-definition, diagnostics, and rename. The file
- * content is opened in the language server so results reflect the current
- * editor state even when the file has not been saved to disk. Rename is the
- * only write op; pass `apply: false` to preview without writing.
+ * Supports references, go-to-definition, type/implementation jumps, hover,
+ * per-file outlines, diagnostics, code actions, and rename. The file content
+ * is opened in the language server so results reflect the current editor
+ * state even when the file has not been saved to disk. Only rename (with
+ * `apply: true`) and code_actions (with `apply_action`) write files; all
+ * other operations are read-only.
  */
 export class LspTool implements BuiltinTool<LspInput> {
   readonly name = 'LSP' as const;
   readonly description = [
-    'Query a language server for code intelligence: search workspace symbols by name, find usages, jump to definitions, get diagnostics, or rename a symbol across all references.',
+    'Query a language server for code intelligence: search workspace symbols by name, outline a single file, find usages, jump to definitions, list type/implementation locations, inspect hover docs, get diagnostics, list quick fixes and refactorings, or rename a symbol across all references.',
     'The language server is started automatically for supported file types (TypeScript/JavaScript, Python, Rust, Go).',
     "'symbols' is workspace-wide but only covers files inside the tsconfig project anchored at the workspace root; results outside it (or matches inside string literals) are invisible — cross-check with Grep when a miss is surprising.",
     'The other operations need a file `path` (plus line/character where relevant).',
     'Rename requires the typescript-language-server (or equivalent) binary on PATH for the file type.',
+    'Only rename (with `apply: true`) and code_actions (with `apply_action`) write files; every other operation is read-only.',
   ].join(' ');
   readonly parameters: Record<string, unknown> = toInputJsonSchema(LspInputSchema);
 
@@ -87,8 +179,15 @@ export class LspTool implements BuiltinTool<LspInput> {
   ) {}
 
   async resolveExecution(args: LspInput): Promise<ToolExecution> {
-    const isWrite = args.operation === 'rename' && args.apply === true;
+    const isWrite =
+      (args.operation === 'rename' && args.apply === true) ||
+      (args.operation === 'code_actions' && args.apply_action !== undefined);
     if (isWrite && this.agent.getCapabilityMode() === 'read-only') {
+      if (args.operation === 'code_actions') {
+        throw new Error(
+          'LSP `code_actions` with `apply_action` writes files, which read-only capability mode forbids. Call code_actions without `apply_action` to preview the actions instead.',
+        );
+      }
       throw new Error(
         'LSP `rename` with `apply: true` writes files, which read-only capability mode forbids. Call rename without `apply` to preview the edit instead.',
       );
@@ -242,6 +341,160 @@ export class LspTool implements BuiltinTool<LspInput> {
           return {
             isError: false,
             output: [`${diagnostics.length} diagnostic(s):`, '', ...diagnostics.map(formatDiagnostic)].join('\n'),
+          };
+        }
+        case 'document_symbols': {
+          const outline = await client.documentSymbol(safePath);
+          if (outline.length === 0) {
+            return { isError: false, output: 'No symbols returned for this file.' };
+          }
+          const entries = outline
+            .slice(0, OUTLINE_LIST_CAP)
+            .map((entry) => `${'  '.repeat(entry.depth)}${formatOutlineEntry(entry)}`);
+          if (outline.length > OUTLINE_LIST_CAP) {
+            entries.push(`… and ${String(outline.length - OUTLINE_LIST_CAP)} more`);
+          }
+          return {
+            isError: false,
+            output: [`Found ${String(outline.length)} symbol(s):`, '', ...entries].join('\n'),
+          };
+        }
+        case 'hover': {
+          if (args.line === undefined || args.character === undefined) {
+            return {
+              isError: true,
+              output: "'hover' requires both 'line' and 'character'.",
+            };
+          }
+          const hover = await client.hover(safePath, args.line - 1, args.character);
+          if (hover === null) {
+            return { isError: false, output: 'No hover information.' };
+          }
+          const parts = [hover.contents];
+          if (hover.range !== undefined) {
+            parts.push(`Range: ${formatRange(hover.range)}`);
+          }
+          const hoverOutput = parts.filter((part) => part.length > 0).join('\n\n');
+          if (hoverOutput.length === 0) {
+            return { isError: false, output: 'No hover information.' };
+          }
+          return { isError: false, output: hoverOutput };
+        }
+        case 'type_definition': {
+          if (args.line === undefined || args.character === undefined) {
+            return {
+              isError: true,
+              output: "'type_definition' requires both 'line' and 'character'.",
+            };
+          }
+          const locations = await client.typeDefinition(safePath, args.line - 1, args.character);
+          if (locations.length === 0) {
+            return { isError: false, output: 'No results found.' };
+          }
+          return {
+            isError: false,
+            output: [
+              `Found ${String(locations.length)} type definition(s):`,
+              '',
+              ...locations.map(formatLocation),
+            ].join('\n'),
+          };
+        }
+        case 'implementation': {
+          if (args.line === undefined || args.character === undefined) {
+            return {
+              isError: true,
+              output: "'implementation' requires both 'line' and 'character'.",
+            };
+          }
+          const locations = await client.implementation(safePath, args.line - 1, args.character);
+          if (locations.length === 0) {
+            return { isError: false, output: 'No results found.' };
+          }
+          return {
+            isError: false,
+            output: [
+              `Found ${String(locations.length)} implementation(s):`,
+              '',
+              ...locations.map(formatLocation),
+            ].join('\n'),
+          };
+        }
+        case 'code_actions': {
+          const kindFilter =
+            args.kinds !== undefined
+              ? args.kinds
+                  .split(',')
+                  .map((kind) => kind.trim())
+                  .filter((kind) => kind.length > 0)
+              : undefined;
+          const actions = await client.codeActions(
+            safePath,
+            args.start_line ?? 0,
+            args.start_character ?? 0,
+            args.end_line ?? WHOLE_DOCUMENT_END_LINE,
+            args.end_character ?? 0,
+          );
+          // Second-stage filter — the only filter there is. No server-side
+          // `context.only` is sent (see client.codeActions), so indexes stay
+          // full-list-relative across calls with and without `kinds`, and
+          // `apply_action` always addresses the same action it listed.
+          const filtered =
+            kindFilter !== undefined && kindFilter.length > 0
+              ? actions.filter((action) =>
+                  action.kind !== undefined
+                    ? kindFilter.some((kind) => action.kind === kind || action.kind!.startsWith(`${kind}.`))
+                    : false,
+                )
+              : actions;
+          if (args.apply_action !== undefined) {
+            const selected = filtered.find((action) => action.index === args.apply_action);
+            if (selected === undefined) {
+              return {
+                isError: true,
+                output:
+                  `No code action with index ${String(args.apply_action)} for this range. ` +
+                  `The server returned ${String(filtered.length)} action(s); re-run without 'apply_action' to list their indices.`,
+              };
+            }
+            if (selected.edit === undefined) {
+              return {
+                isError: true,
+                output: `Code action "${selected.title}" has no workspace edit to apply (it may be a server-side command).`,
+              };
+            }
+            const applied = await applyWorkspaceEdit(
+              selected.edit,
+              this.agent.jian,
+              (p) => {
+                if (!isWithinWorkspace(p, this.workspace, this.agent.jian.pathClass())) {
+                  throw new Error(
+                    `Refusing to apply code action: LSP returned edits for a file outside the workspace: ${p}`,
+                  );
+                }
+              },
+            );
+            if (applied.length === 0) {
+              return { isError: false, output: `Action "${selected.title}" produced no file changes.` };
+            }
+            return {
+              isError: false,
+              output: `Applied action "${selected.title}" to ${String(applied.length)} file(s).`,
+            };
+          }
+          if (filtered.length === 0) {
+            return { isError: false, output: 'No code actions available for this range.' };
+          }
+          const entries = filtered.map((action) => {
+            const parts = [`${String(action.index)}. ${action.title}`];
+            if (action.kind !== undefined) parts.push(action.kind);
+            const range = firstEditRange(action.edit);
+            if (range !== undefined) parts.push(formatRange(range));
+            return parts.join(' — ');
+          });
+          return {
+            isError: false,
+            output: [`Found ${String(filtered.length)} code action(s):`, '', ...entries].join('\n'),
           };
         }
         case 'rename': {

@@ -50,6 +50,38 @@ export interface LspSymbol {
   readonly containerName?: string;
 }
 
+/** Result of `textDocument/hover`, normalized to plain markdown text. */
+export interface LspHover {
+  readonly contents: string;
+  readonly range?: {
+    readonly start: { readonly line: number; readonly character: number };
+    readonly end: { readonly line: number; readonly character: number };
+  };
+}
+
+/**
+ * One flattened entry of a `textDocument/documentSymbol` outline. `line` is
+ * 0-based (LSP); add 1 when formatting for humans.
+ */
+export interface LspSymbolOutline {
+  readonly name: string;
+  readonly kind: number;
+  readonly line: number;
+  readonly depth: number;
+}
+
+/**
+ * One action from `textDocument/codeAction`. `index` is the action's position
+ * in the server's response array — stable across later filtering, which is
+ * what lets callers address an action for application.
+ */
+export interface LspCodeAction {
+  readonly title: string;
+  readonly kind?: string;
+  readonly edit?: LspWorkspaceEdit;
+  readonly index: number;
+}
+
 interface JsonRpcMessage {
   readonly jsonrpc: '2.0';
   readonly id?: number;
@@ -332,6 +364,112 @@ export class LspClient {
   }
 
   /**
+   * Hover information at a position. MarkupContent and MarkedString variants
+   * collapse into a plain markdown string so callers never see protocol
+   * shapes. Returns null when the server has nothing at this position.
+   */
+  async hover(path: string, line: number, character: number): Promise<LspHover | null> {
+    const result = (await this.request('textDocument/hover', {
+      textDocument: { uri: pathToUri(path) },
+      position: { line, character },
+    })) as { contents?: unknown; range?: LspHover['range'] } | null;
+    if (result === null) return null;
+    return {
+      contents: result.contents === undefined ? '' : normalizeHoverContents(result.contents),
+      range: result.range,
+    };
+  }
+
+  async typeDefinition(path: string, line: number, character: number): Promise<LspLocation[]> {
+    const result = (await this.request('textDocument/typeDefinition', {
+      textDocument: { uri: pathToUri(path) },
+      position: { line, character },
+    })) as LspLocation | LspLocation[] | null;
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  }
+
+  async implementation(path: string, line: number, character: number): Promise<LspLocation[]> {
+    const result = (await this.request('textDocument/implementation', {
+      textDocument: { uri: pathToUri(path) },
+      position: { line, character },
+    })) as LspLocation | LspLocation[] | null;
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  }
+
+  /**
+   * Flattened outline of one document. Servers answer with either
+   * hierarchical `DocumentSymbol[]` (range + children) or flat
+   * `SymbolInformation[]` (location); both collapse into one depth-annotated
+   * list so callers never branch on the response shape. Opening the document
+   * is the caller's responsibility (didOpen), matching the other file-scoped
+   * wrappers.
+   */
+  async documentSymbol(path: string): Promise<LspSymbolOutline[]> {
+    interface RawSymbol {
+      readonly name: string;
+      readonly kind: number;
+      readonly range?: LspLocation['range'];
+      readonly children?: readonly RawSymbol[];
+      readonly location?: LspLocation;
+    }
+    const result = (await this.request('textDocument/documentSymbol', {
+      textDocument: { uri: pathToUri(path) },
+    })) as RawSymbol[] | null;
+    if (result === null) return [];
+    const outline: LspSymbolOutline[] = [];
+    const flatten = (symbols: readonly RawSymbol[], depth: number): void => {
+      for (const symbol of symbols) {
+        outline.push({
+          name: symbol.name,
+          kind: symbol.kind,
+          line: symbol.range?.start.line ?? symbol.location?.range.start.line ?? 0,
+          depth,
+        });
+        if (symbol.children !== undefined) flatten(symbol.children, depth + 1);
+      }
+    };
+    flatten(result, 0);
+    return outline;
+  }
+
+  /**
+   * List code actions (quick fixes, refactorings, source actions) for a
+   * document range. `kinds` maps to the LSP `context.only` hint; servers may
+   * ignore it, so callers needing a guaranteed filter apply their own
+   * client-side filter. Returned `index` is the raw response position —
+   * callers address an action by it, so it must not shift with filtering.
+   * For the same reason no server-side `context.only` is sent: a server
+   * that honors it would return a pre-filtered subset, making the indexes
+   * subset-relative and unstable across calls that differ in `kinds`.
+   */
+  async codeActions(
+    path: string,
+    startLine: number,
+    startCharacter: number,
+    endLine: number,
+    endCharacter: number,
+  ): Promise<LspCodeAction[]> {
+    const context: { diagnostics: unknown[] } = { diagnostics: [] };
+    const result = (await this.request('textDocument/codeAction', {
+      textDocument: { uri: pathToUri(path) },
+      range: {
+        start: { line: startLine, character: startCharacter },
+        end: { line: endLine, character: endCharacter },
+      },
+      context,
+    })) as readonly { title: string; kind?: string; edit?: LspWorkspaceEdit }[] | null;
+    if (result === null) return [];
+    return result.map((action, index) => ({
+      title: action.title,
+      kind: action.kind,
+      edit: action.edit,
+      index,
+    }));
+  }
+
+  /**
    * Search workspace symbols by (fuzzy) name via `workspace/symbol`. The
    * query semantics are server-defined: prefix, fuzzy, or token match.
    */
@@ -585,4 +723,68 @@ export function formatDiagnostic(diagnostic: LspDiagnostic): string {
   const severity =
     diagnostic.severity !== undefined ? SEVERITY_LABELS[diagnostic.severity - 1] ?? 'Unknown' : 'Diagnostic';
   return `- ${severity} at ${start.line + 1}:${start.character + 1}: ${diagnostic.message}`;
+}
+
+/** LSP SymbolKind numbers → terse labels for outline rendering. */
+const SYMBOL_KIND_LABELS: Readonly<Record<number, string>> = {
+  1: 'File',
+  2: 'Module',
+  3: 'Namespace',
+  4: 'Package',
+  5: 'Class',
+  6: 'Method',
+  7: 'Property',
+  8: 'Field',
+  9: 'Constructor',
+  10: 'Enum',
+  11: 'Interface',
+  12: 'Function',
+  13: 'Variable',
+  14: 'Constant',
+  15: 'String',
+  16: 'Number',
+  17: 'Boolean',
+  18: 'Array',
+  19: 'Object',
+  20: 'Key',
+  21: 'Null',
+  22: 'EnumMember',
+  23: 'Struct',
+  24: 'Event',
+  25: 'Operator',
+  26: 'TypeParameter',
+};
+
+export function symbolKindLabel(kind: number): string {
+  return SYMBOL_KIND_LABELS[kind] ?? `Kind ${String(kind)}`;
+}
+
+/** One-line outline entry: `Class Foo — 12` (1-based line, like formatLocation). */
+export function formatOutlineEntry(entry: LspSymbolOutline): string {
+  return `${symbolKindLabel(entry.kind)} ${entry.name} — ${String(entry.line + 1)}`;
+}
+
+/**
+ * Collapse the LSP `Hover.contents` union (string | MarkedString |
+ * MarkedString[] | MarkupContent) into a plain markdown string. A
+ * language-tagged MarkedString becomes a fenced code block; MarkupContent
+ * already carries markdown or plaintext and passes through unchanged.
+ */
+function normalizeHoverContents(contents: unknown): string {
+  if (typeof contents === 'string') return contents;
+  if (Array.isArray(contents)) {
+    return contents
+      .map(normalizeHoverContents)
+      .filter((part) => part.length > 0)
+      .join('\n\n');
+  }
+  if (typeof contents === 'object' && contents !== null) {
+    const record = contents as { language?: unknown; value?: unknown };
+    if (typeof record.value === 'string') {
+      return typeof record.language === 'string'
+        ? `\`\`\`${record.language}\n${record.value}\n\`\`\``
+        : record.value;
+    }
+  }
+  return '';
 }
