@@ -41,6 +41,7 @@ function makeStartupInput(): ScreamTUIStartupInput {
 function makeHarness() {
   return {
     setSubagentModelBindings: vi.fn(),
+    setModelTierBindings: vi.fn(),
     getConfig: vi.fn(async () => ({})),
     createSession: vi.fn(),
     resumeSession: vi.fn(),

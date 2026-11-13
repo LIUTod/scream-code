@@ -48,6 +48,7 @@ async function applyLanguageChoice(host: SlashCommandHost, locale: Locale): Prom
       like: host.state.appState.like,
       fusionPlan: host.state.appState.fusionPlan,
       subagentModels: host.state.appState.subagentModels,
+      modelTiers: host.state.appState.modelTiers ?? {},
     });
   } catch (error) {
     host.showStatus(

@@ -10,7 +10,12 @@ import type {
   ToolResultDisplay,
   ToolResultEvent,
 } from '@scream-code/scream-code-sdk';
-import type { NotificationsConfig, TuiConfig, TuiLikePreferences } from './config';
+import type {
+  ModelTierBindings,
+  NotificationsConfig,
+  TuiConfig,
+  TuiLikePreferences,
+} from './config';
 import type { PendingApproval, PendingQuestion } from './reverse-rpc/types';
 import type { Theme } from './theme';
 import type { ResolvedTheme } from './theme/colors';
@@ -120,6 +125,12 @@ export interface AppState {
   like: TuiLikePreferences;
   fusionPlan: TuiConfig['fusionPlan'];
   subagentModels: Record<string, string>;
+  /**
+   * `/model diy` per-purpose bindings (role classes + housekeeping). Absent
+   * keys follow the main model; the engine reads this live, then the
+   * config.toml fallbacks, then the parent model.
+   */
+  modelTiers?: ModelTierBindings;
   availableModels: Record<string, ModelAlias>;
   availableProviders: Record<string, ProviderConfig>;
   sessionTitle: string | null;

@@ -67,6 +67,16 @@ export interface SDKRpcClientOptions {
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
   readonly skillDirs?: readonly string[];
   readonly subagentModelBindings?: () => Record<string, string | undefined>;
+  /**
+   * Live `/model diy` per-purpose bindings (role classes + housekeeping
+   * model). Read at spawn/compaction time; absent keys follow the main model.
+   */
+  readonly modelTierBindings?: () => {
+    read?: string;
+    task?: string;
+    judge?: string;
+    housekeeping?: string;
+  };
   readonly onToolCall?: ToolCallHandler | undefined;
 }
 
@@ -207,6 +217,7 @@ export class SDKRpcClient {
       resolveOAuthTokenProvider: options.resolveOAuthTokenProvider,
       skillDirs: options.skillDirs,
       subagentModelBindings: options.subagentModelBindings,
+      modelTierBindings: options.modelTierBindings,
     });
     this.ready = sdkRpc(new ClientAPI(this)).then((rpc) => {
       this.rpc = rpc;

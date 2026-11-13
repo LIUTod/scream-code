@@ -930,6 +930,12 @@ export const en: Record<string, string> = {
   'subagent.desc_designer': 'Visual design: UI/UX/TUI direction, specs & polish',
   'subagent.follow_main': 'Follow main model',
   'subagent.follow_main_desc': 'Use the main agent\'s current model (default)',
+  // Unset role/housekeeping rows: config.toml (`model_roles` /
+  // `housekeeping_model`) is consulted BEFORE the main model, so these must
+  // not claim "main model".
+  'subagent.follow_default': 'Follow default (config first)',
+  'subagent.follow_default_desc':
+    'Config role/compaction model first when unbound, then the main model',
   'subagent.title': 'Subagent Model Binding',
   'subagent.hint': '↑↓ Select subagent · Enter bind model · Esc cancel',
   'subagent.bind_title': 'Bind {profile}',
@@ -937,6 +943,30 @@ export const en: Record<string, string> = {
   'subagent.save_failed': 'Save failed: {msg}',
   'subagent.stale_binding': '{alias} (stale)',
   'subagent.invalid_alias': 'Model alias {alias} does not exist',
+
+  // ─── Model DIY (per-purpose bindings) ───
+  'modeldiy.title': 'Model DIY',
+  'modeldiy.hint': '↑↓ Select · Enter confirm · Esc cancel',
+  'modeldiy.entry_roles': 'Models by role',
+  'modeldiy.entry_roles_desc':
+    'Bind the explore/plan/verify, code/execute and review roles separately',
+  'modeldiy.entry_housekeeping': 'Compaction model',
+  'modeldiy.entry_housekeeping_desc':
+    'Model for compaction summaries; the configured model first, then the main model',
+  'modeldiy.entry_profiles': 'Models by subagent type',
+  'modeldiy.entry_profiles_desc': 'Bind a model to each built-in subagent profile',
+  'modeldiy.roles_title': 'Models by Role',
+  'modeldiy.roles_hint': '↑↓ Select role · Enter bind model · Esc back',
+  'modeldiy.role_read': 'Explore · Plan · Verify',
+  'modeldiy.role_read_desc':
+    'Read-only subagents: codebase exploration, planning, verification runs',
+  'modeldiy.role_task': 'Code · Execute',
+  'modeldiy.role_task_desc': 'Workspace-mutating subagents: implementation and batch execution',
+  'modeldiy.role_judge': 'Review · Gate',
+  'modeldiy.role_judge_desc': 'Review subagents: code review and systematic quality gating',
+  'modeldiy.bind_title': 'Bind {name}',
+  'modeldiy.housekeeping_title': 'Compaction Model',
+  'modeldiy.housekeeping_hint': '↑↓ Select model · Enter confirm · Esc back',
 
   // ─── Knowledge document tree ────
   'kdoctree.no_title': '(untitled)',

@@ -1010,25 +1010,75 @@ export class ToolManager {
     });
     // MCP entries are glob patterns gated separately; the rest are exact
     // builtin/user tool names. The split keeps every caller on one string[].
+    //
+    // An explicit list is EXACT: `setActiveTools` (and a session profile's
+    // `tools:` list, which lands here) states the tool contract for this
+    // agent, so the tool portal never reshapes it — a profile that lists
+    // exactly what it needs must not silently gain a portal entry, and one
+    // that lists a deferred group's tools gets them directly. The portal
+    // shapes only the DEFAULT tool set, where no explicit contract exists.
     this.mcpAccessPatterns = names.filter((name) => isMcpToolName(name));
-    if (this.isToolPortalActive()) {
-      // Tool portal active: the names a profile lists for deferred groups
-      // are held back from the enabled set — DiscoverTools fronts them until
-      // the model enables a group (enableDeferredToolGroup). Groups enabled
-      // earlier this session survive the replacement, so a later /script or
-      // /rlm toggle (or a profile re-application) cannot silently revoke
-      // them.
-      const kept = names.filter(
-        (name) => !isMcpToolName(name) && !isDeferredBuiltinToolName(name),
-      );
-      for (const groupName of this.enabledDeferredGroups) {
-        const group = getDeferredGroup(groupName);
-        if (group !== undefined) kept.push(...group.toolNames);
-      }
-      this.enabledTools = new Set([...kept, DEFERRED_PORTAL_TOOL_NAME]);
-      return;
-    }
     this.enabledTools = new Set(names.filter((name) => !isMcpToolName(name)));
+  }
+
+  /**
+   * Construct deferred-group instances for names an EXACT active list
+   * carries. Runs AFTER `setActiveTools`, never inside it — the list itself
+   * stays verbatim.
+   *
+   * `setActiveTools` records names only, while the portal-active registry
+   * skips every deferred group's construction. An explicit `tools:` contract
+   * that names one of those tools therefore kept the name with no instance
+   * behind it, and `loopToolsFor` dropped it — the model got neither the
+   * tool nor `DiscoverTools`. This registers the owning group's instances
+   * through the same path the portal enable uses. Only the owning group is
+   * constructed, no sibling name is switched on, and the group is NOT
+   * marked session-enabled: a later default profile still shapes it through
+   * the portal instead of inheriting an explicit contract's group.
+   *
+   * A group whose backing runtime is absent (memory without a memo store,
+   * cron on a sub agent) constructs nothing; that name stays inert, exactly
+   * like naming any other tool the registry does not have.
+   */
+  registerExplicitDeferredTools(names: readonly string[]): readonly string[] {
+    const wanted = new Set(names);
+    const registered: string[] = [];
+    for (const group of DEFERRED_GROUPS) {
+      const requested = group.toolNames.filter((name) => wanted.has(name));
+      // A registry that already built them (portal off, or a sub agent whose
+      // base pass is not gated) needs no second construction — fill gaps
+      // only. `every` is true for a group this list does not name at all.
+      if (requested.every((name) => this.builtinTools.has(name))) {
+        continue;
+      }
+      for (const tool of this.registerDeferredGroupTools(group.name)) {
+        if (wanted.has(tool.name)) registered.push(tool.name);
+      }
+    }
+    return registered;
+  }
+
+  /**
+   * The effective active set for a DEFAULT profile application — the root
+   * profile's resolved list, which carries every default builtin name.
+   *
+   * Unlike an explicit `setActiveTools` list (EXACT, see above), the default
+   * set has no per-profile tool contract, so the portal shapes it here:
+   * deferred group names are withheld, groups enabled earlier this session
+   * are put back, and `DiscoverTools` is appended. With the portal off (or on
+   * any non-main agent) this is the list verbatim, which is exactly the
+   * pre-portal behaviour.
+   */
+  defaultShapedToolNames(names: readonly string[]): readonly string[] {
+    if (!this.isToolPortalActive()) return [...names];
+    const shaped = names.filter((name) => !isDeferredBuiltinToolName(name));
+    for (const groupName of this.enabledDeferredGroups) {
+      for (const name of getDeferredGroup(groupName)?.toolNames ?? []) {
+        if (!shaped.includes(name)) shaped.push(name);
+      }
+    }
+    if (!shaped.includes(DEFERRED_PORTAL_TOOL_NAME)) shaped.push(DEFERRED_PORTAL_TOOL_NAME);
+    return shaped;
   }
 
   /**
@@ -1521,10 +1571,16 @@ export class ToolManager {
     // (config refresh / skills reload): the sites above skipped them, so
     // re-construct their instances into the fresh map. Their names never
     // left the enabled set, so no enabled-set mutation happens here.
-    if (deferConstruction && this.enabledDeferredGroups.size > 0) {
+    if (deferConstruction) {
       for (const groupName of this.enabledDeferredGroups) {
         this.registerDeferredGroupTools(groupName);
       }
+      // An EXACT active list names deferred tools directly instead of going
+      // through the portal, so no group is marked enabled — but the fresh map
+      // above left those names without instances again. Re-register the
+      // owning groups; groups from the loop above are already present and
+      // skipped, and the enabled set is never touched.
+      this.registerExplicitDeferredTools([...this.enabledTools]);
     }
   }
 

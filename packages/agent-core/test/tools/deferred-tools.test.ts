@@ -57,8 +57,12 @@ function fullContext(): DeferredToolGroupContext {
 
 /** Registry-level harness agent in default (portal-on) mode. */
 function portalCtx(): { ctx: AgentTestContext; tools: ToolManager } {
+  // `configure()` builds the registry; `applyDefaultProfile()` puts the
+  // DEFAULT resolved tool set in place — the only shape the portal applies
+  // to (an explicit `tools:` list is an exact contract, see setActiveTools).
   const ctx = testAgent();
-  ctx.configure({ tools: ['Bash'] });
+  ctx.configure();
+  ctx.applyDefaultProfile();
   return { ctx, tools: ctx.agent.tools };
 }
 
@@ -146,7 +150,7 @@ describe('DiscoverTools portal tool', () => {
 
 describe('tool portal in the registry (default mode)', () => {
   it('holds the deferred groups back and offers the portal instead', () => {
-    const { tools } = portalCtx();
+    const { ctx, tools } = portalCtx();
     const names = offered(tools);
     for (const group of DEFERRED_GROUPS) {
       for (const name of group.toolNames) {
@@ -155,28 +159,137 @@ describe('tool portal in the registry (default mode)', () => {
     }
     expect(names).toContain(DEFERRED_PORTAL_TOOL_NAME);
     expect(names).toContain('Bash');
-    // The portal is the only non-configured name in the offered table.
-    expect(names.toSorted()).toEqual(['Bash', 'DiscoverTools']);
+    // Everything else offered is the ordinary default set — the portal is
+    // the only name added, and no deferred name leaks in.
+    expect(names).toContain('Read');
+    expect(names).toContain('Edit');
     // Not constructed either: nothing to execute behind the withheld names.
     expect(tools.getBuiltinTool('CronCreate')).toBeUndefined();
     expect(tools.getBuiltinTool('MemoryLookup')).toBeUndefined();
+    // The wired name is the same set the profile application produced.
+    const active = ctx.agent.tools.getActiveTools();
+    for (const group of DEFERRED_GROUPS) {
+      for (const name of group.toolNames) {
+        expect(active, name).not.toContain(name);
+      }
+    }
+    expect(active).toContain(DEFERRED_PORTAL_TOOL_NAME);
+  });
+
+  /**
+   * Regression net for the contract split: `setActiveTools` is EXACT (SDK
+   * callers, explicit `tools:` profiles, /script//rlm toggles), while the
+   * DEFAULT profile application is the one path the portal shapes. Before
+   * this split, shaping lived in `setActiveTools` and reshaped explicit
+   * lists; after moving it into `useProfile`, a default profile that skipped
+   * it would lose the portal entirely.
+   */
+  it('applies an explicit active list exactly and shapes the default profile', () => {
+    const ctx = testAgent();
+    ctx.configure();
+    const tools = ctx.agent.tools;
+
+    // Explicit list: exactly what was asked for — no portal, no holding.
+    tools.setActiveTools(['Read', 'Edit', 'Bash', 'CronCreate']);
+    expect([...tools.getActiveTools()]).toEqual(['Read', 'Edit', 'Bash', 'CronCreate']);
+    expect(offered(tools)).not.toContain(DEFERRED_PORTAL_TOOL_NAME);
+
+    // Same registry, default-profile application: deferred name withheld,
+    // portal offered, ordinary tools untouched.
+    ctx.applyDefaultProfile();
+    const active = tools.getActiveTools();
+    expect(active).toContain(DEFERRED_PORTAL_TOOL_NAME);
+    for (const group of DEFERRED_GROUPS) {
+      for (const name of group.toolNames) {
+        expect(active, name).not.toContain(name);
+      }
+    }
+    for (const name of ['Read', 'Edit', 'Bash']) expect(active, name).toContain(name);
+    // The helper's explicit `CronCreate` is gone with the old list.
+    expect(offered(tools)).not.toContain('CronCreate');
+    expect(offered(tools)).toContain(DEFERRED_PORTAL_TOOL_NAME);
+  });
+
+  it('keeps a group enabled earlier in the session when the default profile is re-applied', () => {
+    const { ctx, tools } = portalCtx();
+    expect(tools.enableDeferredToolGroup('cron').status).toBe('enabled');
+    expect(tools.getActiveTools()).toContain('CronCreate');
+
+    // Profile re-application (config refresh / skills reload / resume) must
+    // put the enabled group's names back instead of reverting to the plain
+    // default set.
+    ctx.applyDefaultProfile();
+
+    const active = tools.getActiveTools();
+    for (const name of getDeferredGroup('cron')?.toolNames ?? []) {
+      expect(active, name).toContain(name);
+      expect(tools.getBuiltinTool(name), name).toBeDefined();
+    }
+    expect(active).toContain(DEFERRED_PORTAL_TOOL_NAME);
+    // Groups nobody enabled stay withheld.
+    expect(active).not.toContain('CreateGoal');
+  });
+
+  it('applies an explicit profile tool list verbatim, including a deferred name', () => {
+    const ctx = testAgent();
+    ctx.configure();
+
+    // Cron, not memory: the harness has no memo store, so the memory group
+    // constructs nothing either way. The cron group only needs the main
+    // agent's cron manager, which makes "the instance exists" a real
+    // assertion rather than a comment.
+    ctx.agent.useProfile({
+      name: 'explicit-bot',
+      systemPrompt: () => 'explicit profile prompt',
+      tools: ['Bash', 'CronCreate'],
+      toolsExplicit: true,
+    });
+
+    const active = ctx.agent.tools.getActiveTools();
+    // Exactly the profile's list: the deferred name is enabled directly, no
+    // group holding and no portal entry.
+    expect([...active]).toEqual(['Bash', 'CronCreate']);
+    expect(active).not.toContain(DEFERRED_PORTAL_TOOL_NAME);
+    // And it must actually be constructed: the portal gate skips deferred
+    // groups in the base pass, so the name alone used to be dropped by
+    // loopToolsFor — neither the tool nor the portal reached the model.
+    expect(ctx.agent.tools.loopTools.map((tool) => tool.name)).toContain('CronCreate');
+    expect(ctx.agent.tools.getBuiltinTool('CronCreate')).toBeDefined();
+    // Exact means exact: the group's sibling names are not switched on.
+    expect(active).not.toContain('CronList');
+    expect(ctx.agent.tools.loopTools.map((tool) => tool.name)).not.toContain('CronList');
+    // A registry rebuild (config refresh / skills reload / MCP connect) must
+    // not orphan the instance: the enabled name has to survive the fresh map.
+    ctx.agent.tools.initializeBuiltinTools();
+    expect(ctx.agent.tools.loopTools.map((tool) => tool.name)).toContain('CronCreate');
+    expect([...ctx.agent.tools.getActiveTools()]).toEqual(['Bash', 'CronCreate']);
+  });
+
+  it('constructs a deferred name set through the SDK active-tool path', async () => {
+    // `session.setActiveTools` → rpc → the agent's handler; it never passes
+    // through `useProfile`, so the registry needs the same post-set
+    // construction step there or the name is silently inert.
+    const ctx = testAgent();
+    ctx.configure();
+
+    await ctx.rpc.setActiveTools({ names: ['Bash', 'CronCreate'] });
+
+    expect([...ctx.agent.tools.getActiveTools()]).toEqual(['Bash', 'CronCreate']);
+    expect(ctx.agent.tools.loopTools.map((tool) => tool.name)).toContain('CronCreate');
   });
 
   it('enabling a group constructs its tools and offers them', async () => {
     const { tools } = portalCtx();
+    const before = offered(tools);
     const result = await callPortal(tools, 'cron');
     expect(result.isError).toBe(false);
     expect(result.output).toBe(
       'Enabled cron: CronCreate, CronList, CronDelete. They are available from your next turn.',
     );
     expect(tools.getBuiltinTool('CronCreate')).toBeDefined();
-    expect(offered(tools)).toEqual([
-      'Bash',
-      'CronCreate',
-      'CronDelete',
-      'CronList',
-      'DiscoverTools',
-    ]);
+    expect(offered(tools)).toEqual(
+      [...before, 'CronCreate', 'CronDelete', 'CronList'].toSorted(),
+    );
     expect(tools.data().find((info) => info.name === 'CronCreate')?.active).toBe(true);
   });
 
@@ -188,10 +301,7 @@ describe('tool portal in the registry (default mode)', () => {
     const beforeEnable = tools.snapshotEnabledTools();
     const outcome = tools.enableDeferredToolGroup('goal');
     expect(outcome.status).toBe('enabled');
-    expect(tools.loopToolsFor(beforeEnable).map((tool) => tool.name)).toEqual([
-      'Bash',
-      'DiscoverTools',
-    ]);
+    expect(tools.loopToolsFor(beforeEnable).map((tool) => tool.name)).not.toContain('CreateGoal');
     expect(tools.loopTools.map((tool) => tool.name)).toContain('CreateGoal');
   });
 

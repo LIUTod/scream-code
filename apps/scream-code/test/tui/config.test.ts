@@ -59,6 +59,7 @@ notification_condition = "always"
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
+      modelTiers: {},
       language: DEFAULT_TUI_CONFIG.language,
     });
   });
@@ -92,6 +93,7 @@ command = "   "
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
+      modelTiers: {},
       language: DEFAULT_TUI_CONFIG.language,
     });
   });
@@ -138,6 +140,7 @@ autoStart = true
         like: { nickname: undefined, tone: undefined, other: undefined },
         fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
         subagentModels: {},
+        modelTiers: {},
       },
       filePath,
     );
@@ -149,7 +152,45 @@ autoStart = true
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
+      modelTiers: {},
       language: 'zh',
     });
+  });
+
+  it('round-trips the [modelTiers] table through render and parse', () => {
+    const rendered = renderTuiConfig({
+      ...DEFAULT_TUI_CONFIG,
+      modelTiers: { read: 'cheap', judge: 'strict', housekeeping: 'mini' },
+    });
+
+    expect(rendered).toContain('[modelTiers]');
+    expect(rendered).toContain('read = "cheap"');
+    expect(rendered).toContain('judge = "strict"');
+    expect(rendered).toContain('housekeeping = "mini"');
+    // Table names stay camelCase like the rest of tui.toml's top-level tables.
+    expect(parseTuiConfig(rendered).modelTiers).toEqual({
+      read: 'cheap',
+      judge: 'strict',
+      housekeeping: 'mini',
+    });
+  });
+
+  it('drops empty and whitespace-only tier aliases when normalizing', () => {
+    const parsed = parseTuiConfig(`
+[modelTiers]
+read = "   "
+task = " work "
+`);
+
+    expect(parsed.modelTiers).toEqual({ task: 'work' });
+  });
+
+  it('keeps the file shape unchanged when no tier is bound', () => {
+    // Absent table = every tier follows the main model, and an empty table is
+    // never written back — existing tui.toml files stay byte-identical.
+    expect(parseTuiConfig('theme = "dark"').modelTiers).toEqual({});
+    expect(
+      renderTuiConfig({ ...DEFAULT_TUI_CONFIG, subagentModels: { coder: 'k2' } }),
+    ).not.toContain('[modelTiers]');
   });
 });

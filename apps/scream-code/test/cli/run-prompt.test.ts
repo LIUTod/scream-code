@@ -58,6 +58,7 @@ const mocks = vi.hoisted(() => {
     harnessListSessions: vi.fn(async () => [{ id: 'ses_previous', workDir: process.cwd() }]),
     harnessDeleteSession: vi.fn(async () => undefined),
     harnessSetSubagentModelBindings: vi.fn(),
+    harnessSetModelTierBindings: vi.fn(),
     loadTuiConfig: vi.fn(async () => ({
       theme: 'dark',
       editorCommand: null,
@@ -89,6 +90,7 @@ vi.mock('@scream-code/scream-code-sdk', async (importOriginal) => {
       deleteSession = mocks.harnessDeleteSession;
       close = mocks.harnessClose;
       setSubagentModelBindings = mocks.harnessSetSubagentModelBindings;
+      setModelTierBindings = mocks.harnessSetModelTierBindings;
       constructor(...args: unknown[]) {
         const options = args[0] as { readonly homeDir?: string } | undefined;
         if (mocks.harnessCreatesDeviceIdOnConstruction) {

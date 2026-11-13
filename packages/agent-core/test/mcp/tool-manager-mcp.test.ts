@@ -670,6 +670,7 @@ describe('ToolManager MCP integration', () => {
       name: 'no-mcp',
       systemPrompt: () => 'sys',
       tools: ['Read'],
+      toolsExplicit: true,
     });
     expect(
       [...tm.toolInfos()]
@@ -686,6 +687,7 @@ describe('ToolManager MCP integration', () => {
       name: 'with-mcp',
       systemPrompt: () => 'sys',
       tools: ['Read', 'mcp__*'],
+      toolsExplicit: true,
     });
     expect(
       [...tm.toolInfos()]

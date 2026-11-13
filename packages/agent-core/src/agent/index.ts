@@ -926,8 +926,18 @@ export class Agent {
       // reminder injector instead of living in the (cacheable) system prompt.
       roleAdditional: context?.roleAdditional,
     });
-    this.config.update({ profileName: profile.name, systemPrompt, activeTools: profile.tools });
-    this.tools.setActiveTools(profile.tools);
+    // An explicit `tools:` contract (SDK callers, subagent profiles, pinned
+    // session bots) is applied EXACTLY. The default resolved set has no such
+    // contract, so the deferred-tool portal shapes it: low-frequency group
+    // names held back, `DiscoverTools` offered instead, groups enabled
+    // earlier this session kept. `setActiveTools` never shapes on its own.
+    const activeTools = profile.toolsExplicit
+      ? profile.tools
+      : this.tools.defaultShapedToolNames(profile.tools);
+    this.config.update({ profileName: profile.name, systemPrompt, activeTools });
+    this.tools.setActiveTools(activeTools);
+
+
     // Rebuild the builtin registry AFTER the profile name is on the config and
     // the active names are set. Which collaboration tools exist is
     // profile-dependent — canSpawn reads the `spawns` whitelist of
@@ -941,6 +951,16 @@ export class Agent {
     // sessions) must not blow up while building tools.
     if (this.config.hasProvider) {
       this.tools.initializeBuiltinTools();
+      // An EXPLICIT list is exact, so it is never reshaped by the portal —
+      // but the construction gate above skipped every deferred group, which
+      // left a listed deferred name without an instance (loopToolsFor then
+      // dropped it, and the portal tool is not in an explicit list either).
+      // Re-register the owning group's instances without touching the
+      // enabled set: the list stays verbatim, and a name whose group has no
+      // backing runtime stays inert instead of pretending to work.
+      if (profile.toolsExplicit) {
+        this.tools.registerExplicitDeferredTools(activeTools);
+      }
     }
   }
 
@@ -1056,6 +1076,14 @@ export class Agent {
       },
       setActiveTools: (payload) => {
         this.tools.setActiveTools(payload.names);
+        // SDK callers reach the exact list through here rather than
+        // `useProfile`, so the same gap applies: on a portal-active registry
+        // the deferred group's instances were never built and the listed name
+        // would be dropped by loopToolsFor. Register them AFTER the list
+        // lands — the list itself stays exact.
+        if (this.config.hasProvider) {
+          this.tools.registerExplicitDeferredTools(payload.names);
+        }
       },
       setRlmEnabled: (payload) => {
         this.setRlmEnabled(payload.enabled);

@@ -54,6 +54,19 @@ export interface ResolvedAgentProfile {
   description?: string;
   systemPrompt: SystemPromptRenderer;
   tools: string[];
+  /**
+   * True when `tools` is an explicit contract: the profile definition
+   * declared its own `tools:` list, or a pinned session profile supplied
+   * `activeTools`. `useProfile` applies such a list verbatim.
+   *
+   * False for the default resolved set — the root profile (the main agent's
+   * default) and anything that only inherits its list. That set has no
+   * per-profile contract, so the deferred-tool portal shapes it instead
+   * (`ToolManager.defaultShapedToolNames`): deferred group names held back,
+   * `DiscoverTools` offered in their place, groups enabled earlier in the
+   * session kept.
+   */
+  toolsExplicit: boolean;
   whenToUse?: string;
   subagents?: Record<string, ResolvedAgentProfile>;
   // Subagent profile names this agent is allowed to spawn. Undefined means

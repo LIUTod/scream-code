@@ -317,6 +317,120 @@ describe('Agent compaction', () => {
     expect(ctx.agent.usage.data().byModel?.['scream-code']).toBeUndefined();
   });
 
+  it('prefers the live /model diy housekeeping binding over the config fallback', async () => {
+    // A second housekeeping-capable alias exists only in the config under
+    // test; the live tier getter points at it, so it must outrank
+    // `loop_control.housekeeping_model`.
+    const liveConfig: ScreamConfig = {
+      ...HOUSEKEEPING_TEST_CONFIG,
+      models: {
+        ...HOUSEKEEPING_TEST_CONFIG.models,
+        'live-cheap': {
+          provider: 'housekeeping-provider',
+          model: 'live-housekeeping-model',
+          maxContextSize: 64_000,
+        },
+      },
+    };
+    const { calls, generate, mockNextResponse } = createCapturingGenerate();
+    const ctx = testAgent({
+      generate,
+      initialConfig: liveConfig,
+      subagentHost: fakeTierHost({ housekeeping: 'live-cheap' }),
+    });
+    ctx.agent.config.update({ modelAlias: 'session-alias', thinkingLevel: 'off' });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+
+    mockNextResponse({ type: 'text', text: 'Live housekeeping summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    expect(calls).toHaveLength(1);
+    const provider = calls[0]?.provider as { modelName: string };
+    expect(provider.modelName).toBe('live-housekeeping-model');
+    // Usage follows the model that actually paid for the request.
+    expect(ctx.agent.usage.data().byModel?.['live-cheap']).toBeDefined();
+    expect(ctx.agent.usage.data().byModel?.['housekeeping-cheap']).toBeUndefined();
+  });
+
+  it('falls through to the configured housekeeping model when the live binding is stale', async () => {
+    const warnings: string[] = [];
+    const log: Logger = {
+      error: () => {},
+      info: () => {},
+      debug: () => {},
+      warn: (message: unknown) => {
+        warnings.push(String(message));
+      },
+    } as unknown as Logger;
+    const { calls, generate, mockNextResponse } = createCapturingGenerate();
+    const ctx = testAgent({
+      generate,
+      initialConfig: HOUSEKEEPING_TEST_CONFIG,
+      log,
+      // 'ghost-alias' is absent from `models`, so tryResolveChatModel misses.
+      subagentHost: fakeTierHost({ housekeeping: 'ghost-alias' }),
+    });
+    ctx.agent.config.update({ modelAlias: 'session-alias', thinkingLevel: 'off' });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+
+    mockNextResponse({ type: 'text', text: 'Configured housekeeping summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    expect(calls).toHaveLength(1);
+    const provider = calls[0]?.provider as { modelName: string };
+    // Stale live binding degrades to the earlier, still-valid config choice —
+    // not straight to the session model.
+    expect(provider.modelName).toBe('housekeeping-model');
+    expect(warnings.some((message) => message.includes('ghost-alias'))).toBe(true);
+    // The warning must name the REAL next fallback: with a live-tier source
+    // the configured housekeeping model is tried before the session model.
+    expect(
+      warnings.some((message) =>
+        message.includes('falling back to the configured housekeeping model'),
+      ),
+    ).toBe(true);
+    expect(warnings.some((message) => message.includes('using the session model'))).toBe(false);
+  });
+
+  it('keeps the session model when the live getter is set but every tier is unbound', async () => {
+    const { calls, generate, mockNextResponse } = createCapturingGenerate();
+    const ctx = testAgent({
+      generate,
+      initialConfig: {
+        providers: HOUSEKEEPING_TEST_CONFIG.providers,
+        models: HOUSEKEEPING_TEST_CONFIG.models,
+      },
+      subagentHost: fakeTierHost({}),
+    });
+    ctx.agent.config.update({ modelAlias: 'session-alias', thinkingLevel: 'off' });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+
+    mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    expect(calls).toHaveLength(1);
+    const provider = calls[0]?.provider as { modelName: string };
+    expect(provider.modelName).toBe('scream-code');
+  });
+
   it('falls back to the session model and warns for an unknown housekeeping_model alias', async () => {
     const warnings: string[] = [];
     const log: Logger = {
@@ -3091,6 +3205,25 @@ const HOUSEKEEPING_TEST_CONFIG: ScreamConfig = {
   },
   loopControl: { housekeepingModel: 'housekeeping-cheap' },
 };
+
+/**
+ * Stand-in for the session's subagent host, whose `resolveModelTier` is the
+ * only live `/model diy` surface compaction reads. A full host needs a
+ * Session, which compaction never touches.
+ */
+function fakeTierHost(bindings: {
+  read?: string;
+  task?: string;
+  judge?: string;
+  housekeeping?: string;
+}): AgentOptions['subagentHost'] {
+  return {
+    resolveModelTier: (tier: keyof typeof bindings) => {
+      const alias = bindings[tier]?.trim();
+      return alias === undefined || alias.length === 0 ? undefined : alias;
+    },
+  } as unknown as AgentOptions['subagentHost'];
+}
 
 function textResult(text: string): Awaited<ReturnType<GenerateFn>> {
   return {

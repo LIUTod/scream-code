@@ -1022,5 +1022,6 @@ function profile(input: {
     whenToUse: input.whenToUse,
     systemPrompt: () => `${input.name} prompt`,
     tools: [...(input.tools ?? [])],
+    toolsExplicit: true,
   };
 }

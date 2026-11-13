@@ -924,6 +924,11 @@ export const zh: Record<string, string> = {
   'subagent.desc_designer': '视觉层设计：UI/UX/TUI 方向、规格、落地与审计',
   'subagent.follow_main': '跟随主模型',
   'subagent.follow_main_desc': '使用主代理当前模型（默认）',
+  // Unset role/housekeeping rows: config.toml (`model_roles` /
+  // `housekeeping_model`) is consulted BEFORE the main model, so these must
+  // not claim "main model".
+  'subagent.follow_default': '跟随默认（配置项优先）',
+  'subagent.follow_default_desc': '未绑定时先走配置内的角色/压缩模型，再跟随主模型',
   'subagent.title': '子代理模型绑定',
   'subagent.hint': '↑↓ 选择子代理 · Enter 绑定模型 · Esc 取消',
   'subagent.bind_title': '绑定 {profile}',
@@ -931,6 +936,27 @@ export const zh: Record<string, string> = {
   'subagent.save_failed': '保存失败：{msg}',
   'subagent.stale_binding': '{alias}（已失效）',
   'subagent.invalid_alias': '模型别名 {alias} 不存在',
+
+  // ─── 模型 DIY（按用途绑定） ──────
+  'modeldiy.title': '模型 DIY',
+  'modeldiy.hint': '↑↓ 选择 · Enter 确认 · Esc 取消',
+  'modeldiy.entry_roles': '按分工配置模型',
+  'modeldiy.entry_roles_desc': '探索/规划/验证、写码/执行、审查把关三类分工各自绑定模型',
+  'modeldiy.entry_housekeeping': '压缩专用模型',
+  'modeldiy.entry_housekeeping_desc': '上下文压缩摘要使用的模型，默认先走配置项，再跟随主模型',
+  'modeldiy.entry_profiles': '按子代理类型配置模型',
+  'modeldiy.entry_profiles_desc': '为每个内置子代理类型单独绑定模型',
+  'modeldiy.roles_title': '按分工配置模型',
+  'modeldiy.roles_hint': '↑↓ 选择分工 · Enter 绑定模型 · Esc 返回',
+  'modeldiy.role_read': '探索 · 规划 · 验证',
+  'modeldiy.role_read_desc': '只读型子代理：代码探索、方案规划、验证运行',
+  'modeldiy.role_task': '写码 · 执行',
+  'modeldiy.role_task_desc': '写入型子代理：编码实现与批量执行',
+  'modeldiy.role_judge': '审查把关',
+  'modeldiy.role_judge_desc': '评审型子代理：代码审查与系统性质量把关',
+  'modeldiy.bind_title': '绑定 {name}',
+  'modeldiy.housekeeping_title': '压缩专用模型',
+  'modeldiy.housekeeping_hint': '↑↓ 选择模型 · Enter 确认 · Esc 返回',
 
   // ─── 知识文档树 ─────────────────
   'kdoctree.no_title': '(无标题)',

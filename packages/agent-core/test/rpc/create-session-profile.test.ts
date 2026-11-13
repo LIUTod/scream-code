@@ -141,8 +141,8 @@ describe('createSession session profile', () => {
 
     expect(main.config.profileName).toBe('research-bot');
     expect(main.config.systemPrompt).toBe(`${await expectedBasePrompt(main)}\n\n${role}`);
-    // Neither name is deferred, so only the portal tool joins the set.
-    expect(sorted(main.tools.getActiveTools())).toEqual(['DiscoverTools', 'Grep', 'Read']);
+    // An explicit `activeTools` list is an exact contract: no portal shaping.
+    expect(sorted(main.tools.getActiveTools())).toEqual(['Grep', 'Read']);
     expect((await readPersistedState(created.sessionDir)).custom?.agentProfile).toEqual({
       name: 'research-bot',
       systemPrompt: role,
@@ -180,8 +180,9 @@ describe('createSession session profile', () => {
     expect(main.config.profileName).toBe('research-bot');
     expect(main.config.systemPrompt).toContain('role v2');
     expect(main.config.systemPrompt).not.toContain('role v1');
-    // Neither name is deferred, so only the portal tool joins the set.
-    expect(sorted(main.tools.getActiveTools())).toEqual(['DiscoverTools', 'Read']);
+    // The pinned profile's explicit activeTools list survives the resume
+    // exactly — the portal never reshapes it.
+    expect(sorted(main.tools.getActiveTools())).toEqual(['Read']);
   });
 });
 

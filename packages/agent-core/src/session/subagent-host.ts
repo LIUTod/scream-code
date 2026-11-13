@@ -97,20 +97,39 @@ export const PROFILE_ROLE_CLASSES: Record<string, 'read' | 'task' | 'judge'> = {
 };
 
 /**
- * Role-class model fallback: the alias configured for this profile's role
- * class in `loop_control.model_roles`, or undefined when the profile is never
- * role-routed (absent from {@link PROFILE_ROLE_CLASSES}) or its role has no
- * usable alias configured. Priority sits below the per-profile `/model diy`
- * binding (resolveModelBinding is consulted first in configureChild) and
- * above the parent model. An empty or whitespace-only alias counts as unset —
+ * Live `/model diy` per-purpose bindings: one alias per role class plus the
+ * housekeeping model used for compaction summaries. Pushed by the client
+ * (TUI) and read through a getter at spawn/compaction time; absent keys fall
+ * through to the config.toml fallbacks and then the parent/session model.
+ */
+export interface ModelTierBindings {
+  readonly read?: string;
+  readonly task?: string;
+  readonly judge?: string;
+  readonly housekeeping?: string;
+}
+
+/**
+ * Role-class model fallback: the alias for this profile's role class, or
+ * undefined when the profile is never role-routed (absent from
+ * {@link PROFILE_ROLE_CLASSES}) or the role has no usable alias. Priority sits
+ * below the per-profile `/model diy` binding (resolveModelBinding is consulted
+ * first in configureChild) and above the parent model.
+ *
+ * `liveAlias` is the role's live `/model diy` binding, already validated
+ * against the provider registry by the caller. It outranks the config.toml
+ * `loop_control.model_roles` alias: the live binding is the user's most recent
+ * choice in this session. An empty or whitespace-only alias counts as unset —
  * mirrors resolveModelBinding's treatment of an empty binding.
  */
 export function resolveRoleFallback(
   profileName: string,
   config: ScreamConfig | undefined,
+  liveAlias?: string | undefined,
 ): string | undefined {
   const role = PROFILE_ROLE_CLASSES[profileName];
   if (role === undefined) return undefined;
+  if (typeof liveAlias === 'string' && liveAlias.trim().length > 0) return liveAlias.trim();
   const alias = config?.loopControl?.modelRoles?.[role];
   if (typeof alias !== 'string' || alias.trim().length === 0) return undefined;
   return alias;
@@ -231,8 +250,26 @@ export class SessionSubagentHost {
     private readonly modelBindings?: () => Record<string, string | undefined>,
     /** Shared per-session directed-message bus for parent→child messages. */
     readonly bus?: SubagentMessageBus | undefined,
+    /**
+     * Live `/model diy` per-purpose bindings, read at spawn time (role
+     * fallback) and by compaction (housekeeping model). Session-owned: the
+     * getter is the same reference every host in a session reads.
+     */
+    private readonly modelTierBindings?: (() => ModelTierBindings) | undefined,
   ) {
     this.bus ??= new SubagentMessageBus();
+  }
+
+  /**
+   * Live `/model diy` binding for one tier, trimmed, or undefined when unset.
+   * No registry validation here: the role path validates before use (a stale
+   * role alias must fall through to the config.toml fallback) and the
+   * housekeeping path validates through `tryResolveChatModel` at its call site.
+   */
+  resolveModelTier(tier: keyof ModelTierBindings): string | undefined {
+    const alias = this.modelTierBindings?.()[tier];
+    if (typeof alias !== 'string' || alias.trim().length === 0) return undefined;
+    return alias.trim();
   }
 
   async spawn(profileName: string, options: RunSubagentOptions): Promise<SubagentHandle> {
@@ -367,14 +404,24 @@ export class SessionSubagentHost {
       },
       // A resumed subagent is realigned to its bound model (or the parent's
       // current model when unbound), so a /model diy rebind or a parent
-      // setModel between the initial spawn and the resume is reflected.
+      // setModel between the initial spawn and the resume is reflected. The
+      // chain mirrors configureChild exactly: an explicit per-profile
+      // binding, then the live role tier, then the config.toml role alias —
+      // dropping the live tier here would silently send a resumed child to
+      // the parent model instead of the model the user picked this session.
       () => {
         // RLM parameters are deliberately NOT re-pushed from the parent here:
         // the child's recursion state (enabled / depth / cap) is restored from
         // its own wire records — the `rlm.enter` payload (v1.6+) and
         // `rlm.settings` — so a resume keeps exactly what the child had when
         // it last ran, independent of later parent-side changes.
-        const binding = this.resolveModelBinding(profileName);
+        const binding =
+          this.resolveModelBinding(profileName) ??
+          resolveRoleFallback(
+            profileName,
+            parent.screamConfig,
+            this.resolveLiveRoleBinding(profileName, parent),
+          );
         const modelAlias = this.resolveValidModelAlias(parent, binding);
         const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);
         child.config.update({ modelAlias, thinkingLevel });
@@ -1178,14 +1225,19 @@ export class SessionSubagentHost {
     capabilityMode?: SubagentCapabilityMode,
   ): Promise<void> {
     // A subagent uses the model bound to its profile via /model diy when one
-    // is configured; otherwise it falls back to the alias routed to its role
-    // class (loop_control.model_roles) when its profile maps to one, and
-    // otherwise inherits the parent agent's model. A binding whose alias has
-    // since been removed from config.toml falls back to the parent model
-    // rather than sending the subagent into a hung LLM call.
+    // is configured; otherwise it falls back to the live binding for its role
+    // class (`/model diy` → Models by role), then to the alias routed in
+    // config.toml (`loop_control.model_roles`), and otherwise inherits the
+    // parent agent's model. A binding whose alias has since been removed from
+    // config.toml falls back to the parent model rather than sending the
+    // subagent into a hung LLM call.
     const binding =
       this.resolveModelBinding(profile.name) ??
-      resolveRoleFallback(profile.name, parent.screamConfig);
+      resolveRoleFallback(
+        profile.name,
+        parent.screamConfig,
+        this.resolveLiveRoleBinding(profile.name, parent),
+      );
     const modelAlias = this.resolveValidModelAlias(parent, binding);
     const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);
     child.config.update({
@@ -1231,6 +1283,32 @@ export class SessionSubagentHost {
     const alias = bindings[profileName];
     if (typeof alias !== 'string' || alias.trim().length === 0) return undefined;
     return alias;
+  }
+
+  /**
+   * Live `/model diy` binding for this profile's role class, or undefined when
+   * the profile is never role-routed or the binding no longer resolves in the
+   * provider registry. A stale live binding degrades to the config.toml
+   * `loop_control.model_roles` alias instead of masquerading as a valid one:
+   * `resolveValidModelAlias` can only answer "parent model" for an unknown
+   * alias, which would skip the configured fallback entirely.
+   */
+  private resolveLiveRoleBinding(profileName: string, parent: Agent): string | undefined {
+    const role = PROFILE_ROLE_CLASSES[profileName];
+    if (role === undefined) return undefined;
+    const alias = this.resolveModelTier(role);
+    if (alias === undefined) return undefined;
+    if (parent.modelProvider === undefined) return undefined;
+    try {
+      parent.modelProvider.resolveProviderConfig(alias);
+      return alias;
+    } catch (error) {
+      this.session.log?.warn(
+        `live ${role} role binding "${alias}" no longer resolves in the provider registry; using the configured role fallback`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   /**

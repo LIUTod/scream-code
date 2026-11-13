@@ -474,7 +474,7 @@ export async function handleModelCommand(host: SlashCommandHost, args: string): 
   const trimmed = args.trim();
   if (trimmed === 'diy') {
     if (isBusy(host.state.appState)) {
-      host.showError('Cannot rebind subagents while streaming — press Esc or Ctrl-C first.');
+      host.showError('Cannot rebind models while streaming — press Esc or Ctrl-C first.');
       return;
     }
     showSubagentModelBinder(host);
@@ -558,6 +558,7 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
       like: host.state.appState.like,
       fusionPlan: host.state.appState.fusionPlan,
       subagentModels: host.state.appState.subagentModels,
+      modelTiers: host.state.appState.modelTiers ?? {},
     });
   } catch (error) {
     host.showStatus(
@@ -857,6 +858,7 @@ async function applyThemeChoice(host: SlashCommandHost, theme: Theme): Promise<v
       like: host.state.appState.like,
       fusionPlan: host.state.appState.fusionPlan,
       subagentModels: host.state.appState.subagentModels,
+      modelTiers: host.state.appState.modelTiers ?? {},
     });
   } catch (error) {
     host.showStatus(

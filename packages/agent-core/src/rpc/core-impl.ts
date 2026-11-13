@@ -158,6 +158,17 @@ export interface ScreamCoreOptions {
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
   readonly skillDirs?: readonly string[];
   readonly subagentModelBindings?: () => Record<string, string | undefined>;
+  /**
+   * Live `/model diy` per-purpose bindings (role classes + housekeeping
+   * model). Read at spawn/compaction time; absent keys fall through to the
+   * config.toml fallbacks and then the parent/session model.
+   */
+  readonly modelTierBindings?: () => {
+    read?: string;
+    task?: string;
+    judge?: string;
+    housekeeping?: string;
+  };
 }
 
 const ENV_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -233,6 +244,12 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   private readonly resolveOAuthTokenProvider: OAuthTokenProviderResolver | undefined;
   private readonly skillDirs: readonly string[];
   private subagentModelBindings?: () => Record<string, string | undefined>;
+  private modelTierBindings?: () => {
+    read?: string;
+    task?: string;
+    judge?: string;
+    housekeeping?: string;
+  };
   private readonly sessionStore: SessionStore;
   /** Tracks/reaps LSP child processes for every session in this core. */
   readonly lspSupervisor: LspProcessSupervisor;
@@ -263,6 +280,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     this.resolveOAuthTokenProvider = options.resolveOAuthTokenProvider;
     this.skillDirs = options.skillDirs ?? [];
     this.subagentModelBindings = options.subagentModelBindings;
+    this.modelTierBindings = options.modelTierBindings;
     ensureScreamHome(this.homeDir);
     // Reap stale LSP owners left by crashed hosts before any new session can
     // start a server. The sweep is async (ps scans) and never blocks startup.
@@ -287,6 +305,18 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   /** Live TUI-owned per-profile model bindings; called at subagent spawn time. */
   setSubagentModelBindings(getter: (() => Record<string, string | undefined>) | undefined): void {
     this.subagentModelBindings = getter;
+  }
+
+  /**
+   * Live TUI-owned per-purpose model bindings (role classes + housekeeping
+   * model); called at subagent spawn and compaction time.
+   */
+  setModelTierBindings(
+    getter:
+      | (() => { read?: string; task?: string; judge?: string; housekeeping?: string })
+      | undefined,
+  ): void {
+    this.modelTierBindings = getter;
   }
 
   /**
@@ -366,6 +396,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       mcpConfig,
       pluginSessionStarts,
       subagentModelBindings: this.subagentModelBindings,
+      modelTierBindings: this.modelTierBindings,
       lspSupervisor: this.lspSupervisor,
     });
     try {
@@ -497,6 +528,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       initializeMainAgent: false,
       pluginSessionStarts,
       subagentModelBindings: this.subagentModelBindings,
+      modelTierBindings: this.modelTierBindings,
       lspSupervisor: this.lspSupervisor,
     });
     let warning: string | undefined;

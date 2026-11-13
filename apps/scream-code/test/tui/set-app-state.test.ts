@@ -37,7 +37,10 @@ function makeStartupInput(): ScreamTUIStartupInput {
 }
 
 function makeDriver(): SetAppStateDriver {
-  const driver = new ScreamTUI({ setSubagentModelBindings: () => {} } as never, makeStartupInput()) as unknown as SetAppStateDriver;
+  const driver = new ScreamTUI(
+    { setSubagentModelBindings: () => {}, setModelTierBindings: () => {} } as never,
+    makeStartupInput(),
+  ) as unknown as SetAppStateDriver;
   vi.spyOn(driver.state.ui, 'requestRender').mockImplementation(() => {});
   vi.spyOn(driver.state.terminal, 'setProgress').mockImplementation(() => {});
   return driver;

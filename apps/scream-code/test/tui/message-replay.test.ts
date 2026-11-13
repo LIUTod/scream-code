@@ -162,6 +162,7 @@ function makeSession(
 function makeHarness(initialSession: Session) {
   return {
     setSubagentModelBindings: vi.fn(),
+    setModelTierBindings: vi.fn(),
     getConfig: vi.fn(async () => ({
       models: {
         k2: { model: 'scream-cli-v1', maxContextSize: 100 },

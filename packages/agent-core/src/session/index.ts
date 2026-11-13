@@ -42,7 +42,7 @@ import {
   type SkillRoot,
   type SkillSummary,
 } from '../skill';
-import { SessionSubagentHost } from './subagent-host';
+import { SessionSubagentHost, type ModelTierBindings } from './subagent-host';
 import type { SubagentCapabilityMode } from './subagent-capability';
 import { SessionDisposables } from './dispose-registry';
 import { SubagentMessageBus } from './subagent-messages';
@@ -66,6 +66,12 @@ export interface SessionOptions {
   readonly mcpConfig?: SessionMcpConfig;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly subagentModelBindings?: () => Record<string, string | undefined>;
+  /**
+   * Live `/model diy` per-purpose bindings (role classes + housekeeping
+   * model), read through a getter at subagent spawn and compaction time so a
+   * mid-session rebind applies without recreating the session.
+   */
+  readonly modelTierBindings?: (() => ModelTierBindings) | undefined;
   /** Process supervisor tracking this session's LSP children (shared core-wide). */
   readonly lspSupervisor?: LspProcessSupervisor | undefined;
 }
@@ -153,6 +159,10 @@ export function composeSessionAgentProfile(
     description: base.description,
     systemPrompt,
     tools: [...(profile.activeTools ?? base.tools)],
+    // A pinned session that supplied `activeTools` states an explicit tool
+    // contract (the SDK bot's list); one that only supplied a role reuses the
+    // default tool set, which keeps the portal shaping.
+    toolsExplicit: profile.activeTools !== undefined,
     whenToUse: base.whenToUse,
     subagents: base.subagents,
     spawns: base.spawns,
@@ -949,6 +959,7 @@ export class Session {
           this.backgroundTaskTimeoutMs(),
           this.options.subagentModelBindings,
           this.subagentMessages,
+          this.options.modelTierBindings,
         ),
       ownerHost: type === 'sub' ? parentAgent?.subagentHost : undefined,
       mcp: this.mcp,

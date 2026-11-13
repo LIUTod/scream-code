@@ -524,6 +524,7 @@ describe('session switch and /new clear the selection end-to-end', () => {
       createSession: vi.fn(async () => session as unknown as Session),
       resumeSession: vi.fn(async () => session as unknown as Session),
       setSubagentModelBindings: vi.fn(),
+    setModelTierBindings: vi.fn(),
       close: vi.fn(async () => {}),
       getExperimentalFlags: vi.fn(async () => ({})),
     });

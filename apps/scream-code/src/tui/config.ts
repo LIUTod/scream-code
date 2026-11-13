@@ -68,7 +68,26 @@ export const TuiConfigFileSchema = z.object({
     })
     .optional(),
   subagentModels: z.record(z.string(), z.string()).optional(),
+  // `/model diy` per-purpose bindings: one alias per role class plus the
+  // housekeeping model used for compaction summaries. An absent key means
+  // "follow the main model" (the engine then falls back to config.toml).
+  modelTiers: z
+    .object({
+      read: z.string().optional(),
+      task: z.string().optional(),
+      judge: z.string().optional(),
+      housekeeping: z.string().optional(),
+    })
+    .optional(),
 });
+
+/** Keys of the `[modelTiers]` table, in render order. */
+export const MODEL_TIER_KEYS = ['read', 'task', 'judge', 'housekeeping'] as const;
+
+export type ModelTierKey = (typeof MODEL_TIER_KEYS)[number];
+
+/** Live per-purpose model bindings (see {@link MODEL_TIER_KEYS}). */
+export type ModelTierBindings = Partial<Record<ModelTierKey, string>>;
 
 export const TuiConfigSchema = z.object({
   theme: TuiThemeSchema,
@@ -81,6 +100,17 @@ export const TuiConfigSchema = z.object({
     workerCount: z.number().int().min(1).max(3),
   }),
   subagentModels: z.record(z.string(), z.string()),
+  // Optional in the resolved type only so callers that rebuild a config from
+  // AppState need not restate it; `normalizeTuiConfig` always materializes the
+  // table (empty object = every tier follows the main model).
+  modelTiers: z
+    .object({
+      read: z.string().optional(),
+      task: z.string().optional(),
+      judge: z.string().optional(),
+      housekeeping: z.string().optional(),
+    })
+    .optional(),
 });
 
 
@@ -103,6 +133,7 @@ export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
     workerCount: 3,
   },
   subagentModels: {},
+  modelTiers: {},
 });
 
 /**
@@ -179,6 +210,7 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
       workerCount: fusionPlan.workerCount ?? DEFAULT_TUI_CONFIG.fusionPlan.workerCount,
     },
     subagentModels: normalizeSubagentModels(config.subagentModels),
+    modelTiers: normalizeModelTiers(config.modelTiers),
   });
 }
 
@@ -201,12 +233,27 @@ function normalizeSubagentModels(
   return out;
 }
 
+function normalizeModelTiers(raw: TuiConfigFileShape['modelTiers']): ModelTierBindings {
+  const out: ModelTierBindings = {};
+  for (const key of MODEL_TIER_KEYS) {
+    const alias = normalizeOptionalString(raw?.[key]);
+    if (alias !== undefined) out[key] = alias;
+  }
+  return out;
+}
+
 export function renderTuiConfig(config: TuiConfig): string {
   const nickname = escapeTomlBasicString(config.like.nickname ?? '');
   const tone = escapeTomlBasicString(config.like.tone ?? '');
   const other = escapeTomlBasicString(config.like.other ?? '');
   const doNot = escapeTomlBasicString(config.like.doNot ?? '');
-  const subagentModelsBlock = renderSubagentModelsBlock(config.subagentModels);
+  // Tables render only when they carry a binding, so an untouched config keeps
+  // its compact shape and an absent `[modelTiers]` reads as "all follow main".
+  const tables = [
+    renderModelTiersBlock(config.modelTiers ?? {}),
+    renderSubagentModelsBlock(config.subagentModels),
+  ].filter((block) => block.length > 0);
+  const tablesBlock = tables.length === 0 ? '' : `\n\n${tables.join('\n\n')}`;
   return `# ~/.scream-code/tui.toml
 # Terminal UI preferences for scream-code.
 # Agent/runtime settings stay in ~/.scream-code/config.toml.
@@ -230,16 +277,27 @@ tool_priority = "${config.like.toolPriority ?? 'default'}" # "default" | "skill"
 
 [fusionPlan]
 timeoutSeconds = ${config.fusionPlan.timeoutSeconds} # 30..3600, default 600
-workerCount = ${config.fusionPlan.workerCount} # 1..3, default 3${subagentModelsBlock}`;
+workerCount = ${config.fusionPlan.workerCount} # 1..3, default 3${tablesBlock}
+`;
+}
+
+function renderModelTiersBlock(tiers: ModelTierBindings): string {
+  const lines = MODEL_TIER_KEYS.flatMap((key) => {
+    const alias = tiers[key];
+    if (alias === undefined || alias.length === 0) return [];
+    return [`${key} = "${escapeTomlBasicString(alias)}"`];
+  });
+  if (lines.length === 0) return '';
+  return `[modelTiers]\n${lines.join('\n')}`;
 }
 
 function renderSubagentModelsBlock(models: Record<string, string>): string {
   const entries = Object.entries(models);
-  if (entries.length === 0) return '\n';
+  if (entries.length === 0) return '';
   const lines = entries.map(
     ([name, alias]) => `${name} = "${escapeTomlBasicString(alias)}"`,
   );
-  return `\n\n[subagentModels]\n${lines.join('\n')}\n`;
+  return `[subagentModels]\n${lines.join('\n')}`;
 }
 
 function escapeTomlBasicString(value: string): string {

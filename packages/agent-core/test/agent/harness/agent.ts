@@ -21,6 +21,7 @@ import {
 import type { ScreamConfig } from '../../../src/config';
 import type { ExecutableToolResult } from '../../../src/loop';
 import type { Logger } from '../../../src/logging';
+import { DEFAULT_AGENT_PROFILES } from '../../../src/profile';
 import { ProviderManager } from '../../../src/session/provider-manager';
 import type { QuestionResult, RPCCallOptions, SDKAgentRPC } from '../../../src/rpc';
 import type { AgentAPI } from '../../../src/rpc/core-api';
@@ -253,6 +254,19 @@ export class AgentTestContext {
       this.screamConfig = configWithProvider(this.screamConfig, provider, modelCapabilities);
     }
     this.agent.config.update({ modelAlias: provider.model });
+  }
+
+  /**
+   * Applies the built-in default agent profile — the DEFAULT profile
+   * application path, and the only one that reaches the deferred-tool portal:
+   * an explicit `setActiveTools` list (what `configure({ tools })` writes) is
+   * exact and never shaped. Call after `configure()` so a provider exists and
+   * the registry rebuilds against the shaped set.
+   */
+  applyDefaultProfile(): void {
+    const profile = DEFAULT_AGENT_PROFILES['agent'];
+    if (profile === undefined) throw new Error('default agent profile is missing');
+    this.agent.useProfile(profile);
   }
 
   newEvents(): ReturnType<typeof eventSnapshot> {

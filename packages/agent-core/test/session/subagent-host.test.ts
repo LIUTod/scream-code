@@ -2052,6 +2052,103 @@ describe('SessionSubagentHost', () => {
     ).toBe('parent-model');
   });
 
+  it('serves the live /model diy role binding before the config role alias', async () => {
+    // Both a live tier binding and a config.toml role alias exist for the same
+    // role class; the live one (the user's latest choice in the client) wins.
+    const liveConfig: ScreamConfig = {
+      providers: {
+        'test-provider': {
+          type: 'scream',
+          apiKey: 'test-key',
+        },
+      },
+      models: {
+        'parent-model': routedModel('parent-model'),
+        'live-model': routedModel('live-model'),
+        'role-model': routedModel('role-model'),
+      },
+      loopControl: { modelRoles: { task: 'role-model' } },
+    };
+    const parent = testAgent({ initialConfig: liveConfig });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    parent.agent.config.update({ modelAlias: 'parent-model' });
+
+    const child = testAgent({ initialConfig: liveConfig });
+    child.configure({ tools: ['Read'] });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const warn = vi.fn();
+    Object.assign(session, { log: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    const summary =
+      'Completed the subagent task with a detailed enough summary for the parent agent to continue without repeating the child agent work. '.repeat(
+        2,
+      );
+    const spawnOn = async (
+      bindings: { read?: string; task?: string; judge?: string; housekeeping?: string } | undefined,
+      profileName: string,
+      description: string,
+    ): Promise<string | undefined> => {
+      child.mockNextResponse({ type: 'text', text: summary });
+      const host = new SessionSubagentHost(
+        session,
+        'main',
+        undefined,
+        undefined,
+        undefined,
+        bindings === undefined ? undefined : () => bindings,
+      );
+      const handle = await host.spawn(profileName, {
+        parentToolCallId: 'call_agent',
+        prompt: 'Do work',
+        description,
+        runInBackground: false,
+        signal,
+      });
+      await handle.completion;
+      return child.agent.config.modelAlias;
+    };
+
+    // Live tier binding wins over the config.toml role alias.
+    expect(await spawnOn({ task: 'live-model' }, 'coder', 'Live tier wins')).toBe('live-model');
+    // No live binding for the role → the config alias applies (unchanged).
+    expect(await spawnOn({ read: 'live-model' }, 'coder', 'Live unset')).toBe('role-model');
+    // A stale live alias falls through to the config alias, not straight to
+    // the parent model, and the miss is reported instead of swallowed.
+    expect(await spawnOn({ task: 'ghost-model' }, 'coder', 'Live stale')).toBe('role-model');
+    expect(String(warn.mock.calls[0]?.[0])).toContain('ghost-model');
+
+    // A RESUME runs the same chain as the initial spawn. Before this, the
+    // resume callback read only the explicit per-profile binding, so the
+    // child came back on the parent model instead of the live tier alias.
+    child.agent.config.update({ modelAlias: 'parent-model' });
+    child.mockNextResponse({ type: 'text', text: summary });
+    const resumeSession = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const resumeHost = new SessionSubagentHost(
+      resumeSession,
+      'main',
+      undefined,
+      undefined,
+      undefined,
+      () => ({ task: 'live-model' }),
+    );
+    const resumed = await resumeHost.resume('agent-0', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Continue from context',
+      description: 'Resume live tier',
+      runInBackground: false,
+      signal,
+    });
+    await resumed.completion;
+    expect(child.agent.config.modelAlias).toBe('live-model');
+  });
+
   it('falls back to the parent model with a warning when a role alias no longer resolves', async () => {
     // 'ghost-model' is intentionally absent from models so
     // resolveProviderConfig throws for it, exercising the fallback path.
@@ -2300,6 +2397,25 @@ describe('Subagent profile role routing', () => {
     // No config, or no loopControl section at all: follow the parent model.
     expect(resolveRoleFallback('explore', undefined)).toBeUndefined();
     expect(resolveRoleFallback('explore', { providers: {} })).toBeUndefined();
+  });
+
+  it('resolveRoleFallback puts the live /model diy tier above the config alias', () => {
+    const config: ScreamConfig = {
+      providers: {},
+      loopControl: { modelRoles: { read: 'read-model', judge: 'judge-model' } },
+    };
+    // Live binding wins over the config.toml alias for the same role.
+    expect(resolveRoleFallback('explore', config, 'live-read')).toBe('live-read');
+    expect(resolveRoleFallback('explore', config, '  live-read  ')).toBe('live-read');
+    // Unset live binding → config alias stays the answer.
+    expect(resolveRoleFallback('explore', config, undefined)).toBe('read-model');
+    expect(resolveRoleFallback('explore', config, '   ')).toBe('read-model');
+    // A role with no config alias still routes through its live binding.
+    expect(resolveRoleFallback('coder', config, 'live-task')).toBe('live-task');
+    // Unmapped profiles stay unrouted even with a live binding.
+    expect(resolveRoleFallback('writer', config, 'live-read')).toBeUndefined();
+    // No config at all: a live binding still routes the profile.
+    expect(resolveRoleFallback('reviewer', undefined, 'live-judge')).toBe('live-judge');
   });
 });
 
@@ -3156,6 +3272,7 @@ function contextProfile(): ResolvedAgentProfile {
         `agents=${context.agentsMd ?? ''}`,
       ].join('\n'),
     tools: [],
+    toolsExplicit: true,
   };
 }
 
@@ -3171,6 +3288,7 @@ function profile(input: {
     description: input.description,
     systemPrompt: () => input.systemPrompt,
     tools: [...input.tools],
+    toolsExplicit: true,
     subagents: input.subagents,
   };
 }

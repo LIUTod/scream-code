@@ -66,16 +66,29 @@
   default), main agents do NOT get the low-frequency groups
   (cron/memory/knowledge/goal/image/make-skill/manage-plugin/inspect — the
   table lives in `tools/builtin/deferred-tools.ts`). Their construction sites
-  in `initializeBuiltinTools` are gated off, the names are held back from the
-  enabled set by `setActiveTools`, and the `DiscoverTools` portal tool fronts
-  them: enabling a group constructs its instances lazily, adds the names to
-  the enabled set, and marks the group so later `setActiveTools` calls
-  (profile re-application, /script, /rlm, capability trim) keep it. The turn
-  loop's frozen enabled-name filter turns this into next-turn availability —
-  one prefix rebuild at the next turn boundary. Enabled groups are
-  session-local (not persisted): a resume starts with the groups deferred
-  again, like the enabled-deferred-MCP set. `toolPortal: 'off'` restores the
-  pre-portal registry byte-for-byte (all sites construct, no portal tool)
+  in `initializeBuiltinTools` are gated off, and the `DiscoverTools` portal
+  tool fronts them. **Shaping happens at the DEFAULT profile application
+  only** (`Agent.useProfile` → `ToolManager.defaultShapedToolNames`): the
+  default resolved set loses the deferred names, keeps the groups enabled
+  earlier this session, and gains the portal name. An EXACT list —
+  `setActiveTools`, an explicit profile `tools:` contract
+  (`profile.toolsExplicit`), /script and /rlm toggles — is never reshaped.
+  Enabling a group constructs its instances lazily, adds the names to the
+  enabled set, and marks the group so later `setActiveTools` calls (/script,
+  /rlm, capability trim) keep it. An explicit `tools:` contract is never
+  reshaped, but its deferred names still need instances: `useProfile` and the
+  SDK `setActiveTools` handler call `registerExplicitDeferredTools` AFTER
+  `setActiveTools`, and `initializeBuiltinTools` calls it again when it
+  rebuilds the map. That constructs the owning group(s) through the same
+  path as a portal enable without marking them session-enabled or switching
+  on sibling names — otherwise `loopToolsFor` drops the listed name (and the
+  portal is not in the list either). The turn loop's frozen enabled-name
+  filter turns this into next-turn availability — one prefix rebuild at the
+  next turn boundary. Enabled groups are session-local (not persisted): a
+  resume starts with the groups deferred again, like the enabled-deferred-MCP
+  set. `toolPortal: 'off'` restores the pre-portal registry byte-for-byte
+  (all sites construct, no portal tool)
+
 - Registration is idempotent: duplicate names need explicit handling (user tool
   overriding built-in? see call-site conventions)
 - MCP tools come and go with their server's lifecycle

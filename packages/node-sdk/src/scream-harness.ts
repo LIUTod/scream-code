@@ -90,6 +90,20 @@ export class ScreamHarness {
     this.rpc.core.setSubagentModelBindings(getter);
   }
 
+  /**
+   * Install a live getter for the TUI's per-purpose model bindings (role
+   * classes + housekeeping model). Read at subagent spawn and compaction time,
+   * so a mid-session `/model diy` change takes effect without recreating the
+   * session.
+   */
+  setModelTierBindings(
+    getter:
+      | (() => { read?: string; task?: string; judge?: string; housekeeping?: string })
+      | undefined,
+  ): void {
+    this.rpc.core.setModelTierBindings(getter);
+  }
+
   async createSession(options: CreateSessionOptions): Promise<Session> {
     const { planMode, ...coreOptions } = options;
     const summary = await this.rpc.createSession(coreOptions);

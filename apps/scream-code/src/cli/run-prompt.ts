@@ -71,6 +71,10 @@ export async function runPrompt(
   }
   const promptSubagentModels = promptTuiConfig.subagentModels;
   harness.setSubagentModelBindings(() => promptSubagentModels);
+  // Same for the per-purpose bindings (`[modelTiers]`): role routing and the
+  // housekeeping compaction model configured in the TUI must apply here too.
+  const promptModelTiers = promptTuiConfig.modelTiers ?? {};
+  harness.setModelTierBindings(() => promptModelTiers);
 
   log.info('scream-code starting', {
     version,

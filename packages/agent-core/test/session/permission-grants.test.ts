@@ -58,6 +58,7 @@ function testProfile(): ResolvedAgentProfile {
     name: 'test',
     systemPrompt: () => '<system-prompt>',
     tools: [],
+    toolsExplicit: true,
   };
 }
 

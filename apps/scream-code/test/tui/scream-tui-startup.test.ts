@@ -90,6 +90,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
 function makeHarness(session = makeSession(), overrides: Record<string, unknown> = {}) {
   return {
     setSubagentModelBindings: vi.fn(),
+    setModelTierBindings: vi.fn(),
     getConfig: vi.fn(async () => ({
       models: {
         k2: { model: "scream-cli-v1", maxContextSize: 100 },
@@ -386,6 +387,28 @@ describe("ScreamTUI startup", () => {
 
     // Unbinding (follow-main) reads back as the key being absent.
     driver.state.appState.subagentModels = {};
+    expect(getter()).toEqual({});
+  });
+
+  it("injects a live modelTierBindings getter that reflects /model diy tier changes", () => {
+    const harness = makeHarness();
+    const driver = makeDriver(
+      harness,
+      makeStartupInput({}, { modelTiers: { read: "k2", housekeeping: "cheap" } }),
+    );
+
+    // Constructor wired the tier getter alongside the profile getter.
+    expect(harness.setModelTierBindings).toHaveBeenCalledTimes(1);
+    const getter = (harness.setModelTierBindings as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as () => { read?: string; task?: string; judge?: string; housekeeping?: string };
+    expect(getter()).toEqual({ read: "k2", housekeeping: "cheap" });
+
+    // Live update: rebinding a tier reflects on the next read.
+    driver.state.appState.modelTiers = { judge: "sonnet" };
+    expect(getter()).toEqual({ judge: "sonnet" });
+
+    // An AppState without the table (older snapshots) reads as all-follow-main.
+    delete driver.state.appState.modelTiers;
     expect(getter()).toEqual({});
   });
 });

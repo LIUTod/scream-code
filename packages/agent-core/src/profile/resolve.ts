@@ -19,6 +19,8 @@ interface MergedAgentProfile {
   readonly systemPromptTemplate: string;
   readonly promptVars: Record<string, string>;
   readonly tools: string[];
+  /** See {@link ResolvedAgentProfile.toolsExplicit}. */
+  readonly toolsExplicit: boolean;
   readonly whenToUse?: string | undefined;
   readonly subagents?: Record<string, RawSubagentProfile> | undefined;
   readonly spawns?: string[] | undefined;
@@ -106,10 +108,17 @@ function resolveMergedProfile(
       ...profile.promptVars,
     },
     tools: profile.tools !== undefined ? [...profile.tools] : [...(parent?.tools ?? [])],
+    // An inheriting profile that declares its own `tools:` states an explicit
+    // tool contract for that role (every built-in subagent does). The root
+    // profile's list is the opposite: it IS the default resolved set (all
+    // default builtin names), which `useProfile` shapes through the tool
+    // portal rather than applying verbatim.
+    toolsExplicit: profile.extends !== undefined && profile.tools !== undefined,
     whenToUse: profile.whenToUse ?? parent?.whenToUse,
     subagents: cloneSubagents(profile.subagents),
     spawns: profile.spawns !== undefined ? [...profile.spawns] : [...(parent?.spawns ?? [])],
   };
+
 
   cache.set(profile.name, merged);
   return merged;
@@ -121,6 +130,7 @@ function toResolvedProfile(merged: MergedAgentProfile): ResolvedAgentProfile {
     description: merged.description,
     systemPrompt: createSystemPromptRenderer(merged),
     tools: [...merged.tools],
+    toolsExplicit: merged.toolsExplicit,
     whenToUse: merged.whenToUse,
     spawns: merged.spawns !== undefined && merged.spawns.length > 0 ? [...merged.spawns] : undefined,
   };

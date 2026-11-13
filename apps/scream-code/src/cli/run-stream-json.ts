@@ -543,6 +543,10 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   }
   const streamSubagentModels = streamTuiConfig.subagentModels;
   harness.setSubagentModelBindings(() => streamSubagentModels);
+  // Same for the per-purpose bindings (`[modelTiers]`): role routing and the
+  // housekeeping compaction model configured in the TUI must apply here too.
+  const streamModelTiers = streamTuiConfig.modelTiers ?? {};
+  harness.setModelTierBindings(() => streamModelTiers);
 
   const writeStdout = installStdoutEpipeGuard();
   const writer = new StreamJsonWriter(writeStdout);

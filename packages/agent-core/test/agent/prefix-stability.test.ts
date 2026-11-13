@@ -190,10 +190,10 @@ describe('prefix stability matrix', () => {
       }));
     const first = buildToolTable();
     // loopTools is name-sorted (the same order the main loop and compaction
-    // send), so the table order is part of the cache prefix contract.
-    // DiscoverTools rides along: the deferred-tool portal is active by
-    // default for main agents.
-    expect(first.map((tool) => tool.name)).toEqual(['Bash', 'DiscoverTools', 'Read', 'Write']);
+    // send), so the table order is part of the cache prefix contract. The
+    // explicit `configure({ tools })` list is exact: no DiscoverTools, since
+    // the portal shapes only the default profile application.
+    expect(first.map((tool) => tool.name)).toEqual(['Bash', 'Read', 'Write']);
     expect(JSON.stringify(buildToolTable())).toBe(JSON.stringify(first));
   });
 

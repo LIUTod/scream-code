@@ -1201,32 +1201,67 @@ export class FullCompaction {
     return sections.join('\n\n');
   }
 }
+/** `source` label for the live `/model diy` housekeeping tier. */
+const LIVE_HOUSEKEEPING_SOURCE = 'modelTiers.housekeeping';
+
 /**
- * Resolve the opt-in housekeeping model for compaction summarization
- * (`loop_control.housekeeping_model`). Returns undefined when unset (run the
- * compaction request on the session model — see the LoopControl schema
- * comment for why that is the default) or when the alias does not resolve in
- * the provider registry: a stale or misconfigured alias must not break
- * context recovery, so the caller falls back to the session model and the
- * misconfiguration surfaces as a warning instead of a failed compaction.
+ * Resolve the housekeeping model for compaction summarization. Precedence:
+ *
+ *   1. the live `/model diy` binding for the housekeeping tier (what the user
+ *      chose in the client this session),
+ *   2. the config.toml fallback (`loop_control.housekeeping_model`),
+ *   3. the session model (undefined here → the caller keeps the session model).
+ *
+ * Returns undefined when neither is set — the deliberate default, see the
+ * LoopControl schema comment — or when an alias does not resolve in the
+ * provider registry: a stale or misconfigured alias must not break context
+ * recovery, so the caller falls back to the session model and the
+ * misconfiguration surfaces as a warning instead of a failed compaction. A
+ * stale LIVE alias falls through to the configured alias rather than straight
+ * to the session model: the config value is the earlier, still-valid choice.
  */
 function resolveHousekeeping(agent: Agent): ResolvedChatModel | undefined {
+  // The live binding arrives through the session's subagent host, the only
+  // session-scoped handle an agent holds (same reference a spawn reads). An
+  // agent built outside a session has no host and reads config.toml only.
+  const liveAlias = agent.subagentHost?.resolveModelTier('housekeeping');
+  if (liveAlias !== undefined) {
+    const live = resolveHousekeepingAlias(agent, liveAlias, LIVE_HOUSEKEEPING_SOURCE);
+    if (live !== undefined) return live;
+  }
   const alias = agent.screamConfig?.loopControl?.housekeepingModel;
   if (alias === undefined || alias.trim().length === 0) return undefined;
+  return resolveHousekeepingAlias(agent, alias.trim(), 'loop_control.housekeeping_model');
+}
+
+function resolveHousekeepingAlias(
+  agent: Agent,
+  alias: string,
+  source: string,
+): ResolvedChatModel | undefined {
+  // The warning names what actually asked for the alias. A live tier is not
+  // `housekeeping_model`, and a stale live alias falls through to the
+  // CONFIGURED alias before it ever reaches the session model — see the
+  // second attempt in `resolveHousekeeping`.
+  const liveTier = source === LIVE_HOUSEKEEPING_SOURCE;
+  const sourceLabel = liveTier
+    ? `live housekeeping tier "${alias}"`
+    : `housekeeping_model "${alias}"`;
   if (agent.modelProvider === undefined) {
     agent.log.warn(
-      'housekeeping_model is set but the agent has no provider registry; using the session model for compaction summarization',
-      { housekeepingModel: alias },
+      `${sourceLabel} is set but the agent has no provider registry; using the session model for compaction summarization`,
+      { housekeepingModel: alias, source },
     );
     return undefined;
   }
   const resolved = agent.modelProvider.tryResolveChatModel(alias);
   if (resolved === undefined) {
     agent.log.warn(
-      `housekeeping model "${alias}" does not resolve in the provider registry; using the session model for compaction summarization`,
-      { housekeepingModel: alias },
+      liveTier
+        ? `${sourceLabel} does not resolve in the provider registry; falling back to the configured housekeeping model, then the session model`
+        : `${sourceLabel} does not resolve in the provider registry; using the session model for compaction summarization`,
+      { housekeepingModel: alias, source },
     );
-    return undefined;
   }
   return resolved;
 }

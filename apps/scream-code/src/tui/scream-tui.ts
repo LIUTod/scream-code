@@ -162,6 +162,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     like: input.tuiConfig.like,
     fusionPlan: input.tuiConfig.fusionPlan,
     subagentModels: input.tuiConfig.subagentModels,
+    modelTiers: input.tuiConfig.modelTiers,
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,
@@ -255,6 +256,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // latest choice, and unbinding (follow-main) falls back to the parent's
     // current model.
     this.harness.setSubagentModelBindings(() => this.state.appState.subagentModels);
+    // Same live-read contract for the per-purpose bindings (role classes +
+    // housekeeping model). Read at spawn / compaction time, never snapshotted,
+    // so `/model diy` changes apply to the next child or compaction.
+    this.harness.setModelTierBindings(() => this.state.appState.modelTiers ?? {});
 
     this.reverseRpcDisposers.push(
       ...registerReverseRPCHandlers(this.approvalController, this.questionController, {
