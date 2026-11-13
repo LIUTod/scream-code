@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ErrorCodes, ScreamError } from '../../src/errors';
 import {
   ScreamConfigSchema,
+  ModelAliasSchema,
+  ProviderConfigSchema,
   ensureConfigFile,
   mergeConfigPatch,
   parseConfigString,
@@ -721,5 +723,100 @@ model_roles = { read = "fast-model", task = "cheap-model", judge = "strong-model
       task: 'cheap-model',
       judge: 'strong-model',
     });
+  });
+});
+
+describe('model alias tokenizer schema', () => {
+  it('accepts the three tokenizer kinds and leaves the field unset when omitted', () => {
+    for (const tokenizer of ['cl100k', 'o200k', 'heuristic'] as const) {
+      const parsed = ModelAliasSchema.parse({
+        provider: 'p',
+        model: 'm',
+        maxContextSize: 1_000,
+        tokenizer,
+      });
+      expect(parsed.tokenizer).toBe(tokenizer);
+    }
+    const unset = ModelAliasSchema.parse({ provider: 'p', model: 'm', maxContextSize: 1_000 });
+    expect(unset.tokenizer).toBeUndefined();
+  });
+
+  it('rejects an unknown tokenizer kind', () => {
+    expect(() =>
+      ModelAliasSchema.parse({
+        provider: 'p',
+        model: 'm',
+        maxContextSize: 1_000,
+        tokenizer: 'gpt2',
+      }),
+    ).toThrow();
+    expect(() =>
+      ModelAliasSchema.parse({
+        provider: 'p',
+        model: 'm',
+        maxContextSize: 1_000,
+        tokenizer: true,
+      }),
+    ).toThrow();
+  });
+
+  it('reads tokenizer from the TOML models table', () => {
+    const dir = makeTempDir();
+    const config = parseConfigString(
+      `
+[models.claude]
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+max_context_size = 200000
+tokenizer = "o200k"
+`,
+      join(dir, 'config.toml'),
+    );
+    expect(config.models?.['claude']?.tokenizer).toBe('o200k');
+  });
+});
+
+describe('provider apiKey pools', () => {
+  it('parses an array as a key pool from TOML', () => {
+    const config = parseConfigString(`
+[providers.anthropic]
+type = "anthropic"
+api_key = ["key-1", "key-2"]
+`);
+    expect(config.providers?.['anthropic']?.apiKey).toEqual(['key-1', 'key-2']);
+  });
+
+  it('keeps a single string credential unchanged', () => {
+    const parsed = ProviderConfigSchema.parse({ type: 'anthropic', apiKey: 'sk-single' });
+    expect(parsed.apiKey).toBe('sk-single');
+  });
+
+  it('rejects an empty pool', () => {
+    expect(() => ProviderConfigSchema.parse({ type: 'anthropic', apiKey: [] })).toThrow();
+  });
+
+  it('rejects a pool on a provider that cannot rotate keys', () => {
+    for (const type of ['scream', 'google-genai', 'vertexai'] as const) {
+      expect(() =>
+        ProviderConfigSchema.parse({ type, apiKey: ['key-1', 'key-2'] }),
+      ).toThrow(/rotation-capable/);
+    }
+  });
+
+  it('rejects a pool from TOML on a non-rotating provider', () => {
+    expect(() =>
+      parseConfigString(`
+[providers.google]
+type = "google-genai"
+api_key = ["key-1", "key-2"]
+`),
+    ).toThrow(/rotation-capable/);
+  });
+
+  it('accepts a pool on every rotation-capable provider', () => {
+    for (const type of ['anthropic', 'openai', 'openai_responses'] as const) {
+      const parsed = ProviderConfigSchema.parse({ type, apiKey: ['key-1', 'key-2'] });
+      expect(parsed.apiKey).toEqual(['key-1', 'key-2']);
+    }
   });
 });

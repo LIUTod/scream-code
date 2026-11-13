@@ -11,6 +11,7 @@ import { type EditInput, EditInputSchema, EditTool } from '../../src/tools/built
 import { computeAnchor, toModelTextView } from '../../src/tools/builtin/file/line-endings';
 import { resetNoopLoop } from '../../src/tools/builtin/file/noop-loop-guard';
 import { EditSnapshotStore } from '../../src/tools/support/edit-snapshot-store';
+import { EditRecoveryQueue } from '../../src/tools/support/edit-recovery-queue';
 import { fileDiffSummary } from '../../src/tools/support/file-diff';
 import { testJian } from '../fixtures/test-jian';
 import { createFakeJian, PERMISSIVE_WORKSPACE } from './fixtures/fake-jian';
@@ -732,7 +733,7 @@ describe('EditTool', () => {
       getClient: vi.fn().mockResolvedValue({
         didOpen: vi.fn(),
         didChange: vi.fn(),
-        diagnostics: vi.fn().mockResolvedValue([errorDiag]),
+        diagnosticsReport: vi.fn().mockResolvedValue({ diagnostics: [errorDiag], observed: true }),
       }),
       languageIdForPath: vi.fn().mockReturnValue('typescript'),
       commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
@@ -776,7 +777,7 @@ describe('EditTool', () => {
       getClient: vi.fn().mockResolvedValue({
         didOpen: vi.fn(),
         didChange: vi.fn(),
-        diagnostics: vi.fn().mockResolvedValue([warningDiag]),
+        diagnosticsReport: vi.fn().mockResolvedValue({ diagnostics: [warningDiag], observed: true }),
       }),
       languageIdForPath: vi.fn().mockReturnValue('typescript'),
       commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
@@ -807,6 +808,294 @@ describe('EditTool', () => {
     expect(result.output).toContain('[LSP]');
     expect(result.output).toContain('Unused variable');
     expect(result.message).toBeUndefined();
+  });
+});
+
+describe('EditTool edit-recovery reminders', () => {
+  const preExisting: LspDiagnostic = {
+    range: { start: { line: 0, character: 5 }, end: { line: 0, character: 10 } },
+    severity: 1,
+    message: 'Pre-existing error',
+  };
+  const introduced: LspDiagnostic = {
+    range: { start: { line: 1, character: 2 }, end: { line: 1, character: 8 } },
+    severity: 1,
+    message: 'Cannot find name x',
+  };
+  const TEXT = 'const x = 1;\n';
+
+  /** Edit tool whose post-edit diagnostics observe `state.diagnostics` live. */
+  function recoveryTool(
+    queue: EditRecoveryQueue,
+    state: { diagnostics: LspDiagnostic[]; supported?: boolean },
+  ): EditTool {
+    const registry = {
+      getClient: vi.fn().mockResolvedValue({
+        didOpen: vi.fn(),
+        didChange: vi.fn(),
+        diagnosticsReport: vi
+          .fn()
+          .mockImplementation(async () => ({ diagnostics: state.diagnostics, observed: true })),
+      }),
+      languageIdForPath: vi
+        .fn()
+        .mockImplementation(() => (state.supported === false ? undefined : 'typescript')),
+      commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
+      // Active client present: the pre-write baseline seed may run.
+      activeClientFor: vi.fn().mockResolvedValue({}),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+    return new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(TEXT),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+      registry,
+      undefined,
+      undefined,
+      queue,
+    );
+  }
+
+  function edit(tool: EditTool, replacement: string) {
+    return executeTool(
+      tool,
+      context({ path: '/tmp/a.ts', old_string: '1', new_string: replacement }),
+    );
+  }
+
+  it('records the first observation of a file without queuing its pre-existing errors', async () => {
+    const queue = new EditRecoveryQueue();
+    const result = await edit(recoveryTool(queue, { diagnostics: [preExisting] }), '2');
+
+    expect(result.isError).toBe(true);
+    expect(queue.drain()).toEqual([]);
+  });
+
+  it('queues only the signature the edit introduced', async () => {
+    const queue = new EditRecoveryQueue();
+    const state = { diagnostics: [preExisting] };
+    const tool = recoveryTool(queue, state);
+
+    await edit(tool, '2');
+    state.diagnostics = [preExisting, introduced];
+    await edit(tool, '3');
+
+    const [item] = queue.drain();
+    expect(item?.displayPath).toBe('/tmp/a.ts');
+    expect(item?.path).toBe('/tmp/a.ts');
+    expect(item?.signatures).toEqual([
+      { signature: '1:Cannot find name x:1', line: 2, message: 'Cannot find name x' },
+    ]);
+  });
+
+  it('clears the reminder once a later observation no longer reports the error', async () => {
+    const queue = new EditRecoveryQueue();
+    const state = { diagnostics: [] as LspDiagnostic[] };
+    const tool = recoveryTool(queue, state);
+
+    await edit(tool, '2');
+    state.diagnostics = [introduced];
+    await edit(tool, '3');
+    expect(queue.drain()).toHaveLength(1);
+
+    state.diagnostics = [];
+    await edit(tool, '4');
+    expect(queue.drain()).toEqual([]);
+  });
+
+  it('does not duplicate a reminder when the same signature is still reported', async () => {
+    const queue = new EditRecoveryQueue();
+    const state = { diagnostics: [] as LspDiagnostic[] };
+    const tool = recoveryTool(queue, state);
+
+    await edit(tool, '2');
+    state.diagnostics = [introduced];
+    await edit(tool, '3');
+    await edit(tool, '4');
+
+    expect(queue.drain()).toHaveLength(1);
+  });
+
+  it('ignores warning-severity diagnostics', async () => {
+    const queue = new EditRecoveryQueue();
+    const state = { diagnostics: [] as LspDiagnostic[] };
+    const tool = recoveryTool(queue, state);
+
+    await edit(tool, '2');
+    state.diagnostics = [{ ...introduced, severity: 2 }];
+    await edit(tool, '3');
+
+    expect(queue.drain()).toEqual([]);
+  });
+
+  it('ignores fetches where the language server is unavailable', async () => {
+    const queue = new EditRecoveryQueue();
+    const state: { diagnostics: LspDiagnostic[]; supported?: boolean } = {
+      diagnostics: [],
+      supported: false,
+    };
+    const tool = recoveryTool(queue, state);
+
+    // Unsupported file type: the empty result is "no observation", not "the
+    // file is clean" — it must not prime the baseline.
+    await edit(tool, '2');
+    state.supported = true;
+    state.diagnostics = [introduced];
+    await edit(tool, '3');
+
+    expect(queue.drain()).toEqual([]);
+  });
+
+  it('tracks range edits the same way as string edits', async () => {
+    const queue = new EditRecoveryQueue();
+    const state = { diagnostics: [] as LspDiagnostic[] };
+    const tool = recoveryTool(queue, state);
+    const anchor = computeAnchor(TEXT);
+    const rangeEdit = (text: string) =>
+      executeTool(
+        tool,
+        context({ path: '/tmp/a.ts', start_line: 1, end_line: 1, new_string: text, anchor }),
+      );
+
+    await rangeEdit('const y = 1;');
+    state.diagnostics = [introduced];
+    await rangeEdit('const z = 1;');
+
+    expect(queue.drain()).toHaveLength(1);
+  });
+});
+
+describe('EditTool pre-write reminder baseline', () => {
+  const introduced: LspDiagnostic = {
+    range: { start: { line: 1, character: 2 }, end: { line: 1, character: 8 } },
+    severity: 1,
+    message: 'Cannot find name x',
+  };
+  const preExisting: LspDiagnostic = {
+    range: { start: { line: 0, character: 5 }, end: { line: 0, character: 10 } },
+    severity: 1,
+    message: 'Pre-existing error',
+  };
+  const TEXT = 'const x = 1;\n';
+
+  type Observation = LspDiagnostic[] | { diagnostics: LspDiagnostic[]; observed: boolean };
+
+  /**
+   * Edit tool whose diagnostics observations come from a script. Each call to
+   * `diagnosticsReport` (pre-write seed first, then the post-write fetch)
+   * consumes the next entry; the last entry repeats.
+   */
+  function scriptedTool(
+    queue: EditRecoveryQueue,
+    observations: readonly Observation[],
+    hasActiveClient: boolean,
+  ): { tool: EditTool; report: ReturnType<typeof vi.fn> } {
+    let call = 0;
+    const report = vi.fn().mockImplementation(async () => {
+      const next = observations[Math.min(call, observations.length - 1)] ?? [];
+      call += 1;
+      return Array.isArray(next) ? { diagnostics: next, observed: true } : next;
+    });
+    const client = { didOpen: vi.fn(), didChange: vi.fn(), diagnosticsReport: report };
+    const registry = {
+      getClient: vi.fn().mockResolvedValue(client),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+      commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
+      activeClientFor: vi.fn().mockResolvedValue(hasActiveClient ? client : undefined),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+    return {
+      tool: new EditTool(
+        createFakeJian({
+          readText: vi.fn().mockResolvedValue(TEXT),
+          writeText: vi.fn().mockResolvedValue(0),
+        }),
+        PERMISSIVE_WORKSPACE,
+        registry,
+        undefined,
+        undefined,
+        queue,
+      ),
+      report,
+    };
+  }
+
+  function edit(tool: EditTool, replacement: string) {
+    return executeTool(
+      tool,
+      context({ path: '/tmp/a.ts', old_string: '1', new_string: replacement }),
+    );
+  }
+
+  it('queues a reminder for an error the FIRST edit of a file introduces', async () => {
+    const queue = new EditRecoveryQueue();
+    const { tool, report } = scriptedTool(queue, [[], [introduced]], true);
+
+    await edit(tool, '2');
+
+    // Two observations: one before the write (the seed) and one after it.
+    expect(report).toHaveBeenCalledTimes(2);
+    expect(queue.drain()).toHaveLength(1);
+    expect(queue.drain()[0]?.signatures).toEqual([
+      { signature: '1:Cannot find name x:1', line: 2, message: 'Cannot find name x' },
+    ]);
+  });
+
+  it('does not queue an error the file already had before the first edit', async () => {
+    const queue = new EditRecoveryQueue();
+    const { tool } = scriptedTool(queue, [[preExisting], [preExisting]], true);
+
+    await edit(tool, '2');
+
+    expect(queue.drain()).toEqual([]);
+  });
+
+  it('pre-observes the first edit even when no client is warm yet', async () => {
+    const queue = new EditRecoveryQueue();
+    // No warm client: the pre-write fetch cold-starts the same language
+    // server the post-write fetch would start anyway, so the seed happens.
+    const { tool, report } = scriptedTool(queue, [[], [introduced]], false);
+
+    await edit(tool, '2');
+
+    expect(report).toHaveBeenCalledTimes(2);
+    expect(queue.drain()).toHaveLength(1);
+  });
+
+  it('leaves the baseline unset when the pre-write observation is not observed', async () => {
+    const queue = new EditRecoveryQueue();
+    const { tool } = scriptedTool(
+      queue,
+      [{ diagnostics: [], observed: false }, [introduced]],
+      false,
+    );
+
+    await edit(tool, '2');
+
+    // An unobserved pre-fetch is not a clean baseline: nothing is queued.
+    expect(queue.drain()).toEqual([]);
+  });
+
+  it('treats a timed-out observation as no observation at all', async () => {
+    const queue = new EditRecoveryQueue();
+    const { tool } = scriptedTool(
+      queue,
+      [[], [introduced], { diagnostics: [], observed: false }, []],
+      true,
+    );
+
+    await edit(tool, '2');
+    expect(queue.drain()).toHaveLength(1);
+
+    // The poll timed out: neither the baseline nor the reminder may move.
+    await edit(tool, '3');
+    expect(queue.drain()).toHaveLength(1);
+
+    // A real observation of a clean file resolves the reminder.
+    await edit(tool, '4');
+    expect(queue.drain()).toEqual([]);
   });
 });
 
@@ -871,7 +1160,7 @@ describe('EditTool replace_range', () => {
   it('carries dedicated messages for the mode rules it enforces', () => {
     const messagesOf = (args: Record<string, unknown>): string[] => {
       const parsed = EditInputSchema.safeParse(args);
-      if (parsed.success === true) throw new Error('expected schema rejection');
+      if (parsed.success) throw new Error('expected schema rejection');
       return parsed.error.issues.map((issue) => issue.message);
     };
 
@@ -1401,7 +1690,7 @@ describe('EditTool replace_range', () => {
       getClient: vi.fn().mockResolvedValue({
         didOpen: vi.fn(),
         didChange: vi.fn(),
-        diagnostics: vi.fn().mockResolvedValue([errorDiag]),
+        diagnosticsReport: vi.fn().mockResolvedValue({ diagnostics: [errorDiag], observed: true }),
       }),
       languageIdForPath: vi.fn().mockReturnValue('typescript'),
       commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
@@ -1927,10 +2216,10 @@ describe('EditTool stale-anchor recovery', () => {
     const fakeClient = {
       didOpen: vi.fn(),
       didChange: vi.fn(),
-      diagnostics: vi.fn().mockImplementation(async () => {
+      diagnosticsReport: vi.fn().mockImplementation(async () => {
         const next = diagnostics[Math.min(call, diagnostics.length - 1)] ?? [];
         call += 1;
-        return next;
+        return { diagnostics: next, observed: true };
       }),
     };
     return {
@@ -2343,9 +2632,9 @@ describe('EditTool stale-anchor recovery', () => {
     const fakeClient = {
       didOpen: vi.fn(),
       didChange: vi.fn(),
-      diagnostics: vi.fn().mockImplementation(async () => {
+      diagnosticsReport: vi.fn().mockImplementation(async () => {
         call += 1;
-        return errorDiagnostics(call);
+        return { diagnostics: errorDiagnostics(call), observed: true };
       }),
     };
     const registry = {

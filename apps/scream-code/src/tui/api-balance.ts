@@ -42,13 +42,26 @@ function resolveApiKey(providerName: string): string | undefined {
   const config = readConfigFile(join(getDataDir(), 'config.toml'));
   const provider = config.providers?.[providerName];
   if (!provider) return undefined;
-  const direct = provider.apiKey?.trim();
+  // A configured rotation pool is probed with its first non-blank key only:
+  // the balance endpoint reports per-account state, sessions are key-affine
+  // (different sessions start on different pool keys), and the remaining
+  // keys' balances are not shown.
+  const direct = firstKey(provider.apiKey)?.trim();
   if (direct !== undefined && direct.length > 0) return direct;
   // Match the engine's providerApiKey convention (provider-manager.ts):
   // env values are stored under a key derived from the provider type.
   const envKey = envKeyForProviderType(provider.type);
   const stored = envKey !== undefined ? provider.env?.[envKey]?.trim() : undefined;
   return stored !== undefined && stored.length > 0 ? stored : undefined;
+}
+
+/** First non-blank key of a configured credential. Blanks are skipped the way
+ *  the engine's `providerKeyPool` skips them, so a pool whose first entry is
+ *  empty probes with its first real key instead of dropping to the env
+ *  fallback. */
+function firstKey(value: string | string[] | undefined): string | undefined {
+  if (!Array.isArray(value)) return value;
+  return value.map((key) => key.trim()).find((key) => key.length > 0);
 }
 
 function envKeyForProviderType(type: string | undefined): string | undefined {

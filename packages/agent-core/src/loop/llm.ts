@@ -82,5 +82,12 @@ export interface LLM {
   readonly modelName: string;
   readonly capability?: ModelCapability | undefined;
   isRetryableError?(error: unknown): boolean;
+  /**
+   * Switch to the next API key of a multi-key provider pool, rebuilding the
+   * client with it. Returns `false` when the provider has no pool or no other
+   * key is currently usable. Optional: the retry loop falls back to its
+   * regular quota backoff when absent or `false`.
+   */
+  rotateAuth?(): boolean;
   chat(params: LLMChatParams): Promise<LLMChatResponse>;
 }

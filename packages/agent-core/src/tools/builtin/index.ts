@@ -24,6 +24,8 @@ export * from './memory/memory-write';
 export * from './knowledge/knowledge-lookup';
 export * from './image/image-generate';
 export * from './lsp-tool';
+export * from './ast/ast-grep';
+export * from './ast/ast-edit';
 export * from './mcp/discover-mcp-tools';
 export * from './mcp/resources';
 
@@ -51,3 +53,4 @@ export * from './web/fetch-url';
 export * from './web/paper-search';
 export * from './web/web-search';
 export * from './wait';
+export * from './debug';

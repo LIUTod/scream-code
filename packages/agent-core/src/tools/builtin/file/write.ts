@@ -16,13 +16,20 @@ import type { LspRegistry } from '../../../lsp/registry';
 import type { ToolResultDisplay } from '../../display';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { countLines, fileDiffSummary } from '../../support/file-diff';
+import type { EditRecoveryQueue } from '../../support/edit-recovery-queue';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import { withFileMutationLock } from './mutation-queue';
 import { scanCache } from '../../support/scan-cache';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { scanConflictLines } from './conflict-detect';
-import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
+import {
+  fetchDiagnostics,
+  formatDiagnosticsHint,
+  formatDiagnosticsNotice,
+  reconcileEditReminders,
+  type DiagnosticsResult,
+} from './lsp-diagnostics';
 import WRITE_DESCRIPTION from './write.md';
 
 /** Mask isolating the file-type bits of a stat mode. */
@@ -85,6 +92,13 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
     private readonly lspRegistry?: LspRegistry,
+    /**
+     * Session queue of post-edit error reminders; absent outside an Agent.
+     * A Write can be the fix that resolves a pending reminder (the repair
+     * often bypasses Edit), and its post-write diagnostics are the only
+     * observation that path gets.
+     */
+    private readonly editRecovery?: EditRecoveryQueue,
   ) {}
 
   async resolveExecution(args: WriteInput): Promise<ToolExecution> {
@@ -155,7 +169,10 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // length would only equal the byte count for pure ASCII content, so it
       // is not used here.
       const bytesWritten = Buffer.byteLength(args.content, 'utf8');
-      const { notice, hint, hasErrors } = await this.appendDiagnostics(safePath);
+      const { notice, hint, result } = await this.appendDiagnostics(safePath);
+      // A Write often IS the fix for a pending reminder. Fold the observation
+      // into the queue before returning so the reminder stops re-appearing.
+      await reconcileEditReminders(this.editRecovery, this.jian, safePath, result);
       // Diagnostics are appended to the (model-visible) output so the model
       // can self-correct in the same turn; the install hint travels on the
       // `message` side channel for the UI. `hasErrors` keeps isError so the
@@ -166,7 +183,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
           ? `${base}\n\nWrite applied; the language server reports:\n${notice}`
           : base;
       const message = hint.length > 0 ? hint : undefined;
-      if (hasErrors) return { isError: true, output, message };
+      if (result.hasErrors) return { isError: true, output, message };
       return display === undefined ? { output, message } : { output, message, display };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
@@ -277,7 +294,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
 
   private async appendDiagnostics(
     safePath: string,
-  ): Promise<{ notice: string; hint: string; hasErrors: boolean }> {
+  ): Promise<{ notice: string; hint: string; result: DiagnosticsResult }> {
     const result = await fetchDiagnostics(
       this.lspRegistry,
       this.jian,
@@ -286,11 +303,12 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     );
     // Diagnostics are model-facing (appended to the tool output); the install
     // hint is user-facing and travels on the `message` side channel so it
-    // does not burn model tokens on every write.
+    // does not burn model tokens on every write. The raw result travels too:
+    // the reminder reconciliation needs `observed`, not just the rendered text.
     return {
       notice: formatDiagnosticsNotice(result),
       hint: formatDiagnosticsHint(result),
-      hasErrors: result.hasErrors,
+      result,
     };
   }
 }

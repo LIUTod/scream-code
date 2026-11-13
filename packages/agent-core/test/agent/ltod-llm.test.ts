@@ -6,7 +6,7 @@ import {
   type StreamedMessagePart,
   type ToolCall,
 } from '@scream-code/ltod';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { LtodLLM, type GenerateFn } from '../../src/agent/turn/ltod-llm';
 import type { ToolCallDelta } from '../../src/loop';
@@ -511,5 +511,24 @@ describe('LtodLLM secret obfuscation', () => {
     const userText = (capturedHistory![0]!.content[0] as { text: string }).text;
     expect(userText).toBe('use mysecretvalue here');
     expect(seenText).toEqual(['echo mysecretvalue']);
+  });
+});
+
+describe('LtodLLM auth rotation', () => {
+  it('delegates rotateAuth to the provider', () => {
+    const rotateApiKey = vi.fn(() => true);
+    const llm = new LtodLLM({
+      provider: { ...provider, rotateApiKey },
+      modelName: 'test-model',
+      systemPrompt: '',
+    });
+
+    expect(llm.rotateAuth()).toBe(true);
+    expect(rotateApiKey).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports no rotation when the provider has no key pool', () => {
+    const llm = new LtodLLM({ provider, modelName: 'test-model', systemPrompt: '' });
+    expect(llm.rotateAuth()).toBe(false);
   });
 });

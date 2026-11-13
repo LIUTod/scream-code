@@ -7,12 +7,17 @@ import {
   emptyUsage,
   isRetryableGenerateError,
 } from '@scream-code/ltod';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ErrorCodes, ScreamError } from '#/errors';
 import type { LoopEvent, LoopEventDispatcher, LoopStepRetryingEvent } from '#/loop/events';
 import type { LLM, LLMChatParams, LLMChatResponse } from '#/loop/llm';
-import { chatWithRetry, QUOTA_RETRY_ATTEMPTS, STREAM_FORMAT_RETRY_ATTEMPTS } from '#/loop/retry';
+import {
+  chatWithRetry,
+  DEFAULT_MAX_KEY_ROTATIONS,
+  QUOTA_RETRY_ATTEMPTS,
+  STREAM_FORMAT_RETRY_ATTEMPTS,
+} from '#/loop/retry';
 
 function okResponse(): LLMChatResponse {
   return { toolCalls: [], usage: emptyUsage() };
@@ -338,5 +343,156 @@ describe('chatWithRetry: step.retrying classification', () => {
     // being reported as `internal`, so consumers keep their own fallback.
     const event = await retryEventFor(new Error('mystery failure'));
     expect(event.errorCode).toBeUndefined();
+  });
+});
+
+describe('chatWithRetry: API-key rotation on quota-429s', () => {
+  const quotaError = () =>
+    new APIProviderRateLimitError('Allocated quota exceeded', null, 'QUOTA_EXHAUSTED', 1);
+
+  function makeRotatingInput(
+    llm: LLM,
+    signal: AbortSignal,
+    events: LoopStepRetryingEvent[],
+    maxRotations?: number,
+  ): Parameters<typeof chatWithRetry>[0] {
+    return {
+      llm,
+      params: { messages: [], tools: [], signal },
+      dispatchEvent: (async (event: LoopEvent) => {
+        if (event.type === 'step.retrying') events.push(event);
+      }) as LoopEventDispatcher,
+      turnId: 't',
+      currentStep: 1,
+      stepUuid: 'u',
+      ...(maxRotations === undefined ? {} : { maxRotations }),
+    };
+  }
+
+  it('retries immediately on a rotated key instead of paying the quota backoff', async () => {
+    let calls = 0;
+    const rotateAuth = vi.fn(() => true);
+    const events: LoopStepRetryingEvent[] = [];
+    const llm: LLM = {
+      systemPrompt: '',
+      modelName: 'mock',
+      isRetryableError: (e) => isRetryableGenerateError(e),
+      rotateAuth,
+      async chat(): Promise<LLMChatResponse> {
+        calls += 1;
+        if (calls === 1) throw quotaError();
+        return okResponse();
+      },
+    };
+
+    const response = await chatWithRetry(
+      makeRotatingInput(llm, new AbortController().signal, events),
+    );
+
+    expect(response).toEqual(okResponse());
+    expect(calls).toBe(2);
+    expect(rotateAuth).toHaveBeenCalledTimes(1);
+    // A rotation is an immediate re-issue: the retry event carries no wait.
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ failedAttempt: 1, nextAttempt: 1, delayMs: 0 });
+  });
+
+  it('caps rotations and still spends the full quota attempt budget afterwards', async () => {
+    let calls = 0;
+    const rotateAuth = vi.fn(() => true);
+    const events: LoopStepRetryingEvent[] = [];
+    const llm: LLM = {
+      systemPrompt: '',
+      modelName: 'mock',
+      isRetryableError: (e) => isRetryableGenerateError(e),
+      rotateAuth,
+      async chat(): Promise<LLMChatResponse> {
+        calls += 1;
+        throw quotaError();
+      },
+    };
+
+    await expect(
+      chatWithRetry(makeRotatingInput(llm, new AbortController().signal, events)),
+    ).rejects.toMatchObject({ name: 'APIProviderRateLimitError' });
+
+    // Rotations are free of the attempt budget, so the request gets
+    // `DEFAULT_MAX_KEY_ROTATIONS` immediate hops AND `QUOTA_RETRY_ATTEMPTS`
+    // backoff attempts before surfacing the error.
+    expect(rotateAuth).toHaveBeenCalledTimes(DEFAULT_MAX_KEY_ROTATIONS);
+    expect(calls).toBe(DEFAULT_MAX_KEY_ROTATIONS + QUOTA_RETRY_ATTEMPTS);
+  });
+
+  it('keeps today quota behavior when no other key is usable', async () => {
+    let calls = 0;
+    const rotateAuth = vi.fn(() => false);
+    const events: LoopStepRetryingEvent[] = [];
+    const llm: LLM = {
+      systemPrompt: '',
+      modelName: 'mock',
+      isRetryableError: (e) => isRetryableGenerateError(e),
+      rotateAuth,
+      async chat(): Promise<LLMChatResponse> {
+        calls += 1;
+        throw quotaError();
+      },
+    };
+
+    await expect(
+      chatWithRetry(makeRotatingInput(llm, new AbortController().signal, events)),
+    ).rejects.toMatchObject({ name: 'APIProviderRateLimitError' });
+
+    expect(calls).toBe(QUOTA_RETRY_ATTEMPTS);
+    expect(rotateAuth).toHaveBeenCalledTimes(QUOTA_RETRY_ATTEMPTS);
+  });
+
+  it('honours an explicit rotation cap', async () => {
+    let calls = 0;
+    const rotateAuth = vi.fn(() => true);
+    const events: LoopStepRetryingEvent[] = [];
+    const llm: LLM = {
+      systemPrompt: '',
+      modelName: 'mock',
+      isRetryableError: (e) => isRetryableGenerateError(e),
+      rotateAuth,
+      async chat(): Promise<LLMChatResponse> {
+        calls += 1;
+        throw quotaError();
+      },
+    };
+
+    await expect(
+      chatWithRetry(makeRotatingInput(llm, new AbortController().signal, events, 1)),
+    ).rejects.toMatchObject({ name: 'APIProviderRateLimitError' });
+
+    expect(rotateAuth).toHaveBeenCalledTimes(1);
+    expect(calls).toBe(1 + QUOTA_RETRY_ATTEMPTS);
+  });
+
+  it('does not rotate on non-quota rate limits', async () => {
+    let calls = 0;
+    const rotateAuth = vi.fn(() => true);
+    const events: LoopStepRetryingEvent[] = [];
+    const llm: LLM = {
+      systemPrompt: '',
+      modelName: 'mock',
+      isRetryableError: (e) => isRetryableGenerateError(e),
+      rotateAuth,
+      async chat(): Promise<LLMChatResponse> {
+        calls += 1;
+        if (calls === 1) {
+          throw new APIProviderRateLimitError('Too many requests', null, 'RATE_LIMIT_EXCEEDED', 1);
+        }
+        return okResponse();
+      },
+    };
+
+    const response = await chatWithRetry(
+      makeRotatingInput(llm, new AbortController().signal, events),
+    );
+
+    expect(response).toEqual(okResponse());
+    expect(calls).toBe(2);
+    expect(rotateAuth).not.toHaveBeenCalled();
   });
 });

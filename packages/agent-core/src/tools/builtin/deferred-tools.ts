@@ -4,9 +4,9 @@
  *
  * Why this exists: every declared tool costs its JSON schema on every model
  * request (see `discover-mcp-tools.ts` for the MCP-side version of the same
- * argument). Eight low-frequency built-in groups — cron, memory, knowledge,
- * goal, image, make-skill, manage-plugin, inspect — are removed from the
- * default tool table (about 19 schemas) and offered through this one portal
+ * argument). Nine low-frequency built-in groups — cron, memory, knowledge,
+ * goal, image, make-skill, manage-plugin, inspect, debug — are removed from
+ * the default tool table (about 20 schemas) and offered through this one portal
  * tool instead. A group's tools are NOT constructed while deferred; enabling
  * a group constructs its instances and puts their names into the enabled
  * set, so they are callable from the model's next turn (the turn loop
@@ -33,6 +33,7 @@ import { CronDeleteTool } from '../cron/cron-delete';
 import { CronListTool } from '../cron/cron-list';
 import type { WorkspaceConfig } from '../support/workspace';
 import { toInputJsonSchema } from '../support/input-schema';
+import { DebugTool } from './debug';
 import { CreateGoalTool } from './goal/create-goal';
 import { GetGoalTool } from './goal/get-goal';
 import { SetGoalBudgetTool } from './goal/set-goal-budget';
@@ -72,6 +73,7 @@ export const DEFAULT_DEFERRED_GROUP_NAMES = [
   'make-skill',
   'manage-plugin',
   'inspect',
+  'debug',
 ] as const;
 
 export type DeferredToolGroupName = (typeof DEFAULT_DEFERRED_GROUP_NAMES)[number];
@@ -192,6 +194,16 @@ export const DEFERRED_GROUPS: readonly DeferredToolGroup[] = [
     name: 'inspect',
     toolNames: ['InspectOwnAssets'],
     construct: (context) => [new InspectOwnAssetsTool(context.agent)],
+  },
+  {
+    // A Python debugger session is opt-in: it spawns a process tree, needs
+    // debugpy installed, and is only useful while chasing a concrete bug.
+    // Construction is cheap (nothing spawns until `launch`/`attach`).
+    name: 'debug',
+    toolNames: ['Debug'],
+    construct: (context) => [
+      new DebugTool(context.jian, context.cwd, context.agent.lspSupervisor),
+    ],
   },
 ];
 

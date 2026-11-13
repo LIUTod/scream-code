@@ -9,7 +9,7 @@ const strip = (text: string): string => text.replaceAll(ANSI, '');
 const state = {
   model: '',
   availableModels: {},
-  version: '0.19.8',
+  version: '0.20.0',
   hasNewVersion: false,
   latestVersion: null,
   like: {},

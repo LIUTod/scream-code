@@ -87,6 +87,7 @@ describe('deferred group table', () => {
       'make-skill',
       'manage-plugin',
       'inspect',
+      'debug',
     ]);
     expect(DEFERRED_GROUPS.length).toBe(DEFAULT_DEFERRED_GROUP_NAMES.length);
   });
@@ -287,9 +288,13 @@ describe('tool portal in the registry (default mode)', () => {
       'Enabled cron: CronCreate, CronList, CronDelete. They are available from your next turn.',
     );
     expect(tools.getBuiltinTool('CronCreate')).toBeDefined();
-    expect(offered(tools)).toEqual(
-      [...before, 'CronCreate', 'CronDelete', 'CronList'].toSorted(),
-    );
+    // The enable adds the group's tools and loses nothing that was offered
+    // before; the exact default-set shape is pinned by the registry tests.
+    const after = offered(tools);
+    for (const name of before) expect(after, name).toContain(name);
+    expect(after).toContain('CronCreate');
+    expect(after).toContain('CronDelete');
+    expect(after).toContain('CronList');
     expect(tools.data().find((info) => info.name === 'CronCreate')?.active).toBe(true);
   });
 
@@ -319,7 +324,7 @@ describe('tool portal in the registry (default mode)', () => {
     const outcome = tools.enableDeferredToolGroup('everything');
     expect(outcome.status).toBe('error');
     expect(outcome.status === 'error' && outcome.message).toBe(
-      "Unknown tool group 'everything'. Available groups: cron, memory, knowledge, goal, image, make-skill, manage-plugin, inspect.",
+      "Unknown tool group 'everything'. Available groups: cron, memory, knowledge, goal, image, make-skill, manage-plugin, inspect, debug.",
     );
   });
 
@@ -385,6 +390,8 @@ describe('toolPortal: off restores the pre-portal registry', () => {
         "Edit",
         "Grep",
         "Glob",
+        "ast_grep",
+        "ast_edit",
         "Bash",
         "python",
         "RunScript",
@@ -411,6 +418,7 @@ describe('toolPortal: off restores the pre-portal registry', () => {
         "MakeSkillApply",
         "ManagePlugin",
         "LSP",
+        "Debug",
       ]
     `);
   });

@@ -12,6 +12,10 @@ tools:
   - Edit
   - Grep
   - Glob
+  # Structural search and rewrite (@ast-grep/napi). Exact tool names are the
+  # lowercase forms the tools declare themselves.
+  - ast_grep
+  - ast_edit
   - Bash
   # Script execution mode (enabled by default): runs model-written JavaScript
   # in a QuickJS sandbox and calls the tools above from inside the script.
@@ -19,6 +23,11 @@ tools:
   # their own restricted tool lists.
   - RunScript
   - LSP
+  # Interactive Python debugger (Debug Adapter Protocol via debugpy). A
+  # deferred portal group: the portal withholds the name until the model
+  # enables the `debug` group, while a portal-off registry still offers the
+  # name listed here (constructed tools no profile lists are unreachable).
+  - Debug
   - TaskList
   - TaskOutput
   - TaskStop

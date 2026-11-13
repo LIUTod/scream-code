@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/agent-core",
-  "version": "0.19.8",
+  "version": "0.20.0",
   "private": true,
   "description": "The unified agent engine for Scream",
   "license": "MIT",
@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "@antfu/utils": "^9.3.0",
+    "@ast-grep/napi": "^0.51.2",
     "@earendil-works/pi-codemode": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
@@ -55,6 +56,7 @@
     "ajv-formats": "^3.0.1",
     "diff": "^9.0.0",
     "fast-xml-parser": "^5.10.1",
+    "js-tiktoken": "^1.0.21",
     "js-yaml": "^4.1.1",
     "linkedom": "^0.18.12",
     "nunjucks": "^3.2.4",

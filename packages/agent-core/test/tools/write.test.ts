@@ -8,6 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type WriteInput, WriteInputSchema, WriteTool } from '../../src/tools/builtin/file/write';
 import { fileDiffSummary } from '../../src/tools/support/file-diff';
+import {
+  EDIT_RECOVERY_INSTRUCTION,
+  EditRecoveryQueue,
+  type EditRecoverySignature,
+} from '../../src/tools/support/edit-recovery-queue';
 import { testJian } from '../fixtures/test-jian';
 import { createFakeJian, PERMISSIVE_WORKSPACE, toolContentString } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
@@ -433,7 +438,7 @@ describe('WriteTool', () => {
       getClient: vi.fn().mockResolvedValue({
         didOpen: vi.fn(),
         didChange: vi.fn(),
-        diagnostics: vi.fn().mockResolvedValue([errorDiag]),
+        diagnosticsReport: vi.fn().mockResolvedValue({ diagnostics: [errorDiag], observed: true }),
       }),
       languageIdForPath: vi.fn().mockReturnValue('typescript'),
       commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
@@ -469,7 +474,7 @@ describe('WriteTool', () => {
       getClient: vi.fn().mockResolvedValue({
         didOpen: vi.fn(),
         didChange: vi.fn(),
-        diagnostics: vi.fn().mockResolvedValue([warningDiag]),
+        diagnosticsReport: vi.fn().mockResolvedValue({ diagnostics: [warningDiag], observed: true }),
       }),
       languageIdForPath: vi.fn().mockReturnValue('typescript'),
       commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
@@ -692,5 +697,111 @@ describe('WriteTool file_diff display', () => {
     expect(result.isError).toBe(true);
     expect(Object.keys(result)).not.toContain('display');
     expect(readText).not.toHaveBeenCalled();
+  });
+});
+
+describe('WriteTool edit-recovery reminders', () => {
+  const errorSignature: EditRecoverySignature = {
+    signature: '1:Cannot find name x:1',
+    line: 2,
+    message: 'Cannot find name x',
+  };
+
+  function pendingReminder(path: string): Parameters<EditRecoveryQueue['enqueue']>[0] {
+    return {
+      path,
+      displayPath: path,
+      signatures: [errorSignature],
+      instruction: EDIT_RECOVERY_INSTRUCTION,
+    };
+  }
+
+  function registryWith(observation: {
+    diagnostics: LspDiagnostic[];
+    observed: boolean;
+  }): LspRegistry {
+    return {
+      getClient: vi.fn().mockResolvedValue({
+        didOpen: vi.fn(),
+        didChange: vi.fn(),
+        diagnosticsReport: vi.fn().mockResolvedValue(observation),
+      }),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+      commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+  }
+
+  /** stat(): `/tmp` is a directory, everything else a regular file. */
+  const fileStat = vi.fn().mockImplementation(async (path: string) => ({
+    stMode: path === '/tmp' ? 0o040755 : 0o100644,
+  }));
+
+  function tool(
+    queue: EditRecoveryQueue,
+    observation: { diagnostics: LspDiagnostic[]; observed: boolean },
+  ): WriteTool {
+    return new WriteTool(
+      createFakeJian({
+        stat: fileStat,
+        writeText: vi.fn().mockResolvedValue(0),
+        readText: vi.fn().mockResolvedValue('const x = 1;\n'),
+      }),
+      PERMISSIVE_WORKSPACE,
+      registryWith(observation),
+      queue,
+    );
+  }
+
+  it('clears a pending reminder when the write fixes the reported error', async () => {
+    const queue = new EditRecoveryQueue();
+    queue.enqueue(pendingReminder('/tmp/fixed.ts'));
+
+    const result = await executeTool(
+      tool(queue, { diagnostics: [], observed: true }),
+      context({ path: '/tmp/fixed.ts', content: 'const x: number = 1;\n' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(queue.drain()).toEqual([]);
+  });
+
+  it('keeps the reminder when the post-write observation timed out', async () => {
+    const queue = new EditRecoveryQueue();
+    queue.enqueue(pendingReminder('/tmp/slow.ts'));
+
+    await executeTool(
+      tool(queue, { diagnostics: [], observed: false }),
+      context({ path: '/tmp/slow.ts', content: 'const x = 1;\n' }),
+    );
+
+    expect(queue.drain()).toHaveLength(1);
+  });
+
+  it('clears a reminder whose file no longer exists', async () => {
+    const queue = new EditRecoveryQueue();
+    queue.enqueue(pendingReminder('/tmp/deleted.ts'));
+    const missingStat = vi.fn().mockImplementation(async (path: string) => {
+      if (path === '/tmp/deleted.ts') {
+        throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
+      }
+      return { stMode: path === '/tmp' ? 0o040755 : 0o100644 };
+    });
+
+    await executeTool(
+      new WriteTool(
+        createFakeJian({
+          stat: missingStat,
+          writeText: vi.fn().mockResolvedValue(0),
+          readText: vi.fn().mockResolvedValue('const x = 1;\n'),
+        }),
+        PERMISSIVE_WORKSPACE,
+        registryWith({ diagnostics: [], observed: true }),
+        queue,
+      ),
+      context({ path: '/tmp/other.ts', content: 'const x = 1;\n' }),
+    );
+
+    expect(queue.drain()).toEqual([]);
   });
 });

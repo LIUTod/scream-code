@@ -20,6 +20,12 @@ import type { LspRegistry } from '../../../lsp/registry';
 import type { ToolResultDisplay } from '../../display';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import type { EditSnapshotStore } from '../../support/edit-snapshot-store';
+import {
+  EDIT_RECOVERY_INSTRUCTION,
+  diagnosticsSignatures,
+  type EditRecoveryQueue,
+  type EditRecoverySignature,
+} from '../../support/edit-recovery-queue';
 import { fileDiffSummary } from '../../support/file-diff';
 import { toInputJsonSchema } from '../../support/input-schema';
 import {
@@ -279,6 +285,13 @@ export class EditTool implements BuiltinTool<EditInput> {
   readonly description = EDIT_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(EditInputSchema);
 
+  /**
+   * Last diagnostics observation per file (canonical path → signature set).
+   * Diffing each new observation against it is what separates errors this
+   * edit introduced from errors the file already had.
+   */
+  private readonly diagnosticsSeen = new Map<string, Set<string>>();
+
   constructor(
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
@@ -286,6 +299,11 @@ export class EditTool implements BuiltinTool<EditInput> {
     private readonly workingSet?: WorkingSet,
     /** Session snapshot store behind stale-anchor recovery; absent outside an Agent. */
     private readonly editSnapshots?: EditSnapshotStore,
+    /**
+     * Session queue of post-edit error reminders, rendered back into the
+     * prompt by EditRecoveryInjector; absent outside an Agent.
+     */
+    private readonly editRecovery?: EditRecoveryQueue,
   ) {}
 
   async resolveExecution(args: EditInput): Promise<ToolExecution> {
@@ -324,7 +342,7 @@ export class EditTool implements BuiltinTool<EditInput> {
     signal?: AbortSignal,
   ): Promise<ExecutableToolResult> {
     signal?.throwIfAborted();
-    const result = await this.executionCore(args, safePath);
+    const result = await this.executionCore(args, safePath, signal);
     const inputHash = hashEditPayload({
       path: args.path,
       old_string: args.old_string,
@@ -364,7 +382,11 @@ export class EditTool implements BuiltinTool<EditInput> {
     return result;
   }
 
-  private async executionCore(args: EditInput, safePath: string): Promise<ExecutableToolResult> {
+  private async executionCore(
+    args: EditInput,
+    safePath: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutableToolResult> {
     const startLine = args.start_line;
     const endLine = args.end_line;
     const oldString = args.old_string;
@@ -430,6 +452,14 @@ export class EditTool implements BuiltinTool<EditInput> {
       const raw = await this.jian.readText(safePath);
       const modelView = toModelTextView(raw);
       const content = modelView.text;
+      // Seed the reminder baseline from a PRE-write observation. Without a
+      // baseline the post-write track cannot tell an error this edit
+      // introduced from one the file already had, so the first edit of a file
+      // would never queue a reminder. Bounded: only when the file has no
+      // baseline yet and a language client is already active (this never
+      // cold-starts a server); a timeout or an unavailable server leaves the
+      // baseline unset, keeping the conservative "record only" behaviour.
+      await this.seedDiagnosticsBaseline(safePath, signal);
       const replaceAll = args.replace_all ?? false;
       const currentAnchor = computeAnchor(content);
       // Range mode always carries an anchor (the mode guards above return
@@ -564,7 +594,8 @@ export class EditTool implements BuiltinTool<EditInput> {
         await this.jian.writeText(safePath, writtenText);
         scanCache.clear();
         this.rememberPostEditSnapshot(safePath, newContent);
-        const { notice, hint, hasErrors } = await this.appendDiagnostics(safePath);
+        const { notice, hint, hasErrors, signatures } = await this.appendDiagnostics(safePath);
+        this.trackEditDiagnostics(safePath, args.path, signatures);
         // Diagnostics are appended to the (model-visible) output so the model
         // can self-correct in the same turn; the install hint travels on the
         // `message` side channel for the UI. `hasErrors` keeps isError so the
@@ -601,7 +632,8 @@ export class EditTool implements BuiltinTool<EditInput> {
       await this.jian.writeText(safePath, writtenText);
       scanCache.clear();
       this.rememberPostEditSnapshot(safePath, newContent);
-      const { notice, hint, hasErrors } = await this.appendDiagnostics(safePath);
+      const { notice, hint, hasErrors, signatures } = await this.appendDiagnostics(safePath);
+      this.trackEditDiagnostics(safePath, args.path, signatures);
       // Diagnostics are appended to the (model-visible) output so the model
       // can self-correct in the same turn; the install hint travels on the
       // `message` side channel for the UI. `hasErrors` keeps isError so the
@@ -740,7 +772,9 @@ export class EditTool implements BuiltinTool<EditInput> {
           safePath,
           this.workspace.workspaceDir,
         );
-        preApplyErrorCount = pre.diagnostics.filter((d) => d.severity === 1).length;
+        preApplyErrorCount = pre.observed
+          ? pre.diagnostics.filter((d) => d.severity === 1).length
+          : undefined;
       }
     }
 
@@ -836,7 +870,8 @@ export class EditTool implements BuiltinTool<EditInput> {
     const writtenText = materializeModelText(newContent, modelView.lineEndingStyle);
     await this.jian.writeText(safePath, writtenText);
     scanCache.clear();
-    const { notice, hint, hasErrors, errorCount } = await this.appendDiagnostics(safePath);
+    const { notice, hint, hasErrors, errorCount, signatures } =
+      await this.appendDiagnostics(safePath);
 
     if (
       recovery !== undefined &&
@@ -873,6 +908,9 @@ export class EditTool implements BuiltinTool<EditInput> {
     // diagnostics gate flags hasErrors: the write already happened, and the
     // snapshot's job is to mirror the file we just produced.
     this.rememberPostEditSnapshot(safePath, newContent);
+    // Only now: a rolled-back apply (above) must not fold its diagnostics into
+    // the reminder state — they describe text that is no longer on disk.
+    this.trackEditDiagnostics(safePath, args.path, signatures);
 
     const recoveryNote =
       recovery === undefined
@@ -919,7 +957,20 @@ export class EditTool implements BuiltinTool<EditInput> {
 
   private async appendDiagnostics(
     safePath: string,
-  ): Promise<{ notice: string; hint: string; hasErrors: boolean; errorCount: number }> {
+  ): Promise<{
+    notice: string;
+    hint: string;
+    hasErrors: boolean;
+    errorCount: number;
+    /**
+     * Signatures of the errors this observation reported, or undefined when
+     * the language server was unavailable (no registry, unsupported file
+     * type, server missing, or the fetch timed out without a publication).
+     * An unavailable or unobserved fetch is not an observation: it must
+     * neither introduce nor resolve a reminder.
+     */
+    signatures: readonly EditRecoverySignature[] | undefined;
+  }> {
     const result = await fetchDiagnostics(
       this.lspRegistry,
       this.jian,
@@ -929,13 +980,97 @@ export class EditTool implements BuiltinTool<EditInput> {
     // Diagnostics are model-facing (appended to the tool output); the install
     // hint is user-facing and travels on the `message` side channel so it
     // does not burn model tokens on every edit. `errorCount` (severity-1
-    // only) feeds the stale-anchor recovery rollback gate.
+    // only) feeds the stale-anchor recovery rollback gate; `signatures` feeds
+    // the session reminder queue.
     return {
       notice: formatDiagnosticsNotice(result),
       hint: formatDiagnosticsHint(result),
       hasErrors: result.hasErrors,
       errorCount: result.diagnostics.filter((d) => d.severity === 1).length,
+      signatures:
+        result.available && result.observed
+          ? diagnosticsSignatures(result.diagnostics)
+          : undefined,
     };
+  }
+
+  /**
+   * Record a pre-write diagnostics observation as the file's baseline when it
+   * has none yet.
+   *
+   * The first edit of a file used to record only (no baseline, so every error
+   * looked pre-existing) — which meant a single-edit fix never queued its
+   * reminder. Observing once before the write supplies that baseline, so the
+   * post-write diff can name the errors this edit introduced.
+   *
+   * Silent and bounded by construction: no queue or registry returns
+   * immediately, an already-seeded baseline is not re-fetched, and an
+   * unobserved result (timeout, unavailable server, aborted turn) leaves the
+   * baseline unset instead of guessing it. No activeClientFor gate: the
+   * post-write fetch below starts the same language server anyway, so
+   * requiring an already-running one would make the first edit of a session
+   * unreachable — the exact case this seeding exists for.
+   */
+  private async seedDiagnosticsBaseline(
+    safePath: string,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (this.editRecovery === undefined || this.lspRegistry === undefined) return;
+    if (this.diagnosticsSeen.has(safePath)) return;
+    if (signal?.aborted === true) return;
+    let pre;
+    try {
+      pre = await fetchDiagnostics(
+        this.lspRegistry,
+        this.jian,
+        safePath,
+        this.workspace.workspaceDir,
+      );
+    } catch {
+      return;
+    }
+    if (!pre.observed) return;
+    this.diagnosticsSeen.set(
+      safePath,
+      new Set(diagnosticsSignatures(pre.diagnostics).map((signature) => signature.signature)),
+    );
+  }
+
+  /**
+   * Fold one post-apply diagnostics observation into the session reminder
+   * state.
+   *
+   * The difference against the file's last-seen set is what this edit
+   * introduced; the previous set is then replaced by the current one (always,
+   * so a later edit is diffed against what the file looked like after this
+   * one). The queue's resolution check runs on every observation, so a
+   * reminder clears as soon as some later edit's diagnostics no longer list
+   * its signatures.
+   *
+   * A file whose baseline was never observed (no active client at any point)
+   * only records here: with no baseline every error would look introduced, and
+   * files routinely carry pre-existing errors.
+   */
+  private trackEditDiagnostics(
+    safePath: string,
+    displayPath: string,
+    signatures: readonly EditRecoverySignature[] | undefined,
+  ): void {
+    const queue = this.editRecovery;
+    if (queue === undefined || signatures === undefined) return;
+    const current = new Set(signatures.map((signature) => signature.signature));
+    const previous = this.diagnosticsSeen.get(safePath);
+    this.diagnosticsSeen.set(safePath, current);
+    queue.clearIfResolved(safePath, current);
+    if (previous === undefined) return;
+    const introduced = signatures.filter((signature) => !previous.has(signature.signature));
+    if (introduced.length === 0) return;
+    queue.enqueue({
+      path: safePath,
+      displayPath,
+      signatures: introduced,
+      instruction: EDIT_RECOVERY_INSTRUCTION,
+    });
   }
 
   /**

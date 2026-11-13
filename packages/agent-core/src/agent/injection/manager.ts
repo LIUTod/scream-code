@@ -1,5 +1,6 @@
 import type { Agent } from '..';
 import type { DynamicInjector } from './injector';
+import { EditRecoveryInjector } from './edit-recovery';
 import { GoalInjector } from './goal';
 import { createMcpCapabilityGuideInjectors } from './mcp-capability-guides';
 import { PermissionModeInjector } from './permission-mode';
@@ -23,6 +24,7 @@ export class InjectionManager {
       new TodoListReminderInjector(agent),
       new GoalInjector(agent),
       new WorkingSetInjector(agent),
+      new EditRecoveryInjector(agent),
       new UserPrefsInjector(agent),
     ];
   }

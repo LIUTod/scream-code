@@ -1,5 +1,5 @@
 import type { Message } from "@scream-code/ltod";
-import { estimateTokensForMessage } from "../../utils/tokens";
+import { estimateTokensForMessage, type TokenizerKind } from "../../utils/tokens";
 import type { CompactionSource } from "./types";
 
 export interface CompactionConfig {
@@ -77,7 +77,12 @@ export interface CompactionStrategy {
 export class DefaultCompactionStrategy implements CompactionStrategy {
   constructor(
     protected readonly maxSizeProvider: () => number,
-    protected readonly config: CompactionConfig = DEFAULT_COMPACTION_CONFIG
+    protected readonly config: CompactionConfig = DEFAULT_COMPACTION_CONFIG,
+    /** Tokenizer for local token estimates: the session's configured kind,
+     *  threaded from the agent so cut-point math uses the same measurement
+     *  scale as the context gauge. Omitted (direct construction in tests or by
+     *  a host) keeps the character heuristic. */
+    protected readonly tokenizerKind?: () => TokenizerKind | undefined
   ) { }
 
   protected get maxSize(): number {
@@ -140,6 +145,7 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
     let recentUserMessages = 0;
     let recentSize = 0;
     let bestN: number | undefined;
+    const tokenizer = this.tokenizerKind?.();
 
     for (; recentMessages < messages.length; recentMessages++) {
       const splitIndex = messages.length - recentMessages - 1;
@@ -154,7 +160,7 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
         if (m2.role === 'user') {
           recentUserMessages++;
         }
-        recentSize += estimateTokensForMessage(m2);
+        recentSize += estimateTokensForMessage(m2, tokenizer);
       }
 
       if (canSplitAfter(messages, splitIndex)) {
@@ -180,9 +186,10 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
     );
     let reducedSize = 0;
     let bestN: number | undefined;
+    const tokenizer = this.tokenizerKind?.();
 
     for (let i = messages.length - 2; i > 0; i--) {
-      reducedSize += estimateTokensForMessage(messages[i + 1]!);
+      reducedSize += estimateTokensForMessage(messages[i + 1]!, tokenizer);
       if (canSplitAfter(messages, i)) {
         bestN = i + 1;
         if (reducedSize >= minReducedSize) {

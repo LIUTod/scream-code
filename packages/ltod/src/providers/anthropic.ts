@@ -6,6 +6,7 @@ import {
   normalizeAPIStatusError,
   readRetryAfterMsFromHeaders,
 } from '#/errors';
+import { API_KEY_COOLDOWN_MS, createKeyRing, resolveApiKeys, type KeyRing } from '#/keys';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
 import {
   normalizeToolCallIdsForProvider,
@@ -83,7 +84,19 @@ function normalizeAnthropicStopReason(raw: string | null | undefined): {
   }
 }
 export interface AnthropicOptions {
-  apiKey?: string | undefined;
+  /**
+   * Credential, or a pool of credentials. An array is a rotation pool: the
+   * adapter picks one key per session (affinity) and swaps to the next usable
+   * key when one is rejected with a quota-style 429 (30s cooldown, see
+   * `KeyRing`). A single string behaves as today.
+   */
+  apiKey?: string | string[] | undefined;
+  /**
+   * Pre-built rotation pool. Hosts pass a session-scoped ring so several
+   * providers created for the same config entry share one cursor and one set
+   * of cooldowns. Overrides `apiKey` for client construction.
+   */
+  keyRing?: KeyRing | undefined;
   baseUrl?: string | undefined;
   model: string;
   defaultMaxTokens?: number | undefined;
@@ -869,6 +882,7 @@ export class AnthropicChatProvider implements ChatProvider {
   private _generationKwargs: AnthropicGenerationKwargs;
   private _metadata: Record<string, string> | undefined;
   private _apiKey: string | undefined;
+  private _keyRing: KeyRing | undefined;
   private _baseUrl: string | undefined;
   private _defaultHeaders: Record<string, string> | undefined;
   private _clientFactory: ((auth: ProviderRequestAuth) => Anthropic) | undefined;
@@ -879,12 +893,17 @@ export class AnthropicChatProvider implements ChatProvider {
     this._stream = options.stream ?? true;
     this._metadata = options.metadata;
     this._adaptiveThinking = options.adaptiveThinking;
-    const apiKey = options.apiKey ?? process.env['ANTHROPIC_API_KEY'];
-    this._apiKey = apiKey === undefined || apiKey.length === 0 ? undefined : apiKey;
+    const configuredKey = options.apiKey ?? process.env['ANTHROPIC_API_KEY'];
+    this._apiKey =
+      typeof configuredKey === 'string' && configuredKey.length > 0 ? configuredKey : undefined;
+    const configuredKeys = resolveApiKeys(configuredKey);
+    this._keyRing =
+      options.keyRing ?? (configuredKeys.length === 0 ? undefined : createKeyRing(configuredKeys));
     this._baseUrl = options.baseUrl;
     this._defaultHeaders = options.defaultHeaders;
     this._clientFactory = options.clientFactory;
-    this._client = this._apiKey === undefined ? undefined : this._buildClient(this._apiKey);
+    const initialKey = this._keyRing?.current() ?? this._apiKey;
+    this._client = initialKey === undefined ? undefined : this._buildClient(initialKey);
     this._generationKwargs = {
       max_tokens: resolveDefaultMaxTokens(options.model, options.defaultMaxTokens),
       betaFeatures: options.betaFeatures ?? [INTERLEAVED_THINKING_BETA],
@@ -1093,8 +1112,45 @@ export class AnthropicChatProvider implements ChatProvider {
     return resolveAuthBackedClient(
       { cachedClient: this._client, clientFactory: this._clientFactory },
       auth,
-      (a) => this._buildClient(requireProviderApiKey('AnthropicChatProvider', a, this._apiKey)),
+      (a) =>
+        this._buildClient(requireProviderApiKey('AnthropicChatProvider', a, this._currentApiKey())),
     );
+  }
+
+  /**
+   * API key the cached (constructor-time) client path uses: the ring's current
+   * key, falling back to the legacy single-key field.
+   */
+  private _currentApiKey(): string | undefined {
+    return this._keyRing?.current() ?? this._apiKey;
+  }
+
+  /**
+   * Swap the cached client to the next usable key of the pool. The key we are
+   * leaving is cooled down here (the ring knows which one it was). Returns
+   * `false` — leaving the client and the ring untouched — when the pool has
+   * nowhere to move, so callers keep their regular retry path.
+   *
+   * A `clientFactory` owns credential resolution and request dispatch always
+   * goes through it (`resolveAuthBackedClient` prefers the factory over the
+   * cached client), so rebuilding the cache here would change nothing the
+   * request path reads. Report `false` and let the caller fall back to quota
+   * backoff instead of burning a retry on the same credential.
+   */
+  rotateApiKey(): boolean {
+    if (this._clientFactory !== undefined) return false;
+    const ring = this._keyRing;
+    if (ring === undefined) return false;
+    const previousKey = ring.current();
+    if (previousKey === undefined || !ring.rotate()) return false;
+    const nextKey = ring.current();
+    // A one-key pool (or a pool whose only alternative is cooled) "rotates"
+    // onto itself: report no rotation so the caller does not burn budget on a
+    // retry that would reuse the rejected key.
+    if (nextKey === undefined || nextKey === previousKey) return false;
+    ring.markCooldown(previousKey, API_KEY_COOLDOWN_MS);
+    this._client = this._buildClient(nextKey);
+    return true;
   }
 
   private _buildClient(apiKey: string): Anthropic {

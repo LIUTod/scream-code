@@ -27,6 +27,7 @@ import {
   estimateTokens,
   estimateTokensForMessages,
   estimateTokensForTools,
+  type TokenizerKind,
 } from '../../utils/tokens';
 import { isUserAuthoredMessage } from '../context/identity';
 import { project } from '../context/projector';
@@ -276,7 +277,10 @@ export class FullCompaction {
           triggerRatio:
             agent.screamConfig?.loopControl?.compactionTriggerRatio ??
             DEFAULT_COMPACTION_CONFIG.triggerRatio,
-        }
+        },
+        // Cut-point math must measure with the same tokenizer the context
+        // gauge uses — one session, one scale.
+        () => this.tokenizerKind,
       );
     this.autoCompactionDisabled = agent.screamConfig?.loopControl?.compactionMode === 'off';
   }
@@ -389,6 +393,15 @@ export class FullCompaction {
 
   private get tokenCountWithPending(): number {
     return this.agent.context.tokenCountWithPending;
+  }
+
+  /** Tokenizer for local token estimates: the active alias's configured one,
+   *  defaulting to cl100k (near-exact BPE counts). */
+  private get tokenizerKind(): TokenizerKind {
+    const aliasName = this.agent.config.modelAlias;
+    const alias =
+      aliasName === undefined ? undefined : this.agent.screamConfig?.models?.[aliasName];
+    return alias?.tokenizer ?? 'cl100k';
   }
 
   resetForTurn(): void {
@@ -629,12 +642,15 @@ export class FullCompaction {
     // reported context size dips to a messages-only estimate after compaction
     // and jumps back on the next exchange (the measured-anchor basis the
     // context gauge uses includes system prompt and non-deferred tools).
-    const systemPromptTokens = estimateTokens(this.agent.getRuntimeSystemPrompt());
-    const toolTokens = estimateTokensForTools(this.agent.tools.loopTools);
+    // Local estimates use the alias's tokenizer (near-exact BPE counts); the
+    // provider's reported usage still supersedes them at the next step end.
+    const tokenizer = this.tokenizerKind;
+    const systemPromptTokens = estimateTokens(this.agent.getRuntimeSystemPrompt(), tokenizer);
+    const toolTokens = estimateTokensForTools(this.agent.tools.loopTools, tokenizer);
     const tokensBefore =
       systemPromptTokens +
       toolTokens +
-      estimateTokensForMessages(this.agent.context.applyMessageEdits(originalHistory));
+      estimateTokensForMessages(this.agent.context.applyMessageEdits(originalHistory), tokenizer);
     const model = this.agent.config.model;
     // Detect a prior compaction summary at the head of history. If present,
     // use the iterative-update instruction so the LLM merges new content into
@@ -788,6 +804,7 @@ export class FullCompaction {
               compactedCount,
               tokensBefore: estimateTokensForMessages(
                 this.agent.context.applyMessageEdits(messagesToCompact),
+                tokenizer,
               ),
             });
             const result = await summarizeWithFallback(messagesToCompact, summarizeOnce);
@@ -860,7 +877,10 @@ export class FullCompaction {
       const skillCandidateSummary = summary;
       const processedSummary = this.postProcessSummary(summary, fileOps, toolCallHistory, compactedCount);
       const tokensAfter =
-        systemPromptTokens + toolTokens + estimateTokens(processedSummary) + estimateTokensForMessages(projectedRecent);
+        systemPromptTokens +
+        toolTokens +
+        estimateTokens(processedSummary, tokenizer) +
+        estimateTokensForMessages(projectedRecent, tokenizer);
 
       const fileLists = computeFileLists(fileOps);
       // Cap persisted lists so repeated compactions cannot grow them without

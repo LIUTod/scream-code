@@ -2,7 +2,7 @@ import { createToolMessage, type ContentPart, type Message } from '@scream-code/
 
 import type { Agent } from '..';
 import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
-import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
+import { estimateTokens, estimateTokensForMessages, type TokenizerKind } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
 import { isRealUserPrompt } from './identity';
 import {
@@ -292,7 +292,7 @@ export class ContextMemory {
         // from estimates, and subtraction could otherwise go negative.
         this._tokenCount = Math.max(
           0,
-          this._tokenCount - estimateTokensForMessages([message]),
+          this._tokenCount - estimateTokensForMessages([message], this.tokenizerKind),
         );
       }
 
@@ -480,14 +480,14 @@ export class ContextMemory {
     if (index !== -1 && index < this.tokenCountCoveredMessageCount) {
       const before =
         previousEdit === undefined
-          ? estimateTokensForMessages([message])
+          ? estimateTokensForMessages([message], this.tokenizerKind)
           : previousEdit === null
             ? 0
-            : estimateTokensForMessages([{ ...message, content: [...previousEdit] }]);
+            : estimateTokensForMessages([{ ...message, content: [...previousEdit] }], this.tokenizerKind);
       const after =
         normalized === null
           ? 0
-          : estimateTokensForMessages([{ ...message, content: normalized }]);
+          : estimateTokensForMessages([{ ...message, content: normalized }], this.tokenizerKind);
       this._tokenCount = Math.max(0, this._tokenCount + after - before);
     }
     this.agent.emitStatusUpdated();
@@ -525,11 +525,23 @@ export class ContextMemory {
     return this._tokenCount;
   }
 
+  /** Tokenizer for local token estimates: the active alias's configured one,
+   *  defaulting to cl100k (near-exact BPE counts). */
+  private get tokenizerKind(): TokenizerKind {
+    const aliasName = this.agent.config.modelAlias;
+    const alias =
+      aliasName === undefined ? undefined : this.agent.screamConfig?.models?.[aliasName];
+    return alias?.tokenizer ?? 'cl100k';
+  }
+
   get tokenCountWithPending(): number {
     const pendingMessages = this._history.slice(this.tokenCountCoveredMessageCount);
     return (
       this._tokenCount +
-      estimateTokensForMessages(project(this.applyMessageEdits(pendingMessages)))
+      estimateTokensForMessages(
+        project(this.applyMessageEdits(pendingMessages)),
+        this.tokenizerKind,
+      )
     );
   }
 
@@ -638,7 +650,7 @@ export class ContextMemory {
       if (appended > 0) {
         this.agent.log.debug('prefix-stability: provider prompt cache prefix hit', {
           stablePrefixLength: stable,
-          cachedPrefixTokens: estimateTokensForMessages(messages.slice(0, stable)),
+          cachedPrefixTokens: estimateTokensForMessages(messages.slice(0, stable), this.tokenizerKind),
           prevMessageCount: prev.length,
           currentMessageCount: messages.length,
           appendedSinceLast: appended,
@@ -836,7 +848,7 @@ export class ContextMemory {
         // contributed nothing sendable, but its think parts still counted.
         if (index < this.tokenCountCoveredMessageCount) {
           this.tokenCountCoveredMessageCount--;
-          this._tokenCount = Math.max(0, this._tokenCount - estimateTokensForMessages([message]));
+          this._tokenCount = Math.max(0, this._tokenCount - estimateTokensForMessages([message], this.tokenizerKind));
         }
       }
       this.openSteps.delete(uuid);

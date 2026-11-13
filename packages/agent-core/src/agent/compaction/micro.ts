@@ -5,7 +5,7 @@ import type { ContextMessage } from '../context';
 import { flags } from '../../flags';
 import { RepetitionGuard } from '../../tools/support/repetition-guard';
 import { GrepInputSchema } from '../../tools/builtin/file/grep';
-import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
+import { estimateTokens, estimateTokensForMessages, type TokenizerKind } from '../../utils/tokens';
 
 export interface MicroCompactionConfig {
   /** Number of most recent messages to always keep untouched. */
@@ -53,16 +53,17 @@ const DEFAULT_CONFIG: MicroCompactionConfig = {
 function computeCutoff(
   messages: readonly ContextMessage[],
   config: MicroCompactionConfig,
+  tokenizer: TokenizerKind | undefined,
 ): number {
   const messageFloor = Math.max(0, messages.length - config.keepRecentMessages);
   // Walk forward from the floor while the trailing window is over budget.
   // Accumulate tokens from the cutoff position toward the tail so we don't
   // re-walk the whole suffix on every step.
-  let windowTokens = estimateTokensForMessages(messages.slice(messageFloor));
+  let windowTokens = estimateTokensForMessages(messages.slice(messageFloor), tokenizer);
   let cutoff = messageFloor;
   while (cutoff < messages.length && windowTokens > config.keepRecentTokens) {
     const removed = messages[cutoff]!;
-    windowTokens -= estimateTokensForMessages([removed]);
+    windowTokens -= estimateTokensForMessages([removed], tokenizer);
     cutoff += 1;
   }
   return cutoff;
@@ -259,6 +260,19 @@ export class MicroCompaction {
     this.cutoff = cutoff;
   }
 
+  /** Tokenizer for local token estimates: the active alias's configured one,
+   *  defaulting to cl100k (near-exact BPE counts). Same source as the context
+   *  gauge and full compaction, so one session never mixes measurement scales. */
+  private get tokenizerKind(): TokenizerKind | undefined {
+    // Tests construct a compactor with a stub agent (`{}`); without a live
+    // session config there is no alias scale to read, so estimates keep the
+    // character heuristic exactly as an omitted tokenizer argument does.
+    const aliasName = this.agent?.config?.modelAlias;
+    if (aliasName === undefined) return undefined;
+    const alias = this.agent.screamConfig?.models?.[aliasName];
+    return alias?.tokenizer ?? 'cl100k';
+  }
+
   /** Check whether micro-compaction is warranted and advance the cutoff. */
   detect(): void {
     if (!this.enabled || !flags.enabled('micro-compaction')) return;
@@ -272,7 +286,7 @@ export class MicroCompaction {
         : 0;
     if (contextUsageRatio < config.minContextUsageRatio) return;
 
-    const nextCutoff = computeCutoff(history, config);
+    const nextCutoff = computeCutoff(history, config, this.tokenizerKind);
     // Idempotent: don't move the cutoff if it's already at or past the
     // computed position. Re-running detect() in a single turn (full.ts
     // beforeStep + context.messages) should not churn the record log or
@@ -292,7 +306,7 @@ export class MicroCompaction {
     // cacheWrite rates (~1.25x base), so the real cost delta is ~1.15x.
     // If that exceeds the tokens we'd reclaim, skip and let full compaction
     // (which rebuilds the cache anyway) handle it later.
-    const suffixTokens = estimateTokensForMessages(history.slice(nextCutoff));
+    const suffixTokens = estimateTokensForMessages(history.slice(nextCutoff), this.tokenizerKind);
     const CACHE_BREAK_COST = 1.15;
     if (suffixTokens * CACHE_BREAK_COST > reclaimTokens) return;
 
@@ -328,7 +342,7 @@ export class MicroCompaction {
       const isOversizedTruncatable =
         isOld &&
         isTool &&
-        estimateTokensForMessages([msg]) >= config.minContentTokens;
+        estimateTokensForMessages([msg], this.tokenizerKind) >= config.minContentTokens;
       // The result is about to be replaced by a marker, which tells the model
       // the content is gone and it may re-fetch — so a subsequent identical
       // re-read/search must not count as repetition. Repeated compact() runs
@@ -428,12 +442,13 @@ export class MicroCompaction {
     let truncatedToolResultCount = 0;
     let beforeTokens = 0;
     let afterTokens = 0;
+    const tokenizer = this.tokenizerKind;
     const toolCalls = buildToolCallIndex(messages);
     for (let i = 0; i < messages.length && i < cutoff; i++) {
       const message = messages[i];
       if (message?.role !== 'tool' || message.toolCallId === undefined) continue;
 
-      const contentTokens = estimateTokensForMessages([message]);
+      const contentTokens = estimateTokensForMessages([message], tokenizer);
       const isUseless = message.useless === true;
       const isZeroMatch = isZeroMatchSearchResult(
         toolCalls.get(message.toolCallId)?.name,
@@ -442,17 +457,17 @@ export class MicroCompaction {
       if (!isUseless && !isZeroMatch && contentTokens < this.config.minContentTokens) continue;
 
       if (isUseless) {
-        uselessMarkerTokenCount ??= estimateTokens(this.config.uselessMarker);
+        uselessMarkerTokenCount ??= estimateTokens(this.config.uselessMarker, tokenizer);
         truncatedToolResultCount += 1;
         beforeTokens += contentTokens;
         afterTokens += uselessMarkerTokenCount;
       } else if (isZeroMatch) {
-        noMatchesMarkerTokenCount ??= estimateTokens(this.config.noMatchesMarker);
+        noMatchesMarkerTokenCount ??= estimateTokens(this.config.noMatchesMarker, tokenizer);
         truncatedToolResultCount += 1;
         beforeTokens += contentTokens;
         afterTokens += noMatchesMarkerTokenCount;
       } else {
-        markerTokenCount ??= estimateTokens(this.config.truncatedMarker);
+        markerTokenCount ??= estimateTokens(this.config.truncatedMarker, tokenizer);
         truncatedToolResultCount += 1;
         beforeTokens += contentTokens;
         afterTokens += markerTokenCount;

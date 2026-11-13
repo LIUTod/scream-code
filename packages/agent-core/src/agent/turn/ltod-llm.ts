@@ -208,6 +208,19 @@ export class LtodLLM implements LLM {
   isRetryableError(error: unknown): boolean {
     return isRetryableGenerateError(error);
   }
+
+  /**
+   * Rotate the provider's API key for the next attempt.
+   *
+   * Deliberately delegates to `this.provider` rather than the per-call
+   * `effectiveProvider` clone built inside `chat`: the clone is recreated from
+   * `this.provider` on every attempt, so only the original holds the client
+   * the next attempt will use. The clone shares the provider's `KeyRing`, so
+   * the cursor/cooldown state is visible to both.
+   */
+  rotateAuth(): boolean {
+    return this.provider.rotateApiKey?.() ?? false;
+  }
 }
 
 function buildStreamTiming(

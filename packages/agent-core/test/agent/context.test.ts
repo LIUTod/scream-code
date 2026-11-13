@@ -448,8 +448,12 @@ describe('Agent context', () => {
     ctx.agent.context.appendUserMessage([{ type: 'text', text: 'next user prompt'.repeat(20) }]);
 
     const pendingMessages = ctx.agent.context.history.slice(-1);
+    // The gauge counts with the alias's tokenizer (cl100k by default), so the
+    // expectation must use the same counter.
+    const tokenizer =
+      ctx.agent.screamConfig?.models?.[ctx.agent.config.modelAlias ?? '']?.tokenizer ?? 'cl100k';
     expect(ctx.agent.context.tokenCountWithPending).toBe(
-      ctx.agent.context.tokenCount + estimateTokensForMessages(pendingMessages),
+      ctx.agent.context.tokenCount + estimateTokensForMessages(pendingMessages, tokenizer),
     );
   });
 
@@ -502,9 +506,12 @@ describe('Agent context', () => {
     });
 
     const pendingMessages = ctx.agent.context.history.slice(-1);
+    // Same counter as the gauge: the alias's tokenizer (cl100k by default).
+    const tokenizer =
+      ctx.agent.screamConfig?.models?.[ctx.agent.config.modelAlias ?? '']?.tokenizer ?? 'cl100k';
     expect(ctx.agent.context.tokenCount).toBe(1_280);
     expect(ctx.agent.context.tokenCountWithPending).toBe(
-      1_280 + estimateTokensForMessages(pendingMessages),
+      1_280 + estimateTokensForMessages(pendingMessages, tokenizer),
     );
   });
 

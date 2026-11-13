@@ -1,4 +1,5 @@
 import type { ModelCapability } from '#/capability';
+import { API_KEY_COOLDOWN_MS, createKeyRing, resolveApiKeys, type KeyRing } from '#/keys';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
 import {
   normalizeToolCallIdsForProvider,
@@ -68,7 +69,13 @@ function extractReasoningContent(
 }
 
 export interface OpenAILegacyOptions {
-  apiKey?: string | undefined;
+  /**
+   * Credential, or a rotation pool (see `KeyRing`). An array spreads sessions
+   * across the keys and swaps to the next usable key on a quota-style 429.
+   */
+  apiKey?: string | string[] | undefined;
+  /** Pre-built session-scoped rotation pool; overrides `apiKey` for clients. */
+  keyRing?: KeyRing | undefined;
   baseUrl?: string | undefined;
   model: string;
   stream?: boolean | undefined;
@@ -366,6 +373,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   private _model: string;
   private _stream: boolean;
   private _apiKey: string | undefined;
+  private _keyRing: KeyRing | undefined;
   private _baseUrl: string | undefined;
   private _defaultHeaders: Record<string, string> | undefined;
   private _reasoningKey: string | undefined;
@@ -379,8 +387,12 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   private _clientFactory: ((auth: ProviderRequestAuth) => OpenAI) | undefined;
 
   constructor(options: OpenAILegacyOptions) {
-    const apiKey = options.apiKey ?? process.env['OPENAI_API_KEY'];
-    this._apiKey = apiKey === undefined || apiKey.length === 0 ? undefined : apiKey;
+    const configuredKey = options.apiKey ?? process.env['OPENAI_API_KEY'];
+    this._apiKey =
+      typeof configuredKey === 'string' && configuredKey.length > 0 ? configuredKey : undefined;
+    const configuredKeys = resolveApiKeys(configuredKey);
+    this._keyRing =
+      options.keyRing ?? (configuredKeys.length === 0 ? undefined : createKeyRing(configuredKeys));
     this._baseUrl = options.baseUrl ?? 'https://api.openai.com/v1';
     this._defaultHeaders = options.defaultHeaders;
     this._model = options.model;
@@ -404,7 +416,8 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     this._httpClient = options.httpClient;
     this._clientFactory = options.clientFactory;
 
-    this._client = this._apiKey === undefined ? undefined : this._buildClient(this._apiKey);
+    const initialKey = this._keyRing?.current() ?? this._apiKey;
+    this._client = initialKey === undefined ? undefined : this._buildClient(initialKey);
   }
 
   get modelName(): string {
@@ -553,8 +566,36 @@ export class OpenAILegacyChatProvider implements ChatProvider {
       { cachedClient: this._client, clientFactory: this._clientFactory },
       auth,
       (a) =>
-        this._buildClient(requireProviderApiKey('OpenAILegacyChatProvider', a, this._apiKey), a),
+        this._buildClient(
+          requireProviderApiKey('OpenAILegacyChatProvider', a, this._currentApiKey()),
+          a,
+        ),
     );
+  }
+
+  /** Cached-client credential: the ring's current key, else the single key. */
+  private _currentApiKey(): string | undefined {
+    return this._keyRing?.current() ?? this._apiKey;
+  }
+
+  /**
+   * Swap the cached client to the next usable pool key, cooling down the key
+   * we leave. `false` — client and ring untouched — when there is nowhere to
+   * move, or when a `clientFactory` owns credential resolution: request
+   * dispatch always prefers the factory over the cached client, so a rebuilt
+   * cache would never be read and the caller must fall back to quota backoff.
+   */
+  rotateApiKey(): boolean {
+    if (this._clientFactory !== undefined) return false;
+    const ring = this._keyRing;
+    if (ring === undefined) return false;
+    const previousKey = ring.current();
+    if (previousKey === undefined || !ring.rotate()) return false;
+    const nextKey = ring.current();
+    if (nextKey === undefined || nextKey === previousKey) return false;
+    ring.markCooldown(previousKey, API_KEY_COOLDOWN_MS);
+    this._client = this._buildClient(nextKey);
+    return true;
   }
 
   private _buildClient(apiKey: string, auth?: ProviderRequestAuth): OpenAI {

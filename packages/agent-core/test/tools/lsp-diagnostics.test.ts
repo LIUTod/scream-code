@@ -26,17 +26,21 @@ function makeDiagnostic(
   };
 }
 
-function fakeLspClient(diagnostics: LspDiagnostic[], opts?: { throwOnDiag?: Error }): {
+function fakeLspClient(
+  diagnostics: LspDiagnostic[],
+  opts?: { throwOnDiag?: Error; observed?: boolean },
+): {
   didOpen: ReturnType<typeof vi.fn>;
   didChange: ReturnType<typeof vi.fn>;
-  diagnostics: ReturnType<typeof vi.fn>;
+  diagnosticsReport: ReturnType<typeof vi.fn>;
 } {
+  const report = opts?.throwOnDiag
+    ? vi.fn().mockRejectedValue(opts.throwOnDiag)
+    : vi.fn().mockResolvedValue({ diagnostics, observed: opts?.observed ?? true });
   return {
     didOpen: vi.fn(),
     didChange: vi.fn(),
-    diagnostics: opts?.throwOnDiag
-      ? vi.fn().mockRejectedValue(opts.throwOnDiag)
-      : vi.fn().mockResolvedValue(diagnostics),
+    diagnosticsReport: report,
   };
 }
 
@@ -102,6 +106,7 @@ describe('fetchDiagnostics', () => {
     const result = await fetchDiagnostics(registry, jian, '/a.ts', '/ws');
 
     expect(result.available).toBe(true);
+    expect(result.observed).toBe(true);
     expect(result.diagnostics).toEqual(diags);
     expect(result.reason).toBeUndefined();
     expect(jian.readText).toHaveBeenCalledWith('/a.ts');
@@ -110,23 +115,43 @@ describe('fetchDiagnostics', () => {
       'const x: number = "bad";',
       'typescript',
     );
-    expect(client.diagnostics).toHaveBeenCalledWith('/a.ts', DIAGNOSTICS_TIMEOUT_MS);
+    expect(client.diagnosticsReport).toHaveBeenCalledWith('/a.ts', DIAGNOSTICS_TIMEOUT_MS);
   });
 
-  it('returns available=true with empty diagnostics when client.diagnostics throws', async () => {
+  it('reports observed=false when the poll times out without a publication', async () => {
+    // The client answers { diagnostics: [], observed: false } after its poll
+    // loop expires: an empty list that carries no information.
+    const registry = fakeRegistry({ client: fakeLspClient([], { observed: false }) });
+    const result = await fetchDiagnostics(registry, fakeJianWithContent('x'), '/a.ts', '/ws');
+    expect(result.available).toBe(true);
+    expect(result.observed).toBe(false);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('reports observed=true when the server publishes an empty list', async () => {
+    const registry = fakeRegistry({ client: fakeLspClient([], { observed: true }) });
+    const result = await fetchDiagnostics(registry, fakeJianWithContent('x'), '/a.ts', '/ws');
+    expect(result.observed).toBe(true);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.hasErrors).toBe(false);
+  });
+
+  it('returns available=true with observed=false when client.diagnosticsReport throws', async () => {
     const client = fakeLspClient([], { throwOnDiag: new Error('timeout') });
     const registry = fakeRegistry({ client });
     const result = await fetchDiagnostics(registry, fakeJianWithContent('x'), '/a.ts', '/ws');
     expect(result.available).toBe(true);
+    expect(result.observed).toBe(false);
     expect(result.diagnostics).toEqual([]);
   });
 
-  it('returns available=true with empty diagnostics when readText throws', async () => {
+  it('returns available=true with observed=false when readText throws', async () => {
     const client = fakeLspClient([]);
     const registry = fakeRegistry({ client });
     const jian = createFakeJian({ readText: vi.fn().mockRejectedValue(new Error('io')) });
     const result = await fetchDiagnostics(registry, jian, '/a.ts', '/ws');
     expect(result.available).toBe(true);
+    expect(result.observed).toBe(false);
     expect(result.diagnostics).toEqual([]);
     expect(client.didOpen).not.toHaveBeenCalled();
   });
@@ -134,11 +159,11 @@ describe('fetchDiagnostics', () => {
 
 describe('formatDiagnosticsNotice', () => {
   it('returns empty string when LSP was unavailable', () => {
-    expect(formatDiagnosticsNotice({ available: false, diagnostics: [], hasErrors: false })).toBe('');
+    expect(formatDiagnosticsNotice({ available: false, observed: false, diagnostics: [], hasErrors: false })).toBe('');
   });
 
   it('returns empty string when no diagnostics', () => {
-    expect(formatDiagnosticsNotice({ available: true, diagnostics: [], hasErrors: false })).toBe('');
+    expect(formatDiagnosticsNotice({ available: true, observed: true, diagnostics: [], hasErrors: false })).toBe('');
   });
 
   it('formats header and each diagnostic line', () => {
@@ -146,7 +171,7 @@ describe('formatDiagnosticsNotice', () => {
       makeDiagnostic({ severity: 1, message: 'Cannot find name foo', range: { start: { line: 4, character: 3 }, end: { line: 4, character: 6 } } }),
       makeDiagnostic({ severity: 2, message: 'Unused var', range: { start: { line: 9, character: 0 }, end: { line: 9, character: 5 } } }),
     ];
-    const out = formatDiagnosticsNotice({ available: true, diagnostics: diags, hasErrors: true });
+    const out = formatDiagnosticsNotice({ available: true, observed: true, diagnostics: diags, hasErrors: true });
     expect(out).toBe(
       '[LSP] 2 diagnostic(s):\n' +
       '- Error at 5:4: Cannot find name foo\n' +
@@ -158,7 +183,7 @@ describe('formatDiagnosticsNotice', () => {
     const diags = Array.from({ length: 10 }, (_, i) =>
       makeDiagnostic({ message: `err ${i}`, range: { start: { line: i, character: 0 }, end: { line: i, character: 1 } } }),
     );
-    const out = formatDiagnosticsNotice({ available: true, diagnostics: diags, hasErrors: true });
+    const out = formatDiagnosticsNotice({ available: true, observed: true, diagnostics: diags, hasErrors: true });
     expect(out).toContain('[LSP] 10 diagnostic(s):');
     expect(out).toContain('… (2 more)');
     expect(out.split('\n').length).toBe(1 + 8 + 1);
@@ -168,7 +193,7 @@ describe('formatDiagnosticsNotice', () => {
     const diags = Array.from({ length: 8 }, (_, i) =>
       makeDiagnostic({ message: `err ${i}` }),
     );
-    const out = formatDiagnosticsNotice({ available: true, diagnostics: diags, hasErrors: true });
+    const out = formatDiagnosticsNotice({ available: true, observed: true, diagnostics: diags, hasErrors: true });
     expect(out).not.toContain('more)');
   });
 });
@@ -204,18 +229,19 @@ describe('hasErrors', () => {
 
 describe('formatDiagnosticsHint', () => {
   it('returns empty string for unsupported file types', () => {
-    const result: DiagnosticsResult = { available: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
+    const result: DiagnosticsResult = { available: false, observed: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
     expect(formatDiagnosticsHint(result)).toBe('');
   });
 
   it('returns empty string when LSP started successfully', () => {
-    const result: DiagnosticsResult = { available: true, diagnostics: [], hasErrors: false };
+    const result: DiagnosticsResult = { available: true, observed: true, diagnostics: [], hasErrors: false };
     expect(formatDiagnosticsHint(result)).toBe('');
   });
 
   it('returns empty string when server is missing but command is unknown', () => {
     const result: DiagnosticsResult = {
       available: false,
+      observed: false,
       diagnostics: [],
       hasErrors: false,
       reason: 'server-missing',
@@ -227,6 +253,7 @@ describe('formatDiagnosticsHint', () => {
   it('returns a Chinese install hint naming the missing server command', () => {
     const result: DiagnosticsResult = {
       available: false,
+      observed: false,
       diagnostics: [],
       hasErrors: false,
       reason: 'server-missing',
@@ -241,6 +268,7 @@ describe('formatDiagnosticsHint', () => {
   it('names pyright-langserver for python files', () => {
     const result: DiagnosticsResult = {
       available: false,
+      observed: false,
       diagnostics: [],
       hasErrors: false,
       reason: 'server-missing',

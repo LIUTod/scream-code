@@ -188,4 +188,14 @@ export interface ChatProvider {
    */
   getCapability?(model?: string): ModelCapability;
   getContextSizeLimit?(): number | undefined;
+  /**
+   * Advance to the next API key of a multi-key pool (see `KeyRing`) and
+   * rebuild the cached client with it. Returns `false` when the provider has
+   * no pool or no other key is currently usable — callers then fall back to
+   * their regular retry/backoff path.
+   *
+   * The provider cools the key it just left down for `API_KEY_COOLDOWN_MS`
+   * internally; callers only decide *whether* to retry immediately.
+   */
+  rotateApiKey?(): boolean;
 }

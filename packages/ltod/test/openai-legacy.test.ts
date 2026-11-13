@@ -1,7 +1,10 @@
 import { generate } from '#/generate';
+import { API_KEY_COOLDOWN_MS, createKeyRing } from '#/keys';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
-import { OpenAILegacyChatProvider } from '#/providers/openai-legacy';
+import type { ProviderRequestAuth } from '#/provider';
+import { OpenAILegacyChatProvider, type OpenAILegacyOptions } from '#/providers/openai-legacy';
 import type { Tool } from '#/tool';
+import type OpenAI from 'openai';
 import { describe, it, expect, vi } from 'vitest';
 
 function makeChatCompletionResponse(model: string = 'test-model') {
@@ -1546,5 +1549,73 @@ describe('OpenAILegacyChatProvider — non-indexed streaming tool_calls', () => 
 
       expect(result.model).toBe('actual-streamed-model');
     });
+  });
+});
+
+describe('OpenAILegacyChatProvider: multi-key rotation', () => {
+  function clientApiKey(provider: OpenAILegacyChatProvider): string | null | undefined {
+    const client = Reflect.get(provider, '_client') as { apiKey?: string | null } | undefined;
+    return client?.apiKey;
+  }
+
+  function providerWithKey(
+    apiKey: string | string[],
+    overrides: Partial<OpenAILegacyOptions> = {},
+  ): OpenAILegacyChatProvider {
+    return new OpenAILegacyChatProvider({ model: 'gpt-4.1', apiKey, stream: false, ...overrides });
+  }
+
+  it('builds the initial client with the first key of a pool', () => {
+    expect(clientApiKey(providerWithKey(['key-1', 'key-2']))).toBe('key-1');
+  });
+
+  it('rotates to the next key and rebuilds the cached client with it', () => {
+    const provider = providerWithKey(['key-1', 'key-2']);
+    expect(provider.rotateApiKey()).toBe(true);
+    expect(clientApiKey(provider)).toBe('key-2');
+  });
+
+  it('skips a key that is cooling down', () => {
+    const ring = createKeyRing(['key-1', 'key-2', 'key-3']);
+    ring.markCooldown('key-2', API_KEY_COOLDOWN_MS);
+    const provider = providerWithKey(['key-1', 'key-2', 'key-3'], { keyRing: ring });
+
+    expect(provider.rotateApiKey()).toBe(true);
+    expect(clientApiKey(provider)).toBe('key-3');
+  });
+
+  it('cools down the key it leaves', () => {
+    const ring = createKeyRing(['key-1', 'key-2', 'key-3']);
+    const provider = providerWithKey(['key-1', 'key-2', 'key-3'], { keyRing: ring });
+
+    expect(provider.rotateApiKey()).toBe(true); // key-1 → key-2, key-1 cooling
+    expect(ring.rotate()).toBe(true); // key-2 → key-3
+    expect(ring.rotate()).toBe(true); // round-robin skips the cooling key-1
+    expect(ring.current()).toBe('key-2');
+  });
+
+  it('reports no rotation for a single-key pool and keeps the client', () => {
+    const provider = providerWithKey(['only-key']);
+    expect(provider.rotateApiKey()).toBe(false);
+    expect(clientApiKey(provider)).toBe('only-key');
+  });
+
+  it('reports no rotation when a clientFactory owns credential resolution', () => {
+    const factory = vi.fn(
+      (auth: ProviderRequestAuth) => ({ apiKey: auth.apiKey }) as unknown as OpenAI,
+    );
+    const provider = new OpenAILegacyChatProvider({
+      model: 'gpt-4.1',
+      apiKey: ['key-1', 'key-2'],
+      stream: false,
+      clientFactory: factory,
+    });
+
+    // Request dispatch always prefers the factory over the cached client, so a
+    // rebuilt cache would never be read: report false and let the caller fall
+    // back to quota backoff instead of retrying with the rejected credential.
+    expect(provider.rotateApiKey()).toBe(false);
+    expect(factory).not.toHaveBeenCalled();
+    expect(clientApiKey(provider)).toBe('key-1');
   });
 });

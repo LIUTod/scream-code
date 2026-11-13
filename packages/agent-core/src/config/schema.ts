@@ -1,4 +1,5 @@
 import { HOOK_EVENT_TYPES } from '../session/hooks/types';
+import type { TokenizerKind } from '../utils/tokens';
 import { parsePattern } from '#/agent/permission/matches-rule';
 import { ErrorCodes, ScreamError } from '#/errors';
 import { z } from 'zod';
@@ -30,9 +31,22 @@ const HeaderNameSchema = z
   .max(128)
   .regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/, 'must be an HTTP header name');
 
-export const ProviderConfigSchema = z.object({
+/** Provider types whose adapters rotate a key pool on a quota 429. */
+const ROTATING_PROVIDER_TYPES: ReadonlySet<ProviderType> = new Set([
+  'anthropic',
+  'openai',
+  'openai_responses',
+]);
+
+// Kept as a separate, unrefined object so `ProviderConfigPatchSchema` can still
+// call `.partial()` (zod rejects `.partial()` on a refined object).
+const ProviderConfigBaseSchema = z.object({
   type: ProviderTypeSchema,
-  apiKey: z.string().optional(),
+  // A single credential, or a pool: an array means key rotation — requests
+  // start at a session-affine key and a quota-style 429 rotates to the next
+  // usable key while the rejected one cools down (30s). See `KeyRing`.
+  // Only the rotating adapters accept a pool; every other type takes one key.
+  apiKey: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
   baseUrl: z.string().optional(),
   defaultModel: z.string().optional(),
   oauth: OAuthRefSchema.optional(),
@@ -47,9 +61,27 @@ export const ProviderConfigSchema = z.object({
   sessionHeader: HeaderNameSchema.optional(),
 });
 
+export const ProviderConfigSchema = ProviderConfigBaseSchema.superRefine((value, ctx) => {
+  // The adapters that actually rotate a pool (see the KeyRing usage in
+  // session/provider-manager.ts). Everywhere else an array would be accepted
+  // and then silently collapsed to key #1, so reject it at the config edge.
+  if (!Array.isArray(value.apiKey)) return;
+  if (ROTATING_PROVIDER_TYPES.has(value.type)) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['apiKey'],
+    message: `provider type "${value.type}" accepts a single api_key; an array (key pool) requires a rotation-capable provider: ${[...ROTATING_PROVIDER_TYPES].join(', ')}`,
+  });
+});
+
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
 const ThinkingEffortSchema = z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+// Keeping the runtime enum tied to `TokenizerKind` makes a drift between the
+// config schema and the token helpers a type error rather than a silent typo.
+const TOKENIZER_KINDS = ['cl100k', 'o200k', 'heuristic'] as const satisfies readonly TokenizerKind[];
+const TokenizerKindSchema = z.enum(TOKENIZER_KINDS);
 
 export const ModelAliasSchema = z.object({
   provider: z.string(),
@@ -72,6 +104,12 @@ export const ModelAliasSchema = z.object({
   // Levels this model supports for explicit thinking effort. If omitted the
   // UI falls back to [off, low, medium, high].
   thinkingLevels: z.array(ThinkingEffortSchema).optional(),
+  // Tokenizer for local token estimates (compaction watermarks, budget
+  // display): 'cl100k' / 'o200k' count with the matching js-tiktoken encoding
+  // and 'heuristic' keeps the character estimate. Encoder counts are
+  // near-exact — Anthropic/Gemini tokenizers are closed — and billing always
+  // comes from the provider-reported usage. Defaults to 'cl100k'.
+  tokenizer: TokenizerKindSchema.optional(),
 });
 
 export type ModelAlias = z.infer<typeof ModelAliasSchema>;
@@ -345,7 +383,7 @@ export const ScreamConfigSchema = z.object({
 
 export type ScreamConfig = z.infer<typeof ScreamConfigSchema>;
 
-const ProviderConfigPatchSchema = ProviderConfigSchema.partial();
+const ProviderConfigPatchSchema = ProviderConfigBaseSchema.partial();
 const ModelAliasPatchSchema = ModelAliasSchema.partial();
 const ThinkingConfigPatchSchema = ThinkingConfigSchema.partial();
 const PermissionConfigPatchSchema = PermissionConfigSchema.partial();

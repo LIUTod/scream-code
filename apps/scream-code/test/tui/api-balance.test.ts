@@ -6,7 +6,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
-  const providers = new Map<string, { baseUrl: string; apiKey: string; type: string }>();
+  const providers = new Map<
+    string,
+    {
+      baseUrl: string;
+      apiKey: string | string[];
+      type: string;
+      env?: Record<string, string>;
+    }
+  >();
   return {
     providers,
     fetchProviderBalance: vi.fn(async () => ({ total: 1, currency: 'USD' })),
@@ -118,5 +126,21 @@ describe('api-balance cache bounds', () => {
     await api.getProviderBalanceForModel('p0/m');
     await api.getProviderBalanceForModel('p0/m');
     expect(mocks.fetchProviderBalance).toHaveBeenCalledTimes(1);
+  });
+
+  it('probes a pool with its first non-blank key instead of the env fallback', async () => {
+    mocks.providers.set('p_pool', {
+      baseUrl: 'https://pool.example.com',
+      apiKey: ['  ', 'key-live'],
+      type: 'openai',
+      env: { OPENAI_API_KEY: 'key-env' },
+    });
+
+    await api.getProviderBalanceForModel('p_pool/m');
+
+    expect(mocks.fetchProviderBalance).toHaveBeenCalledWith(
+      'https://pool.example.com',
+      'key-live',
+    );
   });
 });

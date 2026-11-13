@@ -35,6 +35,12 @@ export const QUOTA_RETRY_ATTEMPTS = 3;
 // persistent one fails fast instead of burning the full 10-attempt budget.
 export const STREAM_FORMAT_RETRY_ATTEMPTS = 3;
 
+// How many times one request may rotate to another API key of a multi-key
+// pool. Rotations are immediate (no backoff, no attempt consumed), so this cap
+// is what bounds them: a 5-key pool still stops after 4 hops instead of
+// walking a pool whose every key is exhausted.
+export const DEFAULT_MAX_KEY_ROTATIONS = 4;
+
 const BASE_DELAY_MS = 500;
 // Per-attempt backoff cap (32s). The default 10-attempt ramp reaches the
 // cap on the 7th retry, so most of the budget is spent at the cap waiting
@@ -52,6 +58,11 @@ export interface ChatWithRetryInput {
   readonly currentStep: number;
   readonly stepUuid: string;
   readonly maxAttempts?: number;
+  /**
+   * Cap on immediate key rotations for this request (only providers with a
+   * multi-key pool rotate). Defaults to {@link DEFAULT_MAX_KEY_ROTATIONS}.
+   */
+  readonly maxRotations?: number;
   readonly log?: Logger | undefined;
 }
 
@@ -69,6 +80,12 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
   }
 
   const delays = retryBackoffDelays(maxAttempts);
+  const maxRotations = input.maxRotations ?? DEFAULT_MAX_KEY_ROTATIONS;
+  // Rotations are tracked separately from `attempt`: they do not consume the
+  // generic attempt budget (no backoff is paid for them), so a quota error on
+  // a multi-key pool gets `attemptLimit` real backoffs AND up to
+  // `maxRotations` immediate key hops.
+  let rotations = 0;
 
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -89,14 +106,43 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
       // per-minute or dynamic quota window that clears within a minute, and
       // failing instantly left subagents dead on the first 429. A genuinely
       // exhausted account still fails after a few short 30s backoffs.
-      const attemptLimit =
-        error instanceof APIProviderRateLimitError && error.reason === 'QUOTA_EXHAUSTED'
-          ? Math.min(QUOTA_RETRY_ATTEMPTS, maxAttempts)
-          : error instanceof APIStreamFormatError
-            ? Math.min(STREAM_FORMAT_RETRY_ATTEMPTS, maxAttempts)
-            : maxAttempts;
+      const attemptLimit = computeAttemptLimit(error, maxAttempts);
 
-      if (attempt >= attemptLimit || !input.llm.isRetryableError(error)) {
+      if (!input.llm.isRetryableError(error)) {
+        logRequestFailure(input, error, attempt, attemptLimit);
+        throw error;
+      }
+
+      // A quota rejection is per-credential, so a multi-key pool tries the
+      // next key immediately instead of paying a 30s backoff on the key that
+      // just failed. The provider cools the failed key down itself; here we
+      // only decide to re-issue, and refund the attempt so the rotation does
+      // not shorten the generic budget.
+      if (
+        isQuotaExhaustedError(error) &&
+        rotations < maxRotations &&
+        input.llm.rotateAuth?.() === true
+      ) {
+        rotations += 1;
+        input.params.signal.throwIfAborted();
+        input.dispatchEvent({
+          type: 'step.retrying',
+          turnId: input.turnId,
+          step: input.currentStep,
+          stepUuid: input.stepUuid,
+          failedAttempt: attempt,
+          // The rotation refunds the attempt below, so the retry re-runs the
+          // SAME attempt number; the event must not claim the next one.
+          nextAttempt: attempt,
+          maxAttempts: attemptLimit,
+          delayMs: 0,
+          ...retryErrorFields(error),
+        });
+        attempt -= 1;
+        continue;
+      }
+
+      if (attempt >= attemptLimit) {
         logRequestFailure(input, error, attempt, attemptLimit);
         throw error;
       }
@@ -120,6 +166,18 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
       await sleepForRetry(delayMs, input.params.signal);
     }
   }
+}
+
+/** Attempt budget for this failure class: quota and stream-format errors get fewer. */
+function computeAttemptLimit(error: unknown, maxAttempts: number): number {
+  if (isQuotaExhaustedError(error)) return Math.min(QUOTA_RETRY_ATTEMPTS, maxAttempts);
+  if (error instanceof APIStreamFormatError) return Math.min(STREAM_FORMAT_RETRY_ATTEMPTS, maxAttempts);
+  return maxAttempts;
+}
+
+/** A 429 whose reason marks the account/key quota as exhausted, not a burst. */
+function isQuotaExhaustedError(error: unknown): boolean {
+  return error instanceof APIProviderRateLimitError && error.reason === 'QUOTA_EXHAUSTED';
 }
 
 export function computeDelayMs(error: unknown, delays: number[], attempt: number): number {

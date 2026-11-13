@@ -28,6 +28,10 @@ export * from './provider';
 export { createProvider } from './providers';
 export type { ProviderConfig, ProviderType } from './providers';
 
+// Multi-key rotation pool
+export { API_KEY_COOLDOWN_MS, createKeyRing } from './keys';
+export type { KeyRing, KeyRingOptions } from './keys';
+
 // Model capability matrix
 export { UNKNOWN_CAPABILITY, isUnknownCapability } from './capability';
 export type { ModelCapability } from './capability';

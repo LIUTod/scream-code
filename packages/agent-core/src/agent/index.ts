@@ -21,6 +21,7 @@ import { resolveScreamHome } from '../config/path';
 import { computeDelayMs, retryBackoffDelays } from '../loop/retry';
 import { RepetitionGuard } from '../tools/support/repetition-guard';
 import { EditSnapshotStore } from '../tools/support/edit-snapshot-store';
+import { EditRecoveryQueue } from '../tools/support/edit-recovery-queue';
 
 import { CacheWarmer, createCatalogPricingLookup, DEFAULT_MIN_SAVINGS_USD, requestFingerprint, type AliasPricingLookup } from './cache-warmer';
 
@@ -220,6 +221,13 @@ export class Agent {
    * repetitionGuard so subagent boundaries never share snapshots.
    */
   readonly editSnapshots: EditSnapshotStore;
+  /**
+   * Session-scoped queue of errors that edits introduced, rendered into the
+   * prompt by EditRecoveryInjector until they are fixed. Agent-held like
+   * editSnapshots: a subagent's edits must never leak reminders into the
+   * parent's prompt.
+   */
+  readonly editRecoveryQueue: EditRecoveryQueue;
   readonly dreamTracker: DreamTracker;
   readonly replayBuilder: ReplayBuilder;
   /**
@@ -348,6 +356,9 @@ export class Agent {
     // touches files on disk, so a snapshot keeps mirroring it) and are LRU-
     // bounded instead.
     this.editSnapshots = new EditSnapshotStore();
+    // Paired with the snapshots above: the reminders outlive the tool result
+    // that reported the errors, which is the whole point of queueing them.
+    this.editRecoveryQueue = new EditRecoveryQueue();
     // Resolve through the authoritative home resolver rather than falling back
     // to '' — an empty home would put the state file in the current working
     // directory, i.e. in whatever project the session happens to run in.

@@ -1421,10 +1421,12 @@ export class ToolManager {
       [
         new b.ReadTool(jian, workspace, this.lspRegistry, this.agent.repetitionGuard, this.agent.editSnapshots),
         new b.ReadGroupTool(jian, workspace, this.lspRegistry, this.agent.repetitionGuard, this.agent.editSnapshots),
-        new b.WriteTool(jian, workspace, this.lspRegistry),
-        new b.EditTool(jian, workspace, this.lspRegistry, this.agent.workingSet, this.agent.editSnapshots),
+        new b.WriteTool(jian, workspace, this.lspRegistry, this.agent.editRecoveryQueue),
+        new b.EditTool(jian, workspace, this.lspRegistry, this.agent.workingSet, this.agent.editSnapshots, this.agent.editRecoveryQueue),
         new b.GrepTool(jian, workspace, this.agent.repetitionGuard),
         new b.GlobTool(jian, workspace),
+        new b.AstGrepTool(jian, workspace),
+        new b.AstEditTool(jian, workspace, this.lspRegistry, this.agent.editRecoveryQueue),
         new b.BashTool(jian, cwd, background, {
           allowBackground,
           availableTools: this.enabledTools,
@@ -1563,6 +1565,12 @@ export class ToolManager {
         toolServices?.paperSearcher && new b.PaperSearchTool(toolServices.paperSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
         this.lspRegistry && new LspTool(this.agent, workspace, this.lspRegistry),
+        // Debugger sessions spawn a Python debuggee through DAP. The deferred
+        // `debug` group owns the tool while the portal is active; this eager
+        // site restores the pre-portal table (portal off) for main agents.
+        !deferConstruction &&
+          this.agent.type === 'main' &&
+          new b.DebugTool(jian, cwd, this.agent.lspSupervisor),
       ]
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),

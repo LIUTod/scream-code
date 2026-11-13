@@ -51,6 +51,15 @@ export default defineConfig({
     // onnxruntime-web loads its wasm artifact and worker from its own dist
     // directory (resolved via require.resolve), and the tokenizer ships its
     // own runtime data — both must stay unwrapped for that lookup to work.
-    neverBundle: ['mupdf', 'onnxruntime-web', '@huggingface/tokenizers', '@earendil-works/pi-codemode'],
+    // @ast-grep/napi picks its platform binary (`@ast-grep/napi-<os>-<arch>`)
+    // at runtime; bundling would pin the build host's binary into the shipped
+    // CLI and break the other platforms, so it must resolve from node_modules.
+    neverBundle: [
+      'mupdf',
+      'onnxruntime-web',
+      '@huggingface/tokenizers',
+      '@earendil-works/pi-codemode',
+      '@ast-grep/napi',
+    ],
   },
 });

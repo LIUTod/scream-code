@@ -19,9 +19,17 @@ import type { Jian } from '@scream-code/jian';
 
 import type { LspRegistry } from '../../../lsp/registry';
 import { formatDiagnostic, type LspDiagnostic } from '../../../lsp/client';
+import {
+  diagnosticsSignatures,
+  type EditRecoveryQueue,
+  type EditRecoveryReminder,
+} from '../../support/edit-recovery-queue';
 
 export const DIAGNOSTICS_TIMEOUT_MS = 1500;
 const MAX_DIAGNOSTICS_LINES = 8;
+
+/** Empty observation set: nothing is reported, so every reminder is resolved. */
+const NO_SIGNATURES: ReadonlySet<string> = new Set();
 
 export type DiagnosticsUnavailableReason =
   /** Registry absent, file type unsupported, or client could not be obtained. */
@@ -31,6 +39,13 @@ export type DiagnosticsUnavailableReason =
 
 export interface DiagnosticsResult {
   readonly available: boolean;
+  /**
+   * True when the server PUBLISHED diagnostics for the file. False means the
+   * empty `diagnostics` list carries no information — the fetch timed out, the
+   * client threw, or the server is unavailable — and callers must not read it
+   * as "the file is clean".
+   */
+  readonly observed: boolean;
   readonly diagnostics: readonly LspDiagnostic[];
   /** True when any diagnostic has severity 1 (Error). Callers use this to flag the tool result as isError. */
   readonly hasErrors: boolean;
@@ -61,11 +76,11 @@ export async function fetchDiagnostics(
   workspaceRoot: string,
 ): Promise<DiagnosticsResult> {
   if (registry === undefined) {
-    return { available: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
+    return { available: false, observed: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
   }
   const languageId = registry.languageIdForPath(path);
   if (languageId === undefined) {
-    return { available: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
+    return { available: false, observed: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
   }
   const serverCommand = registry.commandForPath(path)?.[0];
   let client;
@@ -74,6 +89,7 @@ export async function fetchDiagnostics(
   } catch {
     return {
       available: false,
+      observed: false,
       diagnostics: [],
       hasErrors: false,
       reason: 'server-missing',
@@ -81,15 +97,22 @@ export async function fetchDiagnostics(
     };
   }
   if (client === undefined) {
-    return { available: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
+    return { available: false, observed: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
   }
   try {
     const content = await jian.readText(path);
     client.didOpen(path, content, languageId);
-    const diags = await client.diagnostics(path, DIAGNOSTICS_TIMEOUT_MS);
-    return { available: true, diagnostics: diags, hasErrors: hasErrors(diags) };
+    const report = await client.diagnosticsReport(path, DIAGNOSTICS_TIMEOUT_MS);
+    return {
+      available: true,
+      observed: report.observed,
+      diagnostics: report.diagnostics,
+      hasErrors: hasErrors(report.diagnostics),
+    };
   } catch {
-    return { available: true, diagnostics: [], hasErrors: false };
+    // The fetch itself failed: the empty list is "nothing observed", not a
+    // clean file.
+    return { available: true, observed: false, diagnostics: [], hasErrors: false };
   }
 }
 
@@ -119,4 +142,62 @@ export function formatDiagnosticsHint(result: DiagnosticsResult): string {
   const cmd = result.serverCommand;
   if (cmd === undefined) return '';
   return `\n提示：为获得编辑后的类型与语法诊断，建议安装语言服务器 \`${cmd}\`。`;
+}
+
+/**
+ * Fold a post-write observation into the session reminder queue.
+ *
+ * Edit maintains the queue itself (it diffs each observation against the
+ * file's last-seen errors to find the ones it introduced). A fix that lands
+ * through a tool that bypasses Edit — Write, an ast_edit apply — still
+ * produces the only observation that path gets, so without this the reminder
+ * would stay pending forever. Only clearing happens here: these writes have
+ * no baseline, so they never introduce reminders.
+ *
+ * Cheap by construction: an empty queue returns before any I/O, and only
+ * paths with a pending reminder are touched. A reminder whose file no longer
+ * exists is cleared outright — nothing will publish diagnostics for a deleted
+ * file again. An unobserved fetch (`result.observed === false`) changes
+ * nothing, mirroring how an unavailable server is treated.
+ */
+export async function reconcileEditReminders(
+  queue: EditRecoveryQueue | undefined,
+  jian: Jian,
+  path: string,
+  result: DiagnosticsResult,
+): Promise<void> {
+  if (queue === undefined) return;
+  const pending = queue.drain();
+  if (pending.length === 0) return;
+  await clearDeletedReminders(queue, jian, pending);
+  if (!result.observed) return;
+  const current = new Set(
+    diagnosticsSignatures(result.diagnostics).map((signature) => signature.signature),
+  );
+  queue.clearIfResolved(path, current);
+}
+
+/**
+ * Drop the reminders whose file is gone. Only a definitive ENOENT counts: any
+ * other stat failure leaves the file's state unknown, and clearing on an
+ * unreadable path would hide a live error.
+ */
+async function clearDeletedReminders(
+  queue: EditRecoveryQueue,
+  jian: Jian,
+  pending: readonly EditRecoveryReminder[],
+): Promise<void> {
+  for (const reminderPath of new Set(pending.map((reminder) => reminder.path))) {
+    if (await pathExists(jian, reminderPath)) continue;
+    queue.clearIfResolved(reminderPath, NO_SIGNATURES);
+  }
+}
+
+async function pathExists(jian: Jian, path: string): Promise<boolean> {
+  try {
+    await jian.stat(path, { followSymlinks: false });
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException | null)?.code !== 'ENOENT';
+  }
 }
