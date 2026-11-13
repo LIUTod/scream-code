@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import type { ToolCall } from '../../src/loop/types';
 import { DEFAULT_AGENT_PROFILES } from '../../src/profile';
-import { testAgent } from '../agent/harness';
+import { harnessConfig, testAgent } from '../agent/harness';
 
 describe('InspectOwnAssets e2e (temporary)', () => {
   it('is registered on the main agent and callable end-to-end', async () => {
-    const ctx = testAgent();
+    // Pinned off the portal: this test verifies the tool's own profile
+    // wiring (registered, offered, callable), not the deferred-tool portal.
+    const ctx = testAgent({ initialConfig: harnessConfig({ toolPortal: 'off' }) });
     ctx.configure();
     const agent = ctx.agent;
 
@@ -59,7 +61,9 @@ describe('InspectOwnAssets e2e (temporary)', () => {
   });
 
   it('full turn: tool is injected into the model request and callable by the model', async () => {
-    const ctx = testAgent();
+    // These tests exercise InspectOwnAssets itself, not the deferred-tool
+    // portal, so pin toolPortal: 'off' to keep the name in the enabled set.
+    const ctx = testAgent({ initialConfig: harnessConfig({ toolPortal: 'off' }) });
     // The harness enables tools explicitly via configure({ tools }) — the
     // same way turn.test.ts enables Bash. (In real runs, session useProfile
     // drives activeTools from profile.tools, covered by the first test.)

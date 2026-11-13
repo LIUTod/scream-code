@@ -146,6 +146,18 @@ export function testAgent(options: TestAgentOptions = {}): AgentTestContext {
   return new AgentTestContext(options);
 }
 
+/**
+ * The harness's default config (mock provider included) with extra
+ * loopControl fields layered on — the idiomatic way to pin a loop-control
+ * switch off its new default (e.g. `toolPortal: 'off'`) in tests that do not
+ * run `configure()` (which would rebuild the provider config anyway).
+ */
+export function harnessConfig(
+  loopControl: NonNullable<ScreamConfig['loopControl']> = {},
+): ScreamConfig {
+  return { ...emptyConfig(), loopControl };
+}
+
 export class AgentTestContext {
   private readonly options: TestAgentOptions;
   private readonly scriptedGenerate = createScriptedGenerate();

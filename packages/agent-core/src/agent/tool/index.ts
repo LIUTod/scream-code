@@ -19,6 +19,15 @@ import { PLUGIN_CIRCUIT_TRIP_THRESHOLD } from '../../plugin/types';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import type { TodoItem } from '../../todo';
 import * as b from '../../tools/builtin';
+import {
+  DEFERRED_GROUPS,
+  DEFERRED_PORTAL_TOOL_NAME,
+  getDeferredGroup,
+  isDeferredBuiltinToolName,
+  type DeferredGroupEnableResult,
+  type DeferredToolGroupContext,
+  type DeferredToolGroupName,
+} from '../../tools/builtin/deferred-tools';
 import { LspTool } from '../../tools/builtin/lsp-tool';
 import { LspRegistry } from '../../lsp/registry';
 import type { GoalGraderFn } from '../../tools/builtin/goal/update-goal';
@@ -453,6 +462,11 @@ export class ToolManager {
   private readonly enabledDeferredMcpTools = new Set<string>();
   protected readonly mcpToolsByServer: Map<string, string[]> = new Map();
   protected enabledTools: Set<string> = new Set();
+  /** Built-in groups enabled this session through DiscoverTools (see
+   * `tools/builtin/deferred-tools.ts`). Session-local on purpose: a resume
+   * re-applies the profile's tool list, so groups start deferred again — the
+   * same lifetime the enabled-deferred-MCP set has. */
+  private readonly enabledDeferredGroups = new Set<DeferredToolGroupName>();
   /** Glob patterns (e.g. `mcp__*`, `mcp__github__*`) gating which MCP tools the profile exposes. */
   private mcpAccessPatterns: string[] = [];
   protected readonly store: Partial<ToolStoreData> = {};
@@ -996,8 +1010,132 @@ export class ToolManager {
     });
     // MCP entries are glob patterns gated separately; the rest are exact
     // builtin/user tool names. The split keeps every caller on one string[].
-    this.enabledTools = new Set(names.filter((name) => !isMcpToolName(name)));
     this.mcpAccessPatterns = names.filter((name) => isMcpToolName(name));
+    if (this.isToolPortalActive()) {
+      // Tool portal active: the names a profile lists for deferred groups
+      // are held back from the enabled set — DiscoverTools fronts them until
+      // the model enables a group (enableDeferredToolGroup). Groups enabled
+      // earlier this session survive the replacement, so a later /script or
+      // /rlm toggle (or a profile re-application) cannot silently revoke
+      // them.
+      const kept = names.filter(
+        (name) => !isMcpToolName(name) && !isDeferredBuiltinToolName(name),
+      );
+      for (const groupName of this.enabledDeferredGroups) {
+        const group = getDeferredGroup(groupName);
+        if (group !== undefined) kept.push(...group.toolNames);
+      }
+      this.enabledTools = new Set([...kept, DEFERRED_PORTAL_TOOL_NAME]);
+      return;
+    }
+    this.enabledTools = new Set(names.filter((name) => !isMcpToolName(name)));
+  }
+
+  /**
+   * The tool portal is active for main agents unless explicitly disabled:
+   * `loopControl.toolPortal` defaults to 'default' (deferred groups held
+   * back, DiscoverTools offered instead) and 'off' restores the
+   * always-resident tool table byte-for-byte. Subagent profiles with
+   * explicit `tools:` lists are never reshaped — their lists replace the
+   * default set and most deferred tools are not constructed for them anyway.
+   */
+  private isToolPortalActive(): boolean {
+    return (
+      this.agent.type === 'main' && this.agent.screamConfig?.loopControl?.toolPortal !== 'off'
+    );
+  }
+
+  /**
+   * Runtime context for a group factory, mirroring what
+   * `initializeBuiltinTools` computed inline for these sites before the
+   * portal existed. Built fresh at each enable/rebuild so the workspace and
+   * skill roots reflect the current session state.
+   */
+  private buildDeferredGroupContext(): DeferredToolGroupContext {
+    const agent = this.agent;
+    const workspace = extendWorkspaceWithSkillRoots(
+      {
+        workspaceDir: agent.config.cwd,
+        additionalDirs: [],
+      },
+      agent.skills?.registry.getSkillRoots() ?? [],
+    );
+    return {
+      agent,
+      jian: agent.jian,
+      cwd: agent.config.cwd,
+      workspace,
+      goalGrader: createGoalGrader(agent),
+    };
+  }
+
+  /**
+   * Construct a group's tools and register the instances into
+   * `builtinTools` — the same resolution map `loopToolsFor` reads for every
+   * other built-in. Deferred sites are skipped by the base construction
+   * pass, so a rebuilt registry re-runs this for every group the session
+   * has enabled so far (config refresh / skills reload call
+   * `initializeBuiltinTools` repeatedly).
+   *
+   * Registration into the enabled set is the callers' business: the enable
+   * path adds the names there, a rebuild re-registration must not.
+   */
+  private registerDeferredGroupTools(groupName: DeferredToolGroupName): readonly BuiltinTool[] {
+    const group = getDeferredGroup(groupName);
+    if (group === undefined) return [];
+    const tools = group.construct(this.buildDeferredGroupContext());
+    for (const tool of tools) this.builtinTools.set(tool.name, tool);
+    return tools;
+  }
+
+  /**
+   * Enable a deferred built-in group for this session (the DiscoverTools
+   * tool). Constructs the group's instances, adds their names to the
+   * enabled set, and marks the group so later `setActiveTools` calls
+   * (profile re-application, /script, /rlm, capability trim) keep it.
+   * Already-enabled groups report idempotent success; a group whose backing
+   * runtime is absent (e.g. memory without a memo store) reports
+   * `unavailable` and stays deferred rather than pretending to enable.
+   *
+   * Like the deferred-MCP enable path, this mutates session state only — no
+   * record is written, so a resume starts with the groups deferred again.
+   * Also like that path, the newly enabled names join the enabled set
+   * immediately but reach the model on the NEXT turn: the turn loop freezes
+   * the enabled-name filter at turn start (agent/turn/index.ts), so the
+   * tool table changes once at the next turn boundary — one prefix rebuild
+   * (agent/context/prefix-fingerprint.ts, toolDeclarationsFingerprint).
+   */
+  enableDeferredToolGroup(groupName: string): DeferredGroupEnableResult {
+    const group = getDeferredGroup(groupName);
+    if (group === undefined) {
+      return {
+        status: 'error',
+        message: `Unknown tool group '${groupName}'. Available groups: ${DEFERRED_GROUPS.map(
+          (candidate) => candidate.name,
+        ).join(', ')}.`,
+      };
+    }
+    if (!this.isToolPortalActive()) {
+      return {
+        status: 'unavailable',
+        message:
+          `Group '${groupName}' cannot be enabled: the tool portal is not active for this agent.`,
+      };
+    }
+    if (this.enabledDeferredGroups.has(group.name)) {
+      return { status: 'already-enabled' };
+    }
+    const tools = this.registerDeferredGroupTools(group.name);
+    if (tools.length === 0) {
+      return {
+        status: 'unavailable',
+        message:
+          `Group '${groupName}' has no tools available in this session (its backing store is not configured).`,
+      };
+    }
+    this.enabledDeferredGroups.add(group.name);
+    for (const tool of tools) this.enabledTools.add(tool.name);
+    return { status: 'enabled', toolNames: tools.map((tool) => tool.name) };
   }
 
   private isMcpToolEnabled(name: string): boolean {
@@ -1222,6 +1360,13 @@ export class ToolManager {
         )
       : DEFAULT_AGENT_PROFILES['agent']?.subagents;
 
+    // Tool portal: when active, the low-frequency groups below are NOT
+    // constructed here — the DiscoverTools portal tool constructs a group's
+    // instances on first enable (tools/builtin/deferred-tools.ts). With
+    // loopControl.toolPortal === 'off' every site below builds exactly the
+    // pre-portal registry, byte for byte.
+    const deferConstruction = this.isToolPortalActive();
+
     this.builtinTools = new Map(
       [
         new b.ReadTool(jian, workspace, this.lspRegistry, this.agent.repetitionGuard, this.agent.editSnapshots),
@@ -1256,48 +1401,77 @@ export class ToolManager {
         new b.TaskListTool(background),
         new b.TaskOutputTool(background),
         new b.TaskStopTool(background),
+        // Blocking wait over the same background task registry: the model
+        // parks on a task instead of polling TaskOutput. Shares this
+        // manager instance with the task tools above.
+        new b.WaitTool(background),
         new b.ReportFindingTool(this.toolStore),
         new b.ReportArchFindingTool(this.toolStore),
-        this.agent.cron && new b.CronCreateTool(this.agent.cron),
-        this.agent.cron && new b.CronListTool(this.agent.cron),
-        this.agent.cron && new b.CronDeleteTool(this.agent.cron),
+        !deferConstruction && this.agent.cron && new b.CronCreateTool(this.agent.cron),
+        !deferConstruction && this.agent.cron && new b.CronListTool(this.agent.cron),
+        !deferConstruction && this.agent.cron && new b.CronDeleteTool(this.agent.cron),
         // On-demand MCP tools stay out of the request until the model
         // enables them through this meta tool (server `exposure: on-demand`,
         // the default); see `tools/builtin/mcp/discover-mcp-tools.ts`.
         this.agent.mcp && new b.DiscoverMcpToolsTool(this),
+        // The tool portal stands in for the deferred groups below when
+        // active; constructed for main agents only, like the groups it
+        // fronts (see tools/builtin/deferred-tools.ts).
+        deferConstruction && new b.DiscoverToolsTool(this),
         // Resource access is a host tool because a read is not a `callTool`;
         // names and semantics follow the conventional MCP trio.
         this.agent.mcp && new b.ListMcpResourcesTool(this.agent),
         this.agent.mcp && new b.ListMcpResourceTemplatesTool(this.agent),
         this.agent.mcp && new b.ReadMcpResourceTool(this.agent),
         // Goal tools are main-agent-only.
-        this.agent.type === 'main' && new b.CreateGoalTool(this.agent),
-        this.agent.type === 'main' && new b.UpdateGoalTool(this.agent, createGoalGrader(this.agent)),
-        this.agent.type === 'main' && new b.GetGoalTool(this.agent),
-        this.agent.type === 'main' && new b.SetGoalBudgetTool(this.agent),
-        this.agent.type === 'main' && new b.WriteGoalNoteTool(this.agent),
+        !deferConstruction && this.agent.type === 'main' && new b.CreateGoalTool(this.agent),
+        !deferConstruction &&
+          this.agent.type === 'main' &&
+          new b.UpdateGoalTool(this.agent, createGoalGrader(this.agent)),
+        !deferConstruction && this.agent.type === 'main' && new b.GetGoalTool(this.agent),
+        !deferConstruction && this.agent.type === 'main' && new b.SetGoalBudgetTool(this.agent),
+        !deferConstruction && this.agent.type === 'main' && new b.WriteGoalNoteTool(this.agent),
         // Memory tools are main-agent-only because the store is global.
-        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryLookupTool(this.agent),
-        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryEditTool(this.agent),
-        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryConsolidatePlanTool(this.agent),
-        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryConsolidateApplyTool(this.agent),
-        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryWriteTool(this.agent),
-        this.agent.type === 'main' && this.agent.knowledgeStore && new b.KnowledgeLookupTool(this.agent),
+        !deferConstruction &&
+          this.agent.type === 'main' &&
+          this.agent.memoStore &&
+          new b.MemoryLookupTool(this.agent),
+        !deferConstruction &&
+          this.agent.type === 'main' &&
+          this.agent.memoStore &&
+          new b.MemoryEditTool(this.agent),
+        !deferConstruction &&
+          this.agent.type === 'main' &&
+          this.agent.memoStore &&
+          new b.MemoryConsolidatePlanTool(this.agent),
+        !deferConstruction &&
+          this.agent.type === 'main' &&
+          this.agent.memoStore &&
+          new b.MemoryConsolidateApplyTool(this.agent),
+        !deferConstruction &&
+          this.agent.type === 'main' &&
+          this.agent.memoStore &&
+          new b.MemoryWriteTool(this.agent),
+        !deferConstruction &&
+          this.agent.type === 'main' &&
+          this.agent.knowledgeStore &&
+          new b.KnowledgeLookupTool(this.agent),
         // Image generation is main-agent-only: it spends API quota and the
         // /config image wizard only exists in the main conversation.
-        this.agent.type === 'main' &&
+        !deferConstruction &&
+          this.agent.type === 'main' &&
           this.agent.screamHomeDir !== undefined &&
           new b.ImageGenerateTool(cwd, this.agent.screamHomeDir, jian, workspace),
         // Inspecting own assets is a main-agent concern.
-        this.agent.type === 'main' && new b.InspectOwnAssetsTool(this.agent),
+        !deferConstruction && this.agent.type === 'main' && new b.InspectOwnAssetsTool(this.agent),
         this.agent.skills?.registry.listInvocableSkills().length &&
           new b.SkillTool(this.agent),
-        this.agent.type === 'main' && new b.MakeSkillPlanTool(this.agent),
-        this.agent.type === 'main' && new b.MakeSkillApplyTool(this.agent),
+        !deferConstruction && this.agent.type === 'main' && new b.MakeSkillPlanTool(this.agent),
+        !deferConstruction && this.agent.type === 'main' && new b.MakeSkillApplyTool(this.agent),
         // Managing the plugin center is a main-agent concern: it mutates the
         // process-wide plugin table and can activate code, so subagents never
         // get the handle.
-        this.agent.type === 'main' && new b.ManagePluginTool(this.agent),
+        !deferConstruction && this.agent.type === 'main' && new b.ManagePluginTool(this.agent),
         canSpawn &&
           new b.AgentTool(
             this.agent.subagentHost,
@@ -1343,6 +1517,15 @@ export class ToolManager {
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),
     );
+    // Groups already enabled this session must survive a registry rebuild
+    // (config refresh / skills reload): the sites above skipped them, so
+    // re-construct their instances into the fresh map. Their names never
+    // left the enabled set, so no enabled-set mutation happens here.
+    if (deferConstruction && this.enabledDeferredGroups.size > 0) {
+      for (const groupName of this.enabledDeferredGroups) {
+        this.registerDeferredGroupTools(groupName);
+      }
+    }
   }
 
   /**

@@ -1,4 +1,9 @@
-export { createCommandJian, testAgent, type TestAgentContext } from './agent';
+export {
+  createCommandJian,
+  harnessConfig,
+  testAgent,
+  type TestAgentContext,
+} from './agent';
 export { createScriptedGenerate } from './scripted-generate';
 export {
   DEFAULT_TEST_SYSTEM_PROMPT,

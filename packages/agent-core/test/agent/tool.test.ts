@@ -259,7 +259,7 @@ describe('Agent tools', () => {
     await ctx.untilTurnEnd();
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
-      tools: Bash, Write
+      tools: Bash, DiscoverTools, Write
       messages:
         user: text "Which tools are active?"
     `);

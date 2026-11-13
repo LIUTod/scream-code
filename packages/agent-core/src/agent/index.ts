@@ -12,6 +12,7 @@ import {
   type ChatProvider,
   type Message,
   type Tool,
+  type TokenUsage,
 } from '@scream-code/ltod';
 
 import type { EnabledPluginSessionStart } from '#/plugin';
@@ -20,6 +21,8 @@ import { resolveScreamHome } from '../config/path';
 import { computeDelayMs, retryBackoffDelays } from '../loop/retry';
 import { RepetitionGuard } from '../tools/support/repetition-guard';
 import { EditSnapshotStore } from '../tools/support/edit-snapshot-store';
+
+import { CacheWarmer, createCatalogPricingLookup, DEFAULT_MIN_SAVINGS_USD, requestFingerprint, type AliasPricingLookup } from './cache-warmer';
 
 import type { McpConnectionManager } from '../mcp';
 import { systemPromptForRequest } from '../profile';
@@ -50,7 +53,7 @@ import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExit
 import { KnowledgeStore, sharedKnowledgeStore, sharedKnowledgeStoreReady } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
-import { DEFAULT_SECRET_PATTERNS, SecretObfuscator } from './secrets';
+import { DEFAULT_SECRET_PATTERNS, SecretObfuscator, obfuscateMessages } from './secrets';
 import { WolfPackMode } from './wolfpack';
 import { SessionMemory } from './session-memory';
 import { WorkingSet } from './working-set';
@@ -68,6 +71,7 @@ import { TurnFlow } from './turn';
 import {
   GENERATE_REQUEST_LOG_CONTEXT,
   LtodLLM,
+  type GenerateFn,
   type GenerateOptionsWithRequestLog,
 } from './turn/ltod-llm';
 import { UsageRecorder } from './usage';
@@ -218,6 +222,13 @@ export class Agent {
   readonly editSnapshots: EditSnapshotStore;
   readonly dreamTracker: DreamTracker;
   readonly replayBuilder: ReplayBuilder;
+  /**
+   * Idle prompt-cache warmer for the main loop's routed requests (see
+   * ./cache-warmer.ts). Undefined for sub agents: they are per-spawn
+   * instances whose context dies with their single turn, so warming their
+   * prefix protects a cache entry no future request will ever read.
+   */
+  readonly cacheWarmer: CacheWarmer | undefined;
 
   /** Read-only manifest of the core engine subsystems (see {@link AgentServices}). */
   readonly services: AgentServices;
@@ -227,6 +238,12 @@ export class Agent {
   private lastRequestHeaderSystemPrompt?: string;
   private readonly sharedEmbeddingEngine: EmbeddingEngine;
   private readonly resolveRuntimeSystemPrompt: (basePrompt: string) => string;
+  /** Alias → price lookup over the cached model catalog (see
+   *  {@link createCatalogPricingLookup}); undefined for sub agents. */
+  private readonly catalogPricing: AliasPricingLookup | undefined;
+  /** Handle of the warmer's pending timer, so the injected
+   *  scheduleTimer/clearTimer pair stays symmetric. */
+  private cacheWarmerTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: AgentOptions) {
     // ── Group 1: external dependencies (injected via AgentOptions) ────────────
@@ -336,6 +353,50 @@ export class Agent {
     // directory, i.e. in whatever project the session happens to run in.
     this.dreamTracker = new DreamTracker(resolveScreamHome(screamHomeDir));
     this.replayBuilder = new ReplayBuilder(this);
+    // ── Group 5: idle-time economics (cache warmer) ──────────────────────────
+    // Sub agents never warm: their context is single-turn by construction.
+    // `disposeRlm` — the per-agent teardown the session checklist drives —
+    // releases the warmer's timer on close.
+    this.catalogPricing =
+      this.type === 'sub'
+        ? undefined
+        : createCatalogPricingLookup(resolveScreamHome(screamHomeDir));
+    this.cacheWarmer =
+      this.type === 'sub'
+        ? undefined
+        : new CacheWarmer({
+            getEnabled: () => this.screamConfig?.loopControl?.cacheWarmer?.enabled === true,
+            getMinSavingsUsd:
+              () =>
+                this.screamConfig?.loopControl?.cacheWarmer?.minSavingsUsd ??
+                DEFAULT_MIN_SAVINGS_USD,
+            generate: (provider, systemPrompt, tools, history, callbacks, options) =>
+              this.generate(provider, systemPrompt, tools, history, callbacks, options),
+            getFingerprint: () => this.currentRequestFingerprint(),
+            isIdle: () => !this.turn.hasActiveTurn,
+            recordUsage: (model, usage) => {
+              // Session scope like compaction: a replay happens outside any
+              // turn, and the record must land even if the wire sink is
+              // already closed (best-effort, logged, never thrown).
+              try {
+                this.usage.record(model, usage, 'session');
+              } catch (error) {
+                this.log.warn('cache warmer usage record failed', error);
+              }
+            },
+            scheduleTimer: (cb, ms) => {
+              this.cacheWarmerTimer = setTimeout(cb, ms);
+            },
+            clearTimer: () => {
+              if (this.cacheWarmerTimer !== undefined) {
+                clearTimeout(this.cacheWarmerTimer);
+                this.cacheWarmerTimer = undefined;
+              }
+            },
+            log: (message) => {
+              this.log.warn(message);
+            },
+          });
     this.services = {
       records: this.records,
       context: this.context,
@@ -452,6 +513,12 @@ export class Agent {
    * pollute the wire log and, on a subagent that does not re-apply a profile
    * on resume, could strip MCP access patterns). */
   disposeRlm(): void {
+    // Session-close seam: `disposeRlm` is the per-agent teardown the session
+    // checklist drives (Session.registerDisposables → 'rlm' step, invoked
+    // for every agent), so the cache warmer's pending timer is released here
+    // too — a timer firing after close must never issue a replay on a
+    // torn-down agent. Cheap when the warmer was never armed.
+    this.cacheWarmer?.dispose();
     if (!this.rlmEnabled) return;
     this.rlmEnabled = false;
     const withoutPython = this.tools.getActiveTools().filter((name) => name !== 'python');
@@ -664,10 +731,99 @@ export class Agent {
       systemPrompt,
       systemPromptBlocks: systemPromptForRequest(systemPrompt),
       capability: this.config.modelCapabilities,
-      generate: this.generate,
+      // Wrapped so every main-loop routed request is captured for the idle
+      // cache-warmer (see routedGenerateWithCapture). The getter's only
+      // consumer is the turn loop, so auxiliary paths — compaction,
+      // housekeeping, side questions, which call `this.generate` directly —
+      // never capture.
+      generate: (provider, systemPrompt, tools, history, callbacks, options) =>
+        this.routedGenerateWithCapture(provider, systemPrompt, tools, history, callbacks, options),
       completionBudgetConfig,
       obfuscator: this.obfuscator,
     });
+  }
+
+  /**
+   * The main loop's routed generate, wrapped to capture the exact request
+   * (provider instance, system blocks, tool table, messages, reported usage)
+   * the loop just sent, so the idle cache-warmer can replay it verbatim at
+   * ~90% of the declared cache TTL. Capture is latest-wins: each step
+   * replaces the previous capture, so the request held at tick time is
+   * always the turn's last routed one.
+   */
+  private readonly routedGenerateWithCapture: GenerateFn = async (
+    provider,
+    systemPrompt,
+    tools,
+    history,
+    callbacks,
+    options,
+  ) => {
+    const result = await this.generate(provider, systemPrompt, tools, history, callbacks, options);
+    this.noteRoutedCacheWarmRequest(provider, systemPrompt, tools, history, result);
+    return result;
+  };
+
+  private noteRoutedCacheWarmRequest(
+    provider: ChatProvider,
+    systemPrompt: string | string[],
+    tools: readonly Tool[],
+    history: readonly Message[],
+    result: { readonly usage: TokenUsage | null },
+  ): void {
+    const warmer = this.cacheWarmer;
+    if (warmer === undefined) return;
+    // Zero-cost early-out while the feature is off: no fingerprinting, no
+    // alias resolution, no catalog read.
+    if (this.screamConfig?.loopControl?.cacheWarmer?.enabled !== true) return;
+    const aliasName = this.config.modelAlias;
+    const alias =
+      aliasName === undefined ? undefined : this.screamConfig?.models?.[aliasName];
+    warmer.noteRoutedRequest({
+      provider,
+      aliasName,
+      systemPromptBlocks: systemPrompt,
+      tools,
+      messages: history,
+      usage: result.usage ?? undefined,
+      cacheRetention: alias?.cacheRetention,
+      price:
+        alias === undefined || this.catalogPricing === undefined
+          ? undefined
+          : this.catalogPricing({ provider: alias.provider, model: alias.model }),
+      fingerprint: requestFingerprint(tools, history),
+    });
+  }
+
+  /**
+   * Fingerprint of what the NEXT routed request would send right now — the
+   * live offered tool table plus the LLM-bound message projection. The
+   * warmer's tick compares this with the capture-time fingerprint to verify
+   * the captured prefix is still intact (prefix-wise, so legitimate tail
+   * appends from finished turns pass and real mutations fail).
+   *
+   * Computed in the same outbound form the request layer sends (secrets
+   * obfuscated) so it is comparable with the capture-time fingerprint, which
+   * is taken from the exact arrays the loop handed to the provider. Uses the
+   * read-only `context.messages` projection rather than `messagesForLLM` so
+   * an idle-time observation cannot synthesize tool results into the
+   * context; the standard micro-compaction detect() pass every LLM-bound
+   * read performs still runs, which only ever advances the cutoff the next
+   * turn would advance anyway.
+   */
+  private currentRequestFingerprint(): string | undefined {
+    try {
+      const tools = this.tools.loopTools;
+      const messages = this.context.messages;
+      const obfuscator = this.obfuscator;
+      const outbound =
+        obfuscator !== undefined && obfuscator.hasSecrets()
+          ? obfuscateMessages(obfuscator, messages)
+          : messages;
+      return requestFingerprint(tools, outbound);
+    } catch {
+      return undefined;
+    }
   }
 
   private _obfuscator: SecretObfuscator | undefined;

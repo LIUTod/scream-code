@@ -22,6 +22,10 @@ tools:
   - TaskList
   - TaskOutput
   - TaskStop
+  # Blocking wait over the same background task registry — the alternative to
+  # polling TaskOutput. Shares the task tools' visibility (same manager), so
+  # it rides with them here.
+  - Wait
   - CronCreate
   - CronList
   - CronDelete

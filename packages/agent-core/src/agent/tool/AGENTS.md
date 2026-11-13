@@ -62,6 +62,20 @@
   (ManagePlugin `reset`), never automatic
 - `loopTools` determinism: sorted via `.toSorted()` — do NOT break it
   (provider prefix cache depends on byte-stable schemas)
+- **Deferred tool portal**: with `loopControl.toolPortal !== 'off'` (the
+  default), main agents do NOT get the low-frequency groups
+  (cron/memory/knowledge/goal/image/make-skill/manage-plugin/inspect — the
+  table lives in `tools/builtin/deferred-tools.ts`). Their construction sites
+  in `initializeBuiltinTools` are gated off, the names are held back from the
+  enabled set by `setActiveTools`, and the `DiscoverTools` portal tool fronts
+  them: enabling a group constructs its instances lazily, adds the names to
+  the enabled set, and marks the group so later `setActiveTools` calls
+  (profile re-application, /script, /rlm, capability trim) keep it. The turn
+  loop's frozen enabled-name filter turns this into next-turn availability —
+  one prefix rebuild at the next turn boundary. Enabled groups are
+  session-local (not persisted): a resume starts with the groups deferred
+  again, like the enabled-deferred-MCP set. `toolPortal: 'off'` restores the
+  pre-portal registry byte-for-byte (all sites construct, no portal tool)
 - Registration is idempotent: duplicate names need explicit handling (user tool
   overriding built-in? see call-site conventions)
 - MCP tools come and go with their server's lifecycle

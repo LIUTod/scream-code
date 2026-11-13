@@ -11,12 +11,17 @@ import type { Agent } from '../../src/agent';
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
 import { createRlmHostHandlers } from '../../src/agent/tool';
 import type { ScreamConfig } from '../../src/config';
+import { DEFAULT_AGENT_PROFILES } from '../../src/profile';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { collectGitContext } from '../../src/session/git-context';
 import type { SubagentCapabilityMode } from '../../src/session/subagent-capability';
-import { SessionSubagentHost } from '../../src/session/subagent-host';
+import {
+  PROFILE_ROLE_CLASSES,
+  SessionSubagentHost,
+  resolveRoleFallback,
+} from '../../src/session/subagent-host';
 import { SubagentMessageBus } from '../../src/session/subagent-messages';
 
 /** TokenUsage with all fields zero (data().total is undefined pre-record). */
@@ -24,7 +29,7 @@ function zeroUsage() {
   return { inputOther: 0, output: 0, inputCacheRead: 0, inputCacheCreation: 0 };
 }
 import { abortError, userCancellationReason } from '../../src/utils/abort';
-import { testAgent, type AgentTestContext } from '../agent/harness/agent';
+import { harnessConfig, testAgent, type AgentTestContext } from '../agent/harness/agent';
 import { systemPromptText } from '../agent/harness/snapshots';
 import { createFakeJian } from '../tools/fixtures/fake-jian';
 
@@ -1230,7 +1235,10 @@ describe('SessionSubagentHost', () => {
     parent.configure();
     parent.newEvents();
 
-    const child = testAgent();
+    // The stand-in child is built with the harness default type ('main');
+    // pin it off the deferred-tool portal so the assertion below verifies
+    // exactly the coder profile's own tool list.
+    const child = testAgent({ initialConfig: harnessConfig({ toolPortal: 'off' }) });
     child.mockNextResponse({ type: 'text', text: 'Implemented the requested fix in the target module, updated all affected call sites, and confirmed the change compiles cleanly and passes the existing test suite. No unrelated code paths were touched while making this change.' });
     const session = fakeSession(parent.agent, child.agent);
     const host = new SessionSubagentHost(session, 'main');
@@ -1978,6 +1986,321 @@ describe('SessionSubagentHost', () => {
     // instead of inheriting the unresolvable alias.
     expect(child.agent.config.modelAlias).toBe('mock-model');
   });
+
+  it('resolves the child model through binding → role alias → parent chain', async () => {
+    const routedConfig: ScreamConfig = {
+      providers: {
+        'test-provider': {
+          type: 'scream',
+          apiKey: 'test-key',
+        },
+      },
+      models: {
+        'parent-model': routedModel('parent-model'),
+        'bound-model': routedModel('bound-model'),
+        'task-model': routedModel('task-model'),
+      },
+      loopControl: { modelRoles: { task: 'task-model' } },
+    };
+    const parent = testAgent({ initialConfig: routedConfig });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    parent.agent.config.update({ modelAlias: 'parent-model' });
+
+    const child = testAgent({ initialConfig: routedConfig });
+    child.configure({ tools: ['Read'] });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const summary =
+      'Completed the subagent task with a detailed enough summary for the parent agent to continue without repeating the child agent work. '.repeat(
+        2,
+      );
+    const spawnOn = async (
+      host: SessionSubagentHost,
+      profileName: string,
+      description: string,
+    ): Promise<string | undefined> => {
+      child.mockNextResponse({ type: 'text', text: summary });
+      const handle = await host.spawn(profileName, {
+        parentToolCallId: 'call_agent',
+        prompt: 'Do work',
+        description,
+        runInBackground: false,
+        signal,
+      });
+      await handle.completion;
+      return child.agent.config.modelAlias;
+    };
+
+    // Tier 1: an explicit /model diy binding beats the role alias.
+    expect(
+      await spawnOn(
+        new SessionSubagentHost(session, 'main', undefined, () => ({ coder: 'bound-model' })),
+        'coder',
+        'Binding wins',
+      ),
+    ).toBe('bound-model');
+    // Tier 2: without a binding, the alias routed to the profile's role class
+    // applies.
+    expect(await spawnOn(new SessionSubagentHost(session, 'main'), 'coder', 'Role wins')).toBe(
+      'task-model',
+    );
+    // Tier 3: a profile whose role class has no alias configured follows the
+    // parent model.
+    expect(
+      await spawnOn(new SessionSubagentHost(session, 'main'), 'explore', 'Unset role'),
+    ).toBe('parent-model');
+  });
+
+  it('falls back to the parent model with a warning when a role alias no longer resolves', async () => {
+    // 'ghost-model' is intentionally absent from models so
+    // resolveProviderConfig throws for it, exercising the fallback path.
+    const ghostRoleConfig: ScreamConfig = {
+      providers: {
+        'test-provider': {
+          type: 'scream',
+          apiKey: 'test-key',
+        },
+      },
+      models: {
+        'parent-model': routedModel('parent-model'),
+      },
+      loopControl: { modelRoles: { read: 'ghost-model' } },
+    };
+    const parent = testAgent({ initialConfig: ghostRoleConfig });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    parent.agent.config.update({ modelAlias: 'parent-model' });
+
+    const child = testAgent({ initialConfig: ghostRoleConfig });
+    child.configure({ tools: ['Read'] });
+    child.mockNextResponse({
+      type: 'text',
+      text:
+        'Completed the fallback subagent task with a detailed enough summary for the parent agent to continue without repeating the child agent work. '.repeat(
+          2,
+        ),
+    });
+
+    const session = fakeSession(parent.agent, child.agent);
+    // resolveValidModelAlias warns through session.log; attach a spy so the
+    // test can assert the fallback path instead of a swallowed warning.
+    const warn = vi.fn();
+    Object.assign(session, { log: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    const host = new SessionSubagentHost(session, 'main');
+    const handle = await host.spawn('explore', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Do work',
+      description: 'Ghost role alias',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // Unknown role alias rejected → child falls back to the parent model, and
+    // the miss is reported through the session logger instead of failing the
+    // spawn: a typo in model_roles must degrade, never break.
+    expect(child.agent.config.modelAlias).toBe('parent-model');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain('ghost-model');
+  });
+
+  it('never role-routes an unmapped prose profile even with every role configured', async () => {
+    const allRolesConfig: ScreamConfig = {
+      providers: {
+        'test-provider': {
+          type: 'scream',
+          apiKey: 'test-key',
+        },
+      },
+      models: {
+        'parent-model': routedModel('parent-model'),
+        'read-model': routedModel('read-model'),
+        'task-model': routedModel('task-model'),
+        'judge-model': routedModel('judge-model'),
+      },
+      loopControl: {
+        modelRoles: { read: 'read-model', task: 'task-model', judge: 'judge-model' },
+      },
+    };
+    const parent = testAgent({ initialConfig: allRolesConfig });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    parent.agent.config.update({ modelAlias: 'parent-model' });
+
+    const child = testAgent({ initialConfig: allRolesConfig });
+    child.configure({ tools: ['Read'] });
+    child.mockNextResponse({
+      type: 'text',
+      text:
+        'Completed the prose subagent task with a detailed enough summary for the parent agent to continue without repeating the child agent work. '.repeat(
+          2,
+        ),
+    });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+    const handle = await host.spawn('writer', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Write the report',
+      description: 'Prose profile',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // writer has no role class: an unmapped profile must degrade to "no
+    // discount" (parent model), never to "wrong discount" (another tier's
+    // alias) — all three roles are configured and none applies.
+    expect(child.agent.config.modelAlias).toBe('parent-model');
+    expect(child.agent.config.modelAlias).not.toBe('read-model');
+    expect(child.agent.config.modelAlias).not.toBe('task-model');
+    expect(child.agent.config.modelAlias).not.toBe('judge-model');
+  });
+
+  it('inherits the parent thinking level when a role-resolved model thinks', async () => {
+    const thinkingRoleConfig: ScreamConfig = {
+      providers: {
+        'test-provider': {
+          type: 'scream',
+          apiKey: 'test-key',
+        },
+      },
+      models: {
+        'parent-model': routedModel('parent-model'),
+        'read-thinking': { ...routedModel('read-thinking'), capabilities: ['thinking'] },
+      },
+      loopControl: { modelRoles: { read: 'read-thinking' } },
+    };
+    const parent = testAgent({ initialConfig: thinkingRoleConfig });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    parent.agent.config.update({ modelAlias: 'parent-model', thinkingLevel: 'high' });
+
+    const child = testAgent({ initialConfig: thinkingRoleConfig });
+    child.configure({ tools: ['Read'] });
+    child.mockNextResponse({
+      type: 'text',
+      text:
+        'Completed the probing subagent task with a detailed enough summary for the parent agent to continue without repeating the child agent work. '.repeat(
+          2,
+        ),
+    });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+    const handle = await host.spawn('explore', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Do work',
+      description: 'Thinking role alias',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    expect(child.agent.config.modelAlias).toBe('read-thinking');
+    expect(child.agent.config.thinkingLevel).toBe('high');
+  });
+
+  it('forces thinking off when a role-resolved model cannot think', async () => {
+    const plainRoleConfig: ScreamConfig = {
+      providers: {
+        'test-provider': {
+          type: 'scream',
+          apiKey: 'test-key',
+        },
+      },
+      models: {
+        'parent-model': routedModel('parent-model'),
+        // No capabilities declared: the probe resolves thinking=false.
+        'read-plain': routedModel('read-plain'),
+      },
+      loopControl: { modelRoles: { read: 'read-plain' } },
+    };
+    const parent = testAgent({ initialConfig: plainRoleConfig });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    parent.agent.config.update({ modelAlias: 'parent-model', thinkingLevel: 'high' });
+
+    const child = testAgent({ initialConfig: plainRoleConfig });
+    child.configure({ tools: ['Read'] });
+    child.mockNextResponse({
+      type: 'text',
+      text:
+        'Completed the probing subagent task with a detailed enough summary for the parent agent to continue without repeating the child agent work. '.repeat(
+          2,
+        ),
+    });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+    const handle = await host.spawn('explore', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Do work',
+      description: 'Non-thinking role alias',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    expect(child.agent.config.modelAlias).toBe('read-plain');
+    // Same resolveThinkingLevel probe as the /model diy path: a model without
+    // thinking support gets 'off' instead of the parent's 'high'.
+    expect(child.agent.config.thinkingLevel).toBe('off');
+  });
+});
+
+describe('Subagent profile role routing', () => {
+  it('maps every profile to a role class or pins it as never role-routed', () => {
+    // writer produces prose, designer owns visual design, and `agent` is the
+    // root profile that is never spawned as a child: none of them may pick up
+    // a read/task/judge alias, where a discount would be wrong rather than
+    // merely missing. Update the map and this pin together when the profile
+    // set changes.
+    const neverRouted = new Set(['agent', 'writer', 'designer']);
+    for (const name of Object.keys(DEFAULT_AGENT_PROFILES)) {
+      expect(
+        PROFILE_ROLE_CLASSES[name] !== undefined || neverRouted.has(name),
+        `profile "${name}" must be role-mapped or pinned as never role-routed`,
+      ).toBe(true);
+    }
+    expect(Object.keys(PROFILE_ROLE_CLASSES)).toHaveLength(7);
+    expect(PROFILE_ROLE_CLASSES).toEqual({
+      explore: 'read',
+      plan: 'read',
+      verify: 'read',
+      coder: 'task',
+      worker: 'task',
+      reviewer: 'judge',
+      oracle: 'judge',
+    });
+  });
+
+  it('resolveRoleFallback serves the role alias only for mapped profiles', () => {
+    const config: ScreamConfig = {
+      providers: {},
+      loopControl: {
+        modelRoles: { read: 'read-model', task: '  ', judge: 'judge-model' },
+      },
+    };
+    expect(resolveRoleFallback('explore', config)).toBe('read-model');
+    expect(resolveRoleFallback('plan', config)).toBe('read-model');
+    expect(resolveRoleFallback('verify', config)).toBe('read-model');
+    // A whitespace-only task alias counts as unset, mirroring
+    // resolveModelBinding's treatment of an empty binding.
+    expect(resolveRoleFallback('coder', config)).toBeUndefined();
+    expect(resolveRoleFallback('worker', config)).toBeUndefined();
+    expect(resolveRoleFallback('reviewer', config)).toBe('judge-model');
+    expect(resolveRoleFallback('oracle', config)).toBe('judge-model');
+    // Unmapped profiles degrade to "no discount", never to a wrong one.
+    expect(resolveRoleFallback('writer', config)).toBeUndefined();
+    expect(resolveRoleFallback('designer', config)).toBeUndefined();
+    expect(resolveRoleFallback('agent', config)).toBeUndefined();
+    expect(resolveRoleFallback('not-a-profile', config)).toBeUndefined();
+    // No config, or no loopControl section at all: follow the parent model.
+    expect(resolveRoleFallback('explore', undefined)).toBeUndefined();
+    expect(resolveRoleFallback('explore', { providers: {} })).toBeUndefined();
+  });
 });
 
 describe('Session resume permission parent chain', () => {
@@ -2235,7 +2558,10 @@ describe('SessionSubagentHost capability persistence', () => {
     parent.configure();
     parent.agent.permission.setMode('yolo');
 
-    const child = testAgent();
+    // The stand-in child is built with the harness default type ('main');
+    // pin it off the deferred-tool portal so the capability inference below
+    // reads the exact tool set the spawn trimmed, not the portal tool.
+    const child = testAgent({ initialConfig: harnessConfig({ toolPortal: 'off' }) });
     child.configure({ tools: ['Read', 'Write', 'Bash'] });
     child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
     child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
@@ -2756,6 +3082,11 @@ describe('Session.createAgent', () => {
     expect(sub.agent.mcp).toBe(session.mcp);
   });
 });
+
+/** Model alias entry for the role-routing spawn tests (all on one provider). */
+function routedModel(model: string): NonNullable<ScreamConfig['models']>[string] {
+  return { provider: 'test-provider', model, maxContextSize: 1_000_000 };
+}
 
 function fakeSession(
   parent: Agent,

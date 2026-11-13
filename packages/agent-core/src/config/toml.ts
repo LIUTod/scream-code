@@ -253,8 +253,28 @@ function transformServiceData(data: Record<string, unknown>): Record<string, unk
   return out;
 }
 
+/**
+ * `loop_control` subsections whose inner keys follow the same snake_case
+ * convention as the top level. A fixed list, not a recursive walk: the
+ * schema gives `loop_control` exactly these two plain-object subsections
+ * (`cacheWarmer`, `modelRoles`) and neither nests deeper than one level
+ * (their field values are all scalars), so one bounded hop covers every
+ * legal shape without a blind transform over unknown keys.
+ */
+const LOOP_CONTROL_NESTED_TABLES = ['cacheWarmer', 'modelRoles'] as const;
+
 function transformLoopControlData(data: Record<string, unknown>): Record<string, unknown> {
   const out = transformPlainObject(data);
+  // The pass above camelCases only the top level; a nested table keeps its
+  // snake_case inner keys, which the non-strict schema then silently strips
+  // (e.g. a hand-written `min_savings_usd` under `cache_warmer`). Re-run the
+  // same convention on the known subsections so nested values survive.
+  for (const key of LOOP_CONTROL_NESTED_TABLES) {
+    const nested = out[key];
+    if (isPlainObject(nested)) {
+      out[key] = transformPlainObject(nested);
+    }
+  }
   if (out['maxStepsPerTurn'] === undefined && out['maxStepsPerRun'] !== undefined) {
     out['maxStepsPerTurn'] = out['maxStepsPerRun'];
   }
@@ -444,7 +464,20 @@ function loopControlToToml(
 ): Record<string, unknown> {
   const out = cloneRecord(rawLoopControl);
   for (const [key, value] of Object.entries(loopControl)) {
-    setDefined(out, camelToSnake(key), value);
+    const targetKey = camelToSnake(key);
+    if (isPlainObject(value)) {
+      // Nested table: convert its inner keys back to snake_case (same
+      // convention as oauthToToml) so a hand-written snake_case subsection
+      // like `[loop_control.cache_warner] min_savings_usd = …` survives a
+      // read-modify-write cycle instead of turning camelCase on disk.
+      const nested: Record<string, unknown> = {};
+      for (const [innerKey, innerValue] of Object.entries(value)) {
+        setDefined(nested, camelToSnake(innerKey), innerValue);
+      }
+      out[targetKey] = nested;
+    } else {
+      setDefined(out, targetKey, value);
+    }
   }
   return out;
 }

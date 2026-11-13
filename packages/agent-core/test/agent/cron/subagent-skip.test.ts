@@ -16,7 +16,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { testAgent } from '../harness/agent';
+import { harnessConfig, testAgent } from '../harness/agent';
 
 const CRON_TOOL_NAMES = ['CronCreate', 'CronList', 'CronDelete'] as const;
 
@@ -59,7 +59,10 @@ describe('Agent + Cron — subagent suppression', () => {
     if (process.platform === 'win32') return;
 
     const before = process.listenerCount('SIGUSR1');
-    const ctx = testAgent({ type: 'main' });
+    // Pinned off the portal: this test verifies constructor wiring (cron
+    // manager + the three tools registered for the main agent), not the
+    // deferred-tool portal path.
+    const ctx = testAgent({ type: 'main', initialConfig: harnessConfig({ toolPortal: 'off' }) });
 
     expect(process.listenerCount('SIGUSR1')).toBe(before + 1);
 

@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRPC, ScreamCore, type ApprovalResponse, type CoreAPI, type SDKAPI } from '../../src';
 import type { Agent } from '../../src/agent';
 import { DEFAULT_AGENT_PROFILES, prepareSystemPromptContext } from '../../src/profile';
+import { DEFERRED_GROUPS } from '../../src/tools/builtin/deferred-tools';
 import { readSessionAgentProfile } from '../../src/session';
 
 const tempDirs: string[] = [];
@@ -113,9 +114,14 @@ describe('createSession session profile', () => {
 
     expect(main.config.profileName).toBe('agent');
     expect(main.config.systemPrompt).toBe(await expectedBasePrompt(main));
-    expect(sorted(main.tools.getActiveTools())).toEqual(
-      sorted(DEFAULT_AGENT_PROFILES['agent']?.tools ?? []),
-    );
+    // The deferred-tool portal reshapes the profile list: the low-frequency
+    // group names are held back and DiscoverTools fronts them. MCP patterns
+    // are not part of the deferral — they pass through untouched.
+    const deferredNames = new Set(DEFERRED_GROUPS.flatMap((group) => [...group.toolNames]));
+    const expectedActive = (DEFAULT_AGENT_PROFILES['agent']?.tools ?? [])
+      .filter((name) => !deferredNames.has(name))
+      .concat('DiscoverTools');
+    expect(sorted(main.tools.getActiveTools())).toEqual(sorted(expectedActive));
     expect((await readPersistedState(created.sessionDir)).custom).toEqual({});
   });
 
@@ -135,7 +141,8 @@ describe('createSession session profile', () => {
 
     expect(main.config.profileName).toBe('research-bot');
     expect(main.config.systemPrompt).toBe(`${await expectedBasePrompt(main)}\n\n${role}`);
-    expect(sorted(main.tools.getActiveTools())).toEqual(['Grep', 'Read']);
+    // Neither name is deferred, so only the portal tool joins the set.
+    expect(sorted(main.tools.getActiveTools())).toEqual(['DiscoverTools', 'Grep', 'Read']);
     expect((await readPersistedState(created.sessionDir)).custom?.agentProfile).toEqual({
       name: 'research-bot',
       systemPrompt: role,
@@ -173,7 +180,8 @@ describe('createSession session profile', () => {
     expect(main.config.profileName).toBe('research-bot');
     expect(main.config.systemPrompt).toContain('role v2');
     expect(main.config.systemPrompt).not.toContain('role v1');
-    expect(sorted(main.tools.getActiveTools())).toEqual(['Read']);
+    // Neither name is deferred, so only the portal tool joins the set.
+    expect(sorted(main.tools.getActiveTools())).toEqual(['DiscoverTools', 'Read']);
   });
 });
 

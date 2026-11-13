@@ -138,6 +138,49 @@ export const LoopControlSchema = z.object({
   // are huge. The summary lands in the MAIN model's context, so a too-weak
   // housekeeping model degrades summary quality — choose accordingly.
   housekeepingModel: z.string().optional(),
+  // Role-based model routing for subagent profiles. A profile without an
+  // explicit model binding falls back to the alias bound to its role class;
+  // unset roles (or an unknown alias) inherit the session model. Roles:
+  // read (explore/plan/verify), task (coder/worker), judge (reviewer/oracle).
+  // Prose and design profiles are never role-routed.
+  modelRoles: z
+    .object({
+      read: z.string().optional(),
+      task: z.string().optional(),
+      judge: z.string().optional(),
+    })
+    .optional(),
+  // Proactively refresh the provider prompt cache on idle sessions: after the
+  // last routed request, replay it once at ~90% of the alias's declared cache
+  // TTL (see `cache_retention`) so the next real turn hits the cache instead
+  // of paying full input price on the whole prefix. Opt-in because it burns
+  // tokens deliberately — that is its cost model: each replay pays the
+  // cache-read price on the cached prefix (plus whatever the model outputs,
+  // which is discarded), and it only pays off when the next turn would
+  // otherwise arrive after the TTL expired. A replay fires only when the
+  // agent is idle, the request prefix is still byte-identical, and the
+  // expected dollar saving — priced from the model catalog's own input vs
+  // cache-read rates — clears `min_savings_usd`. Aliases without
+  // `cache_retention` never schedule, and providers without prompt caching
+  // must not enable this: there is no cache to protect, so every replay is
+  // a pure loss.
+  cacheWarmer: z
+    .object({
+      enabled: z.boolean().optional(),
+      // Minimum expected saving (USD) for one replay to be worth its burn.
+      // Default 0.05: comfortably above a short-replay's output cost on
+      // current pricing, and small enough to protect a normal session
+      // prefix (>= ~25k cached tokens at typical 3.0 vs 0.3 input/cache-read
+      // rates).
+      minSavingsUsd: z.number().positive().optional(),
+    })
+    .optional(),
+  // Low-frequency built-in tool groups are offered through a portal tool
+  // (DiscoverTools) instead of occupying schema space in every request:
+  // ~19 tools removed from the tool table. Enabling a group registers its
+  // tools from the next turn (one prefix rebuild). 'off' restores the
+  // always-resident tool table.
+  toolPortal: z.enum(['default', 'off']).optional(),
 });
 
 export type LoopControl = z.infer<typeof LoopControlSchema>;

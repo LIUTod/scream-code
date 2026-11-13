@@ -82,11 +82,17 @@ const SUBAGENT_PROMPT_ALLOWANCES = new Map<string, string>([
 ]);
 
 /**
- * Classes that expose a tool-like `name` but are never offered to the model:
- * the Python runner is reached through `RunScript`, not called by name.
+ * Classes that expose a tool-like `name` but are never offered by a profile's
+ * `tools:` list: the Python runner is reached through `RunScript`, not called
+ * by name; the deferred-tool portal is appended to the main agent's enabled
+ * set by the registry when `loopControl.toolPortal` is active.
  */
 const NON_MODEL_TOOL_CLASSES = new Map<string, string>([
   ['python', 'sandbox runner used by RunScript, has no model-facing schema'],
+  [
+    'DiscoverTools',
+    'tool portal fronts the deferred built-in groups; registry-managed, never profile-listed',
+  ],
 ]);
 
 const promptContext = {

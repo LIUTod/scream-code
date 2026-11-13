@@ -55,7 +55,7 @@ describe('Agent resume', () => {
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
       call 1:
         system: <system-prompt>
-        tools: Bash
+        tools: Bash, DiscoverTools
         messages:
           assistant: text "Historical compacted summary."
           user: text "Fresh prompt after resume"

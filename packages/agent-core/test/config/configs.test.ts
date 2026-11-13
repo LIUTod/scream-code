@@ -585,3 +585,141 @@ describe('sessionHeader schema', () => {
     ).toThrow();
   });
 });
+
+describe('loopControl modelRoles schema', () => {
+  it('parses model_roles when present and leaves it undefined when absent', () => {
+    const parsed = ScreamConfigSchema.parse({
+      loopControl: {
+        modelRoles: { read: 'fast-model', task: 'cheap-model', judge: 'strong-model' },
+      },
+    });
+    expect(parsed.loopControl?.modelRoles).toEqual({
+      read: 'fast-model',
+      task: 'cheap-model',
+      judge: 'strong-model',
+    });
+    expect(ScreamConfigSchema.parse({}).loopControl).toBeUndefined();
+  });
+
+  it('rejects a wrong-shape modelRoles entry', () => {
+    expect(() =>
+      ScreamConfigSchema.parse({ loopControl: { modelRoles: { read: 42 } } }),
+    ).toThrow();
+    expect(() =>
+      ScreamConfigSchema.parse({ loopControl: { modelRoles: 'fast-model' } }),
+    ).toThrow();
+  });
+
+  it('round-trips model_roles through the TOML loader and writer', async () => {
+    const dir = makeTempDir();
+    const configPath = join(dir, 'config.toml');
+    const config = parseConfigString(
+      `
+[loop_control]
+model_roles = { read = "fast-model", judge = "strong-model" }
+`,
+      configPath,
+    );
+    expect(config.loopControl?.modelRoles).toEqual({ read: 'fast-model', judge: 'strong-model' });
+
+    await writeConfigFile(configPath, config);
+    const reloaded = readConfigFile(configPath);
+    expect(reloaded.loopControl?.modelRoles).toEqual({
+      read: 'fast-model',
+      judge: 'strong-model',
+    });
+  });
+});
+
+describe('loopControl toolPortal schema', () => {
+  it('parses tool_portal when present and leaves it undefined when absent', () => {
+    expect(ScreamConfigSchema.parse({ loopControl: { toolPortal: 'off' } }).loopControl).toEqual({
+      toolPortal: 'off',
+    });
+    expect(ScreamConfigSchema.parse({ loopControl: { toolPortal: 'default' } }).loopControl).toEqual({
+      toolPortal: 'default',
+    });
+    expect(ScreamConfigSchema.parse({}).loopControl).toBeUndefined();
+    expect(ScreamConfigSchema.parse({ loopControl: {} }).loopControl?.toolPortal).toBeUndefined();
+  });
+
+  it('rejects a value outside the enum', () => {
+    expect(() =>
+      ScreamConfigSchema.parse({ loopControl: { toolPortal: 'always' } }),
+    ).toThrow();
+  });
+
+  it('round-trips tool_portal through the TOML loader and writer', async () => {
+    const dir = makeTempDir();
+    const configPath = join(dir, 'config.toml');
+    const config = parseConfigString(
+      `
+[loop_control]
+tool_portal = "off"
+`,
+      configPath,
+    );
+    expect(config.loopControl?.toolPortal).toBe('off');
+
+    await writeConfigFile(configPath, config);
+    const reloaded = readConfigFile(configPath);
+    expect(reloaded.loopControl?.toolPortal).toBe('off');
+  });
+});
+
+describe('loopControl nested-table TOML deep transform', () => {
+  it('round-trips [loop_control.cache_warmer] including the nested snake_case threshold', async () => {
+    const dir = makeTempDir();
+    const configPath = join(dir, 'config.toml');
+    const config = parseConfigString(
+      `
+[loop_control.cache_warmer]
+enabled = true
+min_savings_usd = 0.2
+`,
+      configPath,
+    );
+    // The nested table's snake_case keys must be camelCased too; without the
+    // deep transform the non-strict schema silently strips
+    // `min_savings_usd` and the hand-written threshold is lost.
+    expect(config.loopControl?.cacheWarmer).toEqual({ enabled: true, minSavingsUsd: 0.2 });
+
+    await writeConfigFile(configPath, config);
+    const written = await readFile(configPath, 'utf-8');
+    // The write path must restore the snake_case convention, not serialize
+    // the camelCase typed object.
+    expect(written).toContain('min_savings_usd = 0.2');
+    expect(written).not.toContain('minSavingsUsd');
+
+    const reloaded = readConfigFile(configPath);
+    expect(reloaded.loopControl?.cacheWarmer).toEqual({ enabled: true, minSavingsUsd: 0.2 });
+  });
+
+  it('round-trips nested model_roles (read/task/judge) through the same deep transform', async () => {
+    const dir = makeTempDir();
+    const configPath = join(dir, 'config.toml');
+    const config = parseConfigString(
+      `
+[loop_control]
+model_roles = { read = "fast-model", task = "cheap-model", judge = "strong-model" }
+`,
+      configPath,
+    );
+    expect(config.loopControl?.modelRoles).toEqual({
+      read: 'fast-model',
+      task: 'cheap-model',
+      judge: 'strong-model',
+    });
+
+    await writeConfigFile(configPath, config);
+    const written = await readFile(configPath, 'utf-8');
+    expect(written).toContain('model_roles');
+
+    const reloaded = readConfigFile(configPath);
+    expect(reloaded.loopControl?.modelRoles).toEqual({
+      read: 'fast-model',
+      task: 'cheap-model',
+      judge: 'strong-model',
+    });
+  });
+});

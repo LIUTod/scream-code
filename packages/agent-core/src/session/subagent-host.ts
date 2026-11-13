@@ -2,6 +2,7 @@ import type { TokenUsage } from '@scream-code/ltod';
 
 import type { Agent } from '../agent';
 import type { PromptOrigin } from '../agent/context';
+import type { ScreamConfig } from '../config';
 import type { LoopTurnStopReason } from '../loop';
 import {
   DEFAULT_AGENT_PROFILES,
@@ -74,6 +75,46 @@ const HOOK_TEXT_PREVIEW_LENGTH = 500;
 const CHILD_RELEASE_BOUND_MS = 5_000;
 const SUBAGENT_MAX_TOKENS_ERROR =
   'Subagent turn failed before completing its final summary: reason=max_tokens';
+
+/**
+ * Role class per profile: read-tier profiles search and plan, task-tier
+ * profiles mutate the workspace, judge-tier profiles gate quality. A profile
+ * missing from this map is never role-routed (follows the parent model) — an
+ * unmapped profile must degrade to "no discount", never to "wrong discount".
+ * Prose (`writer`) and design (`designer`) work is deliberately excluded, as
+ * is the root `agent` profile (never spawned as a child). Keyed beside the
+ * {@link DEFAULT_AGENT_PROFILES} import so the profile set and its routing
+ * tiers are reviewed as one change.
+ */
+export const PROFILE_ROLE_CLASSES: Record<string, 'read' | 'task' | 'judge'> = {
+  explore: 'read',
+  plan: 'read',
+  verify: 'read',
+  coder: 'task',
+  worker: 'task',
+  reviewer: 'judge',
+  oracle: 'judge',
+};
+
+/**
+ * Role-class model fallback: the alias configured for this profile's role
+ * class in `loop_control.model_roles`, or undefined when the profile is never
+ * role-routed (absent from {@link PROFILE_ROLE_CLASSES}) or its role has no
+ * usable alias configured. Priority sits below the per-profile `/model diy`
+ * binding (resolveModelBinding is consulted first in configureChild) and
+ * above the parent model. An empty or whitespace-only alias counts as unset —
+ * mirrors resolveModelBinding's treatment of an empty binding.
+ */
+export function resolveRoleFallback(
+  profileName: string,
+  config: ScreamConfig | undefined,
+): string | undefined {
+  const role = PROFILE_ROLE_CLASSES[profileName];
+  if (role === undefined) return undefined;
+  const alias = config?.loopControl?.modelRoles?.[role];
+  if (typeof alias !== 'string' || alias.trim().length === 0) return undefined;
+  return alias;
+}
 
 /**
  * Render parent messages as the block a child sees. Both delivery paths share
@@ -1137,10 +1178,14 @@ export class SessionSubagentHost {
     capabilityMode?: SubagentCapabilityMode,
   ): Promise<void> {
     // A subagent uses the model bound to its profile via /model diy when one
-    // is configured; otherwise it inherits the parent agent's model. A binding
-    // whose alias has since been removed from config.toml falls back to the
-    // parent model rather than sending the subagent into a hung LLM call.
-    const binding = this.resolveModelBinding(profile.name);
+    // is configured; otherwise it falls back to the alias routed to its role
+    // class (loop_control.model_roles) when its profile maps to one, and
+    // otherwise inherits the parent agent's model. A binding whose alias has
+    // since been removed from config.toml falls back to the parent model
+    // rather than sending the subagent into a hung LLM call.
+    const binding =
+      this.resolveModelBinding(profile.name) ??
+      resolveRoleFallback(profile.name, parent.screamConfig);
     const modelAlias = this.resolveValidModelAlias(parent, binding);
     const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);
     child.config.update({
@@ -1192,9 +1237,9 @@ export class SessionSubagentHost {
    * Validate that a bound alias still resolves in the provider registry.
    * Returns the binding when valid; falls back to the parent's current model
    * when the alias is unconfigured (or no provider is available) so a stale
-   * `/model diy` binding cannot send the subagent into a hung LLM call.
-   * `binding === undefined` (follow-main) is the common path and skips the
-   * probe entirely.
+   * `/model diy` binding or `model_roles` alias cannot send the subagent into
+   * a hung LLM call. `binding === undefined` (follow-main) is the common path
+   * and skips the probe entirely.
    */
   private resolveValidModelAlias(parent: Agent, binding: string | undefined): string | undefined {
     if (binding === undefined) return parent.config.modelAlias;

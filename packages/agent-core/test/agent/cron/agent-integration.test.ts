@@ -9,13 +9,16 @@ import {
   CronCreateTool,
   type CronCreateInput,
 } from '../../../src/tools/cron/cron-create';
-import { testAgent, type AgentTestContext } from '../harness/agent';
+import { harnessConfig, testAgent, type AgentTestContext } from '../harness/agent';
 
 describe('Agent + Cron integration (P1.7)', () => {
   let ctx: AgentTestContext;
 
   beforeEach(() => {
-    ctx = testAgent();
+    // These tests exercise the cron tools directly (their own behavior, not
+    // the portal). Pin toolPortal: 'off' so the names stay in the enabled
+    // set exactly as before the deferred-tool portal landed.
+    ctx = testAgent({ initialConfig: harnessConfig({ toolPortal: 'off' }) });
     // `configure({ tools: [...] })` triggers `agent.config.update(...)`,
     // which is the only path that calls `initializeBuiltinTools()`.
     // Listing all three cron tools turns them on in `enabledTools` so
