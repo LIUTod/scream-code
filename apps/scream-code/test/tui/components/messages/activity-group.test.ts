@@ -141,24 +141,23 @@ describe('ActivityGroupComponent', () => {
     expect(lines[3]).not.toContain('tok');
   });
 
-  it('reserves the full collapsed height while running so steps swap in place', () => {
+  it('grows the collapsed block with its content while running', () => {
     const group = new ActivityGroupComponent(darkColors, undefined);
     group.attachTool(makeTool('t1', 'Bash', { command: 'ls -la' }), 1);
-    const first = render(group);
-    expect(first).toHaveLength(ACTIVITY_GROUP_COLLAPSED_LINES + 1);
-    // Slots the timeline has not filled yet render as blank rows below the steps.
-    expect(first[2]).toContain('Bash');
-    expect(first.slice(3).every((line) => line.trim().length === 0)).toBe(true);
+    const first = nonEmpty(render(group));
+    // Height follows content: a running block renders only its steps — the
+    // reserved blanks this block used to pad with rendered as terminal
+    // background (a black band at the bottom of the viewport).
+    expect(first).toHaveLength(2);
+    expect(first[1]).toContain('Bash');
 
     group.attachTool(makeTool('t2', 'Edit', { file_path: '/workspace/a.ts' }), 2);
-    const second = render(group);
-    expect(second).toHaveLength(ACTIVITY_GROUP_COLLAPSED_LINES + 1);
-    // The filled row kept its content and its position: appending a step swapped
-    // one row's content in place instead of pushing the block taller. Only the
-    // branch glyph may flip (└→├) — a within-row change, never a row move.
-    expect(second[2]?.slice(5)).toBe(first[2]?.slice(5));
-    expect(second[2]).not.toBe(first[2]);
-    expect(second[3]).toContain('Edit');
+    const second = nonEmpty(render(group));
+    expect(second).toHaveLength(3);
+    // Chronology preserved: the earlier step keeps its row in place and the
+    // new step appends below it.
+    expect(second[1]).toContain('Bash');
+    expect(second[2]).toContain('Edit');
   });
 
   it('settles the reserved block to its real height when the turn ends', () => {

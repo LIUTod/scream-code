@@ -635,19 +635,11 @@ export class ActivityGroupComponent extends Container {
       }
       this.bodyContainer.addChild(this.thinkingSummaryRow(segment, width, isLast));
     });
-    if (this.running && shown.length < budget) {
-      // Reserve the full collapsed height while the turn runs: slots the
-      // timeline has not filled yet render as blank rows below the steps, so
-      // the block reaches its settled height with its first step and every
-      // later step swaps a row's content in place instead of pushing the
-      // transcript below it down. A running turn then never jostles the page
-      // once per step; the block settles to its real height when the turn ends.
-      // A Spacer, not a Text: Text renders blank content as zero rows, and the
-      // slot must hold its row.
-      for (let index = shown.length; index < budget; index += 1) {
-        this.bodyContainer.addChild(new Spacer(1));
-      }
-    }
+    // Height follows content: no reserved blank rows while the turn runs. The
+    // steady-height padding this slot used to hold rendered as terminal-
+    // background rows — a black band at the bottom of the viewport for every
+    // running tool — and the step swaps it avoided are absorbed by the follow
+    // logic (a following viewport re-seats on every layout frame anyway).
   }
 
   /**
