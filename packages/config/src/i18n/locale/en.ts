@@ -947,23 +947,25 @@ export const en: Record<string, string> = {
   // ─── Model DIY (per-purpose bindings) ───
   'modeldiy.title': 'Model DIY',
   'modeldiy.hint': '↑↓ Select · Enter confirm · Esc cancel',
-  'modeldiy.entry_roles': 'Models by role',
+  'modeldiy.entry_roles': 'Models by role (fallback)',
   'modeldiy.entry_roles_desc':
-    'Bind the explore/plan/verify, code/execute and review roles separately',
+    'Default model per role class; applies when the subagent has no explicit binding (writer and designer are never role-routed)',
   'modeldiy.entry_housekeeping': 'Compaction model',
   'modeldiy.entry_housekeeping_desc':
     'Model for compaction summaries; the configured model first, then the main model',
-  'modeldiy.entry_profiles': 'Models by subagent type',
-  'modeldiy.entry_profiles_desc': 'Bind a model to each built-in subagent profile',
+  'modeldiy.entry_profiles': 'Models by subagent type (priority)',
+  'modeldiy.entry_profiles_desc': 'Pin one subagent profile to a model; wins over the role binding',
   'modeldiy.roles_title': 'Models by Role',
   'modeldiy.roles_hint': '↑↓ Select role · Enter bind model · Esc back',
-  'modeldiy.role_read': 'Explore · Plan · Verify',
+  'modeldiy.role_read': 'read · explore/plan/verify',
   'modeldiy.role_read_desc':
-    'Read-only subagents: codebase exploration, planning, verification runs',
-  'modeldiy.role_task': 'Code · Execute',
-  'modeldiy.role_task_desc': 'Workspace-mutating subagents: implementation and batch execution',
-  'modeldiy.role_judge': 'Review · Gate',
-  'modeldiy.role_judge_desc': 'Review subagents: code review and systematic quality gating',
+    'Members: explore, plan, verify — read-tier subagents (code recon, planning, gate runs)',
+  'modeldiy.role_task': 'task · code/execute',
+  'modeldiy.role_task_desc':
+    'Members: coder, worker — write-tier subagents (implementation, batch file work)',
+  'modeldiy.role_judge': 'judge · review',
+  'modeldiy.role_judge_desc':
+    'Members: reviewer, oracle — judgement-tier subagents (diff review, architecture review)',
   'modeldiy.bind_title': 'Bind {name}',
   'modeldiy.housekeeping_title': 'Compaction Model',
   'modeldiy.housekeeping_hint': '↑↓ Select model · Enter confirm · Esc back',
