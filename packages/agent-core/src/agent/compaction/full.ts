@@ -11,6 +11,7 @@ import {
   type GenerateResult,
   type Message,
   type TokenUsage,
+  type ProviderRequestAuth,
   APIContextOverflowError,
 } from '@scream-code/ltod';
 
@@ -29,8 +30,10 @@ import {
 } from '../../utils/tokens';
 import { isUserAuthoredMessage } from '../context/identity';
 import { project } from '../context/projector';
+import type { ResolvedChatModel } from '../../session/provider-manager';
 import compactionInstructionTemplate from './compaction-instruction.md';
 import compactionUpdateInstructionTemplate from './compaction-update-instruction.md';
+import { HOUSEKEEPING_SYSTEM_PROMPT } from './housekeeping-prompt';
 import { renderMessagesToText } from './render-messages';
 import type { CompactionBeginData, CompactionResult } from './types';
 import { DEFAULT_COMPACTION_CONFIG, DefaultCompactionStrategy, type CompactionStrategy } from './strategy';
@@ -643,6 +646,14 @@ export class FullCompaction {
       await this.triggerPreCompactHook(data, tokensBefore, signal);
 
       const delays = retryBackoffDelays(MAX_COMPACTION_RETRY_ATTEMPTS);
+      // Resolved once here (not inside summarizeOnce) so the retry loop, the
+      // overflow shrink loop and the re-summarize fallback all reuse the same
+      // resolved provider/auth wrapper for every attempt.
+      const housekeeping = resolveHousekeeping(this.agent);
+      // The summary lands in the session model's context regardless of which
+      // model produced it, so usage attribution and empty-response errors
+      // name the model that actually made the request.
+      const summaryModel = housekeeping?.modelName ?? model;
       const summarizeOnce = async (
         messagesToCompact: readonly ContextMessage[],
       ): Promise<{ summary: string; usage: TokenUsage | null }> => {
@@ -676,33 +687,72 @@ export class FullCompaction {
             toolCalls: [],
           } satisfies Message,
         ];
-        const response = await this.agent.generate(
-          // Carry the session's thinking level: the bare provider defaults to
-          // 'off', which always-thinking models reject with HTTP 400 — exactly
-          // the failure the main request path avoids via withThinking.
-          this.agent.config.provider.withThinking(this.agent.config.thinkingLevel),
-          // Reuse the agent's real system prompt — in the same request form
-          // (split blocks) as the main loop — so the compaction request
-          // shares the exact prefix of the last routed request — the KV
-          // cache hits instead of paying full price for the whole history.
-          // The compaction instruction (a tail user message) already forbids
-          // tool calls, so the tool descriptions in the main system prompt
-          // don't cause the model to call anything.
-          this.agent.getRuntimeSystemPromptBlocks(),
-          // Same tool set (sorted by name) the main loop sends — tools are
-          // part of the cache prefix for prefix-caching backends, so an empty
-          // or reordered list would break the prefix right after the system
-          // prompt and only the system segment would hit.
-          [...this.agent.tools.loopTools],
-          messages,
-          undefined,
-          { signal },
-        );
+        const generateSummary = (messages: Message[]): Promise<GenerateResult> => {
+          if (housekeeping === undefined) {
+            return this.agent.generate(
+              // Carry the session's thinking level: the bare provider defaults to
+              // 'off', which always-thinking models reject with HTTP 400 — exactly
+              // the failure the main request path avoids via withThinking.
+              this.agent.config.provider.withThinking(this.agent.config.thinkingLevel),
+              // Reuse the agent's real system prompt — in the same request form
+              // (split blocks) as the main loop — so the compaction request
+              // shares the exact prefix of the last routed request — the KV
+              // cache hits instead of paying full price for the whole history.
+              // The compaction instruction (a tail user message) already forbids
+              // tool calls, so the tool descriptions in the main system prompt
+              // don't cause the model to call anything.
+              this.agent.getRuntimeSystemPromptBlocks(),
+              // Same tool set (sorted by name) the main loop sends — tools are
+              // part of the cache prefix for prefix-caching backends, so an empty
+              // or reordered list would break the prefix right after the system
+              // prompt and only the system segment would hit.
+              [...this.agent.tools.loopTools],
+              messages,
+              undefined,
+              { signal },
+            );
+          }
+          // Housekeeping override: run the summarization on the configured
+          // cheaper model. The prefix-cache rationale above does not apply —
+          // a different provider cannot ride the main request's KV prefix —
+          // so the request carries a fixed minimal summarizer contract and no
+          // tool schemas instead (see housekeeping-prompt.ts). The projected
+          // messages and the tail instruction are identical to the default
+          // path, so the summary shape stays the same.
+          const send = (auth: ProviderRequestAuth): Promise<GenerateResult> =>
+            this.agent.generate(
+              // Same thinking-compat rationale as the default path: the bare
+              // provider defaults to 'off', which always-thinking models reject.
+              housekeeping.provider.withThinking(this.agent.config.thinkingLevel),
+              HOUSEKEEPING_SYSTEM_PROMPT,
+              // The compaction instruction already forbids tool calls; empty
+              // tools keep the cheap request honest instead of shipping the
+              // full tool schemas to a model that must not use them.
+              [],
+              messages,
+              undefined,
+              { signal, auth },
+            );
+          return housekeeping.authRequest === undefined
+            ? // Explicit empty auth: the generate wrapper resolves OAuth by the
+              // SESSION model's alias (agent/index.ts) — applying that wrapper
+              // here would inject the session provider's credentials into a
+              // request for a different provider. An auth object without a key
+              // short-circuits that resolution while the housekeeping provider
+              // falls back to its own constructor-level key
+              // (requireProviderApiKey: auth?.apiKey ?? defaultApiKey).
+            send({})
+            : // OAuth-backed housekeeping provider: reuse the alias's own auth
+              // wrapper (token fetch + 401 refresh) resolved in
+              // ProviderManager.tryResolveChatModel.
+            housekeeping.authRequest(send);
+        };
+        const response = await generateSummary(messages);
         if (response.finishReason === 'truncated') {
           throw new TruncatedError();
         }
         return {
-          summary: extractCompactionSummary(response, model),
+          summary: extractCompactionSummary(response, summaryModel),
           usage: response.usage,
         };
       };
@@ -757,7 +807,10 @@ export class FullCompaction {
       }
 
       if (usage !== null) {
-        this.agent.usage.record(model, usage);
+        // Record under the model that made the request (the housekeeping alias
+        // when overridden, the session model otherwise) so per-model usage
+        // stats stay attributable.
+        this.agent.usage.record(summaryModel, usage);
       }
 
       // A newer compaction may own the shared state if our abort signal was
@@ -1148,6 +1201,36 @@ export class FullCompaction {
     return sections.join('\n\n');
   }
 }
+/**
+ * Resolve the opt-in housekeeping model for compaction summarization
+ * (`loop_control.housekeeping_model`). Returns undefined when unset (run the
+ * compaction request on the session model — see the LoopControl schema
+ * comment for why that is the default) or when the alias does not resolve in
+ * the provider registry: a stale or misconfigured alias must not break
+ * context recovery, so the caller falls back to the session model and the
+ * misconfiguration surfaces as a warning instead of a failed compaction.
+ */
+function resolveHousekeeping(agent: Agent): ResolvedChatModel | undefined {
+  const alias = agent.screamConfig?.loopControl?.housekeepingModel;
+  if (alias === undefined || alias.trim().length === 0) return undefined;
+  if (agent.modelProvider === undefined) {
+    agent.log.warn(
+      'housekeeping_model is set but the agent has no provider registry; using the session model for compaction summarization',
+      { housekeepingModel: alias },
+    );
+    return undefined;
+  }
+  const resolved = agent.modelProvider.tryResolveChatModel(alias);
+  if (resolved === undefined) {
+    agent.log.warn(
+      `housekeeping model "${alias}" does not resolve in the provider registry; using the session model for compaction summarization`,
+      { housekeepingModel: alias },
+    );
+    return undefined;
+  }
+  return resolved;
+}
+
 function extractCompactionSummary(response: GenerateResult, model: string): string {
   const summary =
     typeof response.message.content === 'string'

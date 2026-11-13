@@ -1,5 +1,10 @@
 import type { Logger } from '#/logging/types';
-import type { ProviderConfig as LtodProviderConfig, ModelCapability, ProviderRequestAuth } from '@scream-code/ltod';
+import type {
+  ChatProvider,
+  ProviderConfig as LtodProviderConfig,
+  ModelCapability,
+  ProviderRequestAuth,
+} from '@scream-code/ltod';
 import { APIStatusError, createProvider, UNKNOWN_CAPABILITY } from '@scream-code/ltod';
 import type { ScreamConfig, ModelAlias, OAuthRef, ProviderConfig } from '../config';
 import { ErrorCodes, isScreamError, ScreamError } from '../errors';
@@ -19,6 +24,32 @@ export interface ResolvedRuntimeProvider {
   readonly modelCapabilities: ModelCapability;
 }
 
+/** Request wrapper produced by {@link ModelProvider.resolveAuth}: it resolves
+ *  the OAuth bearer token immediately before each request and refreshes it on
+ *  401. Callers pass their request as the callback and receive the auth. */
+export type AuthorizedRequest = <T>(
+  request: (auth: ProviderRequestAuth) => Promise<T>,
+) => Promise<T>;
+
+/**
+ * A model alias resolved into a ready-to-use chat provider for auxiliary
+ * ("housekeeping") LLM calls. Produced by {@link ModelProvider.tryResolveChatModel}.
+ */
+export interface ResolvedChatModel {
+  /** Chat provider built exactly like the session model's `config.provider`
+   *  (`createProvider(resolveProviderConfig(alias).provider)`), so per-call
+   *  overrides (`withThinking`, generation kwargs) behave identically. */
+  readonly provider: ChatProvider;
+  /** The alias name the model is configured under — the name `usage.record`
+   *  and user-facing error messages key on, NOT the underlying provider model
+   *  id (which lives on `provider.modelName`). */
+  readonly modelName: string;
+  readonly capabilities: ModelCapability;
+  /** OAuth request wrapper for the alias's provider; undefined when the
+   *  provider authenticates with its own constructor-level API key. */
+  readonly authRequest: AuthorizedRequest | undefined;
+}
+
 interface ProviderManagerOptions {
   readonly config: ScreamConfig | (() => ScreamConfig);
   readonly screamRequestHeaders?: Record<string, string>;
@@ -26,14 +57,28 @@ interface ProviderManagerOptions {
   readonly promptCacheKey?: string;
 }
 
-type AuthorizedRequest = <T>(
-  request: (auth: ProviderRequestAuth) => Promise<T>,
-) => Promise<T>;
+/** Failure codes that mean "this alias cannot be used" — every other error
+ *  escaping resolution is a bug and must surface, not silently fall back. */
+const UNRESOLVABLE_MODEL_CODES = new Set<string>([
+  ErrorCodes.CONFIG_INVALID,
+  ErrorCodes.MODEL_NOT_CONFIGURED,
+  ErrorCodes.MODEL_CONFIG_INVALID,
+]);
 
 export interface ModelProvider {
   readonly defaultModel?: string;
   resolveProviderConfig(model: string): ResolvedRuntimeProvider;
   resolveAuth?(model: string, options?: { readonly log?: Logger }): AuthorizedRequest | undefined;
+  /**
+   * Best-effort alias resolution for auxiliary ("housekeeping") LLM calls
+   * (e.g. compaction summarization on a cheaper model). Resolves through the
+   * same path as {@link resolveProviderConfig} — same alias table, same
+   * provider construction — but returns `undefined` instead of throwing when
+   * `model` is not a usable alias (unknown name, missing provider, bad
+   * context size), so callers can fall back to the session model. Errors
+   * outside model resolution propagate.
+   */
+  tryResolveChatModel(model: string): ResolvedChatModel | undefined;
 }
 
 export class SingleModelProvider implements ModelProvider {
@@ -57,6 +102,25 @@ export class SingleModelProvider implements ModelProvider {
       modelCapabilities: this.modelCapabilities,
       providerName: 'single-model-provider',
       provider: this.providerConfig,
+    }
+  }
+
+  tryResolveChatModel(model: string): ResolvedChatModel | undefined {
+    try {
+      const resolved = this.resolveProviderConfig(model);
+      // No OAuth layer exists on SingleModelProvider (resolveAuth is not
+      // implemented), so the provider always authenticates with its own
+      // constructor-level key.
+      return {
+        provider: createProvider(resolved.provider),
+        modelName: model,
+        capabilities: resolved.modelCapabilities,
+        authRequest: undefined,
+      };
+    } catch {
+      // SingleModelProvider supports exactly one model; anything else is the
+      // "unknown alias" case and falls back.
+      return undefined;
     }
   }
 }
@@ -188,6 +252,25 @@ export class ProviderManager implements ModelProvider {
         }
       }
     };
+  }
+
+  tryResolveChatModel(model: string): ResolvedChatModel | undefined {
+    try {
+      const resolved = this.resolveProviderConfig(model);
+      return {
+        provider: createProvider(resolved.provider),
+        modelName: model,
+        capabilities: resolved.modelCapabilities,
+        // Resolving auth may itself throw a config error (e.g. oauth + apiKey
+        // set on the same provider) — that is the same "alias not usable"
+        // bucket and is caught below, so the caller falls back instead of
+        // failing the housekeeping call.
+        authRequest: this.resolveAuth(model),
+      };
+    } catch (error) {
+      if (isScreamError(error) && UNRESOLVABLE_MODEL_CODES.has(error.code)) return undefined;
+      throw error;
+    }
   }
 }
 

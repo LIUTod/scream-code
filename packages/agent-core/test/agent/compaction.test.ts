@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentOptions } from '../../src/agent';
 import { recoverMemosFromCompactionSummary } from '../../src/agent/compaction/full';
 import type { ContextMessage } from '../../src/agent/context';
+import { HOUSEKEEPING_SYSTEM_PROMPT } from '../../src/agent/compaction/housekeeping-prompt';
 import { createScriptedGenerate } from './harness/scripted-generate';
 import {
   COMPACTION_INSTRUCTION,
@@ -30,6 +31,9 @@ import {
   type CompactionStrategy,
 } from '../../src/agent/compaction';
 import { HookEngine, type HookEngineTriggerArgs } from '../../src/session/hooks';
+import type { Logger } from '../../src/logging';
+import type { ScreamConfig } from '../../src/config';
+import { RepetitionGuard } from '../../src/tools/support/repetition-guard';
 import { estimateTokensForMessages } from '../../src/utils/tokens';
 import type { TestAgentContext, TestAgentOptions } from './harness/agent';
 import { testAgent } from './harness/agent';
@@ -227,6 +231,272 @@ describe('Agent compaction', () => {
     expect(captured._generationKwargs?.extra_body?.thinking?.type).toBe(
       ctx.agent.config.thinkingLevel === 'off' ? 'disabled' : 'enabled',
     );
+  });
+
+  it('keeps the compaction request on the session model when housekeeping_model is unset', async () => {
+    const { calls, generate, scripted, mockNextResponse } = createCapturingGenerate();
+    const ctx = testAgent({ generate });
+    ctx.configure({
+      tools: ['Bash'],
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+
+    mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    expect(calls).toHaveLength(1);
+    const [call] = calls;
+    const provider = call?.provider as {
+      name: string;
+      modelName: string;
+      _generationKwargs?: { extra_body?: { thinking?: { type: string } } };
+    };
+    // Same provider identity as the main loop — config.provider is a GETTER
+    // building a fresh instance per access, so assert the observable shape:
+    // backend, underlying model id, and the session thinking level.
+    expect(provider.name).toBe('scream');
+    expect(provider.modelName).toBe('scream-code');
+    expect(provider._generationKwargs?.extra_body?.thinking?.type).toBe(
+      ctx.agent.config.thinkingLevel === 'off' ? 'disabled' : 'enabled',
+    );
+    // The KV-cache prefix: real system prompt blocks (same request form as
+    // the main loop) and the same tool set the main loop sends.
+    expect(call?.systemPrompt).toEqual(ctx.agent.getRuntimeSystemPromptBlocks());
+    expect(call?.tools).toEqual([...ctx.agent.tools.loopTools]);
+    // No housekeeping override: the unset branch sends { signal } only, and
+    // the session provider has no OAuth config, so agent.generate's
+    // session-alias auth wrapper resolves to nothing — the compaction request
+    // never carries an injected credential.
+    expect(call?.auth).toBeUndefined();
+  });
+
+  it('routes the compaction request through the housekeeping model when housekeeping_model is set', async () => {
+    const { calls, generate, scripted, mockNextResponse } = createCapturingGenerate();
+    const ctx = testAgent({ generate, initialConfig: HOUSEKEEPING_TEST_CONFIG });
+    ctx.agent.config.update({ modelAlias: 'session-alias', thinkingLevel: 'off' });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+
+    mockNextResponse({ type: 'text', text: 'Housekeeping summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    expect(calls).toHaveLength(1);
+    const [call] = calls;
+    const provider = call?.provider as {
+      name: string;
+      modelName: string;
+      _generationKwargs?: { extra_body?: { thinking?: { type: string } } };
+    };
+    // The override provider (underlying model id differs from the session
+    // model), carrying the session's thinking level like the default path.
+    expect(provider.name).toBe('scream');
+    expect(provider.modelName).toBe('housekeeping-model');
+    expect(provider._generationKwargs?.extra_body?.thinking?.type).toBe('disabled');
+    // Fixed minimal summarizer contract instead of the main system prompt,
+    // and no tool schemas.
+    expect(call?.systemPrompt).toBe(HOUSEKEEPING_SYSTEM_PROMPT);
+    expect(call?.tools).toEqual([]);
+    // Usage (and, through the same summaryModel variable, empty-response
+    // error messages) is attributed to the override alias, not the session
+    // model — the summary lands in the session model's context, but the
+    // request was paid for by the housekeeping model.
+    expect(ctx.agent.usage.data().byModel?.['housekeeping-cheap']).toBeDefined();
+    expect(ctx.agent.usage.data().byModel?.['scream-code']).toBeUndefined();
+  });
+
+  it('falls back to the session model and warns for an unknown housekeeping_model alias', async () => {
+    const warnings: string[] = [];
+    const log: Logger = {
+      error: () => {},
+      warn: (message) => {
+        warnings.push(message);
+      },
+      info: () => {},
+      debug: () => {},
+      createChild: () => log,
+    };
+    const { calls, generate, scripted, mockNextResponse } = createCapturingGenerate();
+    const ctx = testAgent({
+      generate,
+      log,
+      initialConfig: {
+        ...HOUSEKEEPING_TEST_CONFIG,
+        loopControl: { housekeepingModel: 'no-such-alias' },
+      },
+    });
+    ctx.agent.config.update({ modelAlias: 'session-alias', thinkingLevel: 'off' });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+
+    mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    // Exactly today's request shape (see the unset test above).
+    expect(calls).toHaveLength(1);
+    const [call] = calls;
+    const provider = call?.provider as { name: string; modelName: string };
+    expect(provider.name).toBe('scream');
+    expect(provider.modelName).toBe('scream-code');
+    expect(call?.systemPrompt).toEqual(ctx.agent.getRuntimeSystemPromptBlocks());
+    expect(call?.tools).toEqual([...ctx.agent.tools.loopTools]);
+    // The misconfiguration surfaces as a warning, not a failed compaction.
+    expect(warnings.some((message) => message.includes('no-such-alias'))).toBe(true);
+  });
+
+  it('routes the overflow retry through the same housekeeping model', async () => {
+    const seenModels: string[] = [];
+    const generate: GenerateFn = async (chat) => {
+      seenModels.push((chat as { modelName: string }).modelName);
+      if (seenModels.length === 1) {
+        throw new APIContextOverflowError(400, 'Context length exceeded', 'req-hk-overflow');
+      }
+      return textResult('Housekeeping overflow summary.');
+    };
+    const ctx = testAgent({
+      generate,
+      initialConfig: HOUSEKEEPING_TEST_CONFIG,
+      // Unlike alwaysCompactOnce, shrink on overflow so the retry takes the
+      // shrink branch (a reduced split) instead of the re-summarize fallback.
+      compactionStrategy: {
+        ...alwaysCompactOnce,
+        reduceCompactOnOverflow: (messages: readonly Message[]) =>
+          Math.max(1, messages.length - 1),
+      },
+    });
+    ctx.agent.config.update({ modelAlias: 'session-alias', thinkingLevel: 'off' });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const outcome = ctx.onceAny(['context.apply_compaction', 'error']);
+
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+
+    expect(await outcome).toBe('context.apply_compaction');
+    // The retry is a new summarizeOnce invocation against the SAME resolved
+    // override — resolution happens once per compaction, before the loop.
+    expect(seenModels).toEqual(['housekeeping-model', 'housekeeping-model']);
+  });
+
+  it('resolves OAuth credentials for an OAuth-backed housekeeping model', async () => {
+    const seenAuth: Array<string | undefined> = [];
+    const generate: GenerateFn = async (_provider, _system, _tools, _history, _callbacks, options) => {
+      seenAuth.push(options?.auth?.apiKey);
+      return textResult('Housekeeping oauth summary.');
+    };
+    const ctx = testAgent({
+      generate,
+      initialConfig: {
+        providers: {
+          'session-provider': { type: 'scream', apiKey: 'session-key' },
+          'housekeeping-oauth': {
+            type: 'anthropic',
+            baseUrl: 'https://api.example/v1',
+            oauth: { storage: 'file', key: 'oauth/housekeeping' },
+          },
+        },
+        models: {
+          'session-alias': {
+            provider: 'session-provider',
+            model: 'scream-code',
+            maxContextSize: 256_000,
+          },
+          'housekeeping-cheap': {
+            provider: 'housekeeping-oauth',
+            model: 'housekeeping-model',
+            maxContextSize: 64_000,
+          },
+        },
+        loopControl: { housekeepingModel: 'housekeeping-cheap' },
+      },
+      providerManagerOverrides: {
+        resolveOAuthTokenProvider: () => ({
+          getAccessToken: async () => 'housekeeping-token',
+        }),
+      },
+    });
+    ctx.agent.config.update({ modelAlias: 'session-alias', thinkingLevel: 'off' });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const outcome = ctx.onceAny(['context.apply_compaction', 'error']);
+
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+
+    expect(await outcome).toBe('context.apply_compaction');
+    // The housekeeping alias's own OAuth wrapper supplied the credential —
+    // applying the SESSION provider's auth wrapper would have sent the wrong
+    // token (or none) to the housekeeping provider.
+    expect(seenAuth).toEqual(['housekeeping-token']);
+  });
+
+  it('does not inject the session model OAuth credentials into an apiKey housekeeping request', async () => {
+    const seenAuth: Array<{ hasAuth: boolean; apiKey: string | undefined }> = [];
+    const tokenCalls: number[] = [];
+    const generate: GenerateFn = async (_provider, _system, _tools, _history, _callbacks, options) => {
+      seenAuth.push({ hasAuth: options?.auth !== undefined, apiKey: options?.auth?.apiKey });
+      return textResult('Housekeeping key summary.');
+    };
+    const ctx = testAgent({
+      generate,
+      initialConfig: {
+        providers: {
+          'session-oauth': {
+            type: 'anthropic',
+            baseUrl: 'https://api.example/v1',
+            oauth: { storage: 'file', key: 'oauth/session' },
+          },
+          'housekeeping-provider': { type: 'scream', apiKey: 'housekeeping-key' },
+        },
+        models: {
+          'session-alias': {
+            provider: 'session-oauth',
+            model: 'scream-for-coding',
+            maxContextSize: 256_000,
+          },
+          'housekeeping-cheap': {
+            provider: 'housekeeping-provider',
+            model: 'housekeeping-model',
+            maxContextSize: 64_000,
+          },
+        },
+        loopControl: { housekeepingModel: 'housekeeping-cheap' },
+      },
+      providerManagerOverrides: {
+        resolveOAuthTokenProvider: () => ({
+          getAccessToken: async () => {
+            tokenCalls.push(1);
+            return 'session-oauth-token';
+          },
+        }),
+      },
+    });
+    ctx.agent.config.update({ modelAlias: 'session-alias', thinkingLevel: 'off' });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    const outcome = ctx.onceAny(['context.apply_compaction', 'error']);
+
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+
+    expect(await outcome).toBe('context.apply_compaction');
+    // An explicit key-less auth object short-circuits the generate wrapper's
+    // session-alias OAuth resolution: the housekeeping provider authenticates
+    // with its own constructor-level key, and the session OAuth token is
+    // never fetched for this request.
+    expect(seenAuth).toEqual([{ hasAuth: true, apiKey: undefined }]);
+    expect(tokenCalls).toEqual([]);
   });
 
   it('runs manual compaction and applies the compacted context', async () => {    const ctx = testAgent();
@@ -2342,6 +2612,121 @@ describe('Agent compaction', () => {
     });
   });
 
+  describe('repetition-guard exemption', () => {
+    const microConfig = {
+      keepRecentMessages: 0,
+      minContentTokens: 0,
+      minContextUsageRatio: 0,
+      truncatedMarker: '[cleared]',
+      uselessMarker: '[uneventful]',
+      noMatchesMarker: '[no matches]',
+    };
+
+    function historyWithToolCall(
+      call: { type: 'function'; id: string; name: string; arguments: string | null },
+      resultText: string,
+    ): ContextMessage[] {
+      return [
+        { role: 'assistant', content: [], toolCalls: [call] },
+        {
+          role: 'tool',
+          toolCallId: call.id,
+          toolCalls: [],
+          content: [{ type: 'text', text: resultText }],
+        } as ContextMessage,
+      ];
+    }
+
+    it('forgets the read repetition key when a Read result is elided', () => {
+      const guard = new RepetitionGuard();
+      guard.record(RepetitionGuard.readKey('/a.ts'), 'f1');
+      guard.record(RepetitionGuard.readKey('/a.ts'), 'f1');
+      const micro = new MicroCompaction(
+        { repetitionGuard: guard } as never,
+        microConfig,
+      );
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 2;
+      const history = historyWithToolCall(
+        { type: 'function', id: 'tc_read', name: 'Read', arguments: JSON.stringify({ path: '/a.ts' }) },
+        'old file content'.repeat(50),
+      );
+
+      micro.compact(history);
+
+      // The elision told the model it may re-read, so the guard count was
+      // dropped: the next record starts over at 1 instead of continuing at 3.
+      expect(guard.record(RepetitionGuard.readKey('/a.ts'), 'f1').count).toBe(1);
+    });
+
+    it('forgets every read key of an elided ReadGroup result', () => {
+      const guard = new RepetitionGuard();
+      guard.record(RepetitionGuard.readKey('/a.ts'), 'f1');
+      guard.record(RepetitionGuard.readKey('/b.ts'), 'f1');
+      const micro = new MicroCompaction(
+        { repetitionGuard: guard } as never,
+        microConfig,
+      );
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 2;
+      const history = historyWithToolCall(
+        {
+          type: 'function',
+          id: 'tc_rg',
+          name: 'ReadGroup',
+          arguments: JSON.stringify({ paths: ['/a.ts', '/b.ts'] }),
+        },
+        'old file content'.repeat(50),
+      );
+
+      micro.compact(history);
+
+      expect(guard.record(RepetitionGuard.readKey('/a.ts'), 'f1').count).toBe(1);
+      expect(guard.record(RepetitionGuard.readKey('/b.ts'), 'f1').count).toBe(1);
+    });
+
+    it('forgets the grep repetition key when a zero-match Grep result is elided', () => {
+      const guard = new RepetitionGuard();
+      const argsJson = JSON.stringify({ pattern: 'hit' });
+      guard.record(RepetitionGuard.grepKey(argsJson), 'f1');
+      guard.record(RepetitionGuard.grepKey(argsJson), 'f1');
+      const micro = new MicroCompaction(
+        { repetitionGuard: guard } as never,
+        microConfig,
+      );
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 2;
+      const history = historyWithToolCall(
+        { type: 'function', id: 'tc_grep', name: 'Grep', arguments: argsJson },
+        'No matches found',
+      );
+
+      micro.compact(history);
+
+      expect(guard.record(RepetitionGuard.grepKey(argsJson), 'f1').count).toBe(1);
+    });
+
+    it('keeps the guard state when the tool result is not elided', () => {
+      const guard = new RepetitionGuard();
+      guard.record(RepetitionGuard.readKey('/a.ts'), 'f1');
+      guard.record(RepetitionGuard.readKey('/a.ts'), 'f1');
+      const micro = new MicroCompaction(
+        { repetitionGuard: guard } as never,
+        microConfig,
+      );
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 0;
+      const history = historyWithToolCall(
+        { type: 'function', id: 'tc_read', name: 'Read', arguments: JSON.stringify({ path: '/a.ts' }) },
+        'kept verbatim',
+      );
+
+      micro.compact(history);
+
+      expect(guard.record(RepetitionGuard.readKey('/a.ts'), 'f1').count).toBe(3);
+    });
+  });
+
   describe('prompt-cache-aware pruning', () => {
     it('supersedes an old Read result when the same file is re-read later', () => {
       const micro = new MicroCompaction({} as never, {
@@ -2650,6 +3035,62 @@ function oauthTestAgentOptions(
     },
   };
 }
+
+interface CapturedGenerateCall {
+  readonly provider: unknown;
+  readonly systemPrompt: unknown;
+  readonly tools: unknown;
+  readonly auth: unknown;
+}
+
+/**
+ * Wraps the scripted generate so each call also records the raw arguments —
+ * provider instance, system prompt, tools, per-request auth. Used by the
+ * housekeeping-model tests to assert the exact request shape on both paths.
+ */
+function createCapturingGenerate(): {
+  scripted: ReturnType<typeof createScriptedGenerate>;
+  calls: CapturedGenerateCall[];
+  generate: GenerateFn;
+  mockNextResponse: ReturnType<typeof createScriptedGenerate>['mockNextResponse'];
+} {
+  const scripted = createScriptedGenerate();
+  const calls: CapturedGenerateCall[] = [];
+  const generate: GenerateFn = (chat, systemPrompt, tools, history, callbacks, options) => {
+    calls.push({ provider: chat, systemPrompt, tools, auth: options?.auth });
+    return scripted.generate(chat, systemPrompt, tools, history, callbacks, options);
+  };
+  return {
+    scripted,
+    calls,
+    generate,
+    mockNextResponse: scripted.mockNextResponse,
+  };
+}
+
+/** Session alias + housekeeping alias on separate providers, with
+ *  `loop_control.housekeeping_model` pointing at the cheaper one. The session
+ *  alias is selected per-test via `config.update({ modelAlias })`. */
+const HOUSEKEEPING_TEST_CONFIG: ScreamConfig = {
+  providers: {
+    'session-provider': { type: 'scream', apiKey: 'session-key' },
+    'housekeeping-provider': { type: 'scream', apiKey: 'housekeeping-key' },
+  },
+  models: {
+    'session-alias': {
+      provider: 'session-provider',
+      model: 'scream-code',
+      maxContextSize: 256_000,
+      capabilities: ['thinking', 'tool_use'],
+    },
+    'housekeeping-cheap': {
+      provider: 'housekeeping-provider',
+      model: 'housekeeping-model',
+      maxContextSize: 64_000,
+    },
+  },
+  loopControl: { housekeepingModel: 'housekeeping-cheap' },
+};
 
 function textResult(text: string): Awaited<ReturnType<GenerateFn>> {
   return {

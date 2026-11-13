@@ -48,7 +48,11 @@
 - Does NOT: mutate the wire history (folding only affects memory and produces a
   summary record)
 - Compaction request: reuse the real system prompt + sorted tools (hits the
-  provider prefix cache) — do NOT substitute a custom prompt
+  provider prefix cache) — do NOT substitute a custom prompt. Opt-in exception:
+  `loop_control.housekeeping_model` routes the summarization request to a
+  cheaper alias with a fixed minimal prompt (`housekeeping-prompt.ts`) and an
+  empty tool set; unset keeps the session-model request (the default, for the
+  KV-cache prefix rationale above)
 - `apply_compaction` resets the micro cutoff and triggers
   `injection.onContextCompacted`
 

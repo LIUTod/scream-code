@@ -94,6 +94,7 @@ max_steps_per_run = 42
 max_retries_per_step = 3
 reserved_context_size = 50000
 compaction_trigger_ratio = 0.85
+housekeeping_model = "housekeeping-cheap"
 
 [background]
 max_running_tasks = 4
@@ -162,6 +163,7 @@ describe('harness config TOML loader', () => {
       maxRetriesPerStep: 3,
       reservedContextSize: 50000,
       compactionTriggerRatio: 0.85,
+      housekeepingModel: 'housekeeping-cheap',
     });
     expect(config.background?.agentTaskTimeoutS).toBe(900);
     expect(config.hooks).toEqual([
@@ -210,6 +212,7 @@ describe('harness config TOML loader', () => {
     expect(text).toContain('pattern = "Read(src/**)"');
     expect(text).not.toContain('[[permission.allow]]');
     expect(text).toContain('max_steps_per_turn = 7');
+    expect(text).toContain('housekeeping_model = "housekeeping-cheap"');
     expect(text).toContain('GOOGLE_CLOUD_PROJECT = "project-1"');
     expect(text).toContain('session_header = "x-test-session"');
     expect(text).toContain('theme = "dark"');

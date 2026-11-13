@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ScreamConfig } from '../../src/config';
 import { ErrorCodes, ScreamError } from '../../src/errors';
-import { ProviderManager } from '../../src/session/provider-manager';
+import { ProviderManager, SingleModelProvider } from '../../src/session/provider-manager';
 import { resolveThinkingLevel } from '../../src/agent/config/thinking';
 
 // Thin wrapper that adapts the legacy `resolveRuntimeProvider(input)` shape to
@@ -945,5 +945,84 @@ describe('sessionHeader injection', () => {
       .defaultHeaders;
     expect(headers).toBeDefined();
     expect(headers && 'User-Agent' in headers).toBe(false);
+  });
+});
+
+describe('ProviderManager.tryResolveChatModel', () => {
+  it('resolves a known alias through the same path as resolveProviderConfig', () => {
+    const manager = new ProviderManager({ config: BASE_CONFIG });
+    const resolved = manager.tryResolveChatModel('scream-code/scream-for-coding');
+
+    expect(resolved?.modelName).toBe('scream-code/scream-for-coding');
+    expect(resolved?.provider.modelName).toBe('scream-for-coding');
+    expect(resolved?.provider.name).toBe('scream');
+    expect(resolved?.capabilities.max_context_tokens).toBe(1_000_000);
+    expect(resolved?.capabilities.thinking).toBe(true);
+    // apiKey provider, no oauth configured → no auth wrapper.
+    expect(resolved?.authRequest).toBeUndefined();
+  });
+
+  it('returns undefined for an unknown alias instead of throwing', () => {
+    const manager = new ProviderManager({ config: BASE_CONFIG });
+    expect(manager.tryResolveChatModel('no-such-alias')).toBeUndefined();
+  });
+
+  it('returns undefined when the alias points at an unconfigured provider', () => {
+    const manager = new ProviderManager({
+      config: {
+        ...BASE_CONFIG,
+        models: {
+          ...BASE_CONFIG.models,
+          'dangling-alias': {
+            provider: 'missing-provider',
+            model: 'whatever',
+            maxContextSize: 1_000,
+          },
+        },
+      },
+    });
+
+    expect(manager.tryResolveChatModel('dangling-alias')).toBeUndefined();
+  });
+
+  it('wires the OAuth request wrapper for OAuth-backed aliases', async () => {
+    const manager = new ProviderManager({
+      config: {
+        providers: {
+          'oauth-provider': {
+            type: 'anthropic',
+            baseUrl: 'https://api.example/v1',
+            oauth: { storage: 'file', key: 'oauth/test' },
+          },
+        },
+        models: {
+          'oauth-alias': {
+            provider: 'oauth-provider',
+            model: 'claude-x',
+            maxContextSize: 1_000_000,
+          },
+        },
+      },
+      resolveOAuthTokenProvider: () => ({ getAccessToken: async () => 'resolved-token' }),
+    });
+
+    const resolved = manager.tryResolveChatModel('oauth-alias');
+    expect(resolved?.authRequest).toBeDefined();
+    const auth = await resolved!.authRequest!(async (requestAuth) => requestAuth);
+    expect(auth.apiKey).toBe('resolved-token');
+  });
+
+  it('SingleModelProvider resolves its own model and returns undefined otherwise', () => {
+    const provider = new SingleModelProvider({
+      type: 'scream',
+      model: 'only-model',
+      apiKey: 'k',
+    });
+
+    const resolved = provider.tryResolveChatModel('only-model');
+    expect(resolved?.provider.modelName).toBe('only-model');
+    expect(resolved?.modelName).toBe('only-model');
+    expect(resolved?.authRequest).toBeUndefined();
+    expect(provider.tryResolveChatModel('other-model')).toBeUndefined();
   });
 });

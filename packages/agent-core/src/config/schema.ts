@@ -128,6 +128,16 @@ export const LoopControlSchema = z.object({
   // compaction LLM call). At the blocking threshold the model gets a one-time
   // wrap-up warning instead; manual /compact still works in both modes.
   compactionMode: z.enum(['auto', 'off']).optional(),
+  // Model alias (a `[models."name"]` entry) that housekeeping LLM calls —
+  // currently compaction summarization — run on instead of the session model.
+  // UNSET keeps the compaction request on the session model: deliberate,
+  // because that request shares the main loop's routed request prefix (system
+  // prompt + tool schemas) and rides the provider's KV cache; moving it to
+  // another model forfeits the prefix and re-pays full price for the whole
+  // history. Set it only when the provider lacks prefix caching or sessions
+  // are huge. The summary lands in the MAIN model's context, so a too-weak
+  // housekeeping model degrades summary quality — choose accordingly.
+  housekeepingModel: z.string().optional(),
 });
 
 export type LoopControl = z.infer<typeof LoopControlSchema>;
