@@ -19,6 +19,7 @@ import type { EnabledPluginSessionStart } from '#/plugin';
 import { resolveScreamHome } from '../config/path';
 import { computeDelayMs, retryBackoffDelays } from '../loop/retry';
 import { RepetitionGuard } from '../tools/support/repetition-guard';
+import { EditSnapshotStore } from '../tools/support/edit-snapshot-store';
 
 import type { McpConnectionManager } from '../mcp';
 import { systemPromptForRequest } from '../profile';
@@ -209,6 +210,12 @@ export class Agent {
   readonly workingSet: WorkingSet;
   /** Session-scoped read/search repetition counter, handed to the file tools. */
   readonly repetitionGuard: RepetitionGuard;
+  /**
+   * Session-scoped snapshots of what the file tools last read/wrote, backing
+   * stale-anchor recovery for line-range edits. Agent-held like
+   * repetitionGuard so subagent boundaries never share snapshots.
+   */
+  readonly editSnapshots: EditSnapshotStore;
   readonly dreamTracker: DreamTracker;
   readonly replayBuilder: ReplayBuilder;
 
@@ -319,6 +326,11 @@ export class Agent {
     // Session-scoped: every Agent (including subagents) owns one, so
     // repetition counts never leak across agent boundaries.
     this.repetitionGuard = new RepetitionGuard();
+    // Session-scoped recovery snapshots, paired with repetitionGuard above:
+    // they survive micro-compaction elision by design (compaction never
+    // touches files on disk, so a snapshot keeps mirroring it) and are LRU-
+    // bounded instead.
+    this.editSnapshots = new EditSnapshotStore();
     // Resolve through the authoritative home resolver rather than falling back
     // to '' — an empty home would put the state file in the current working
     // directory, i.e. in whatever project the session happens to run in.

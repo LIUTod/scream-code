@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { LspRegistry } from '../../src/lsp/registry';
 import { ReadGroupTool, ReadGroupInputSchema } from '../../src/tools/builtin/file/read-group';
 import type { ReadGroupInput } from '../../src/tools/builtin/file/read-group';
+import { computeAnchor } from '../../src/tools/builtin/file/line-endings';
+import { EditSnapshotStore } from '../../src/tools/support/edit-snapshot-store';
 import { createFakeJian } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -350,5 +352,43 @@ describe('ReadGroupTool — LSP registry threading', () => {
     expect(result.isError).toBeFalsy();
     const output = typeof result.output === 'string' ? result.output : '';
     expect(output).not.toContain('Declarations');
+  });
+
+  it('threads the snapshot store to the inner ReadTool so grouped reads record snapshots', async () => {
+    const contentA = 'alpha\nbeta\n';
+    const contentB = 'gamma\ndelta\n';
+    const fileContents: Record<string, string> = {
+      '/workspace/a.ts': contentA,
+      '/workspace/b.ts': contentB,
+    };
+    const store = new EditSnapshotStore();
+    // The snapshot capture re-reads each file once via readText, so the fake
+    // needs that override on top of the streaming fixtures.
+    const tool = new ReadGroupTool(
+      createFakeJian({
+        ...jianWithFiles(fileContents),
+        readText: vi
+          .fn<Jian['readText']>()
+          .mockImplementation(async (p: string) => fileContents[p] ?? ''),
+      }),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+      undefined,
+      undefined,
+      store,
+    );
+
+    const result = await executeTool(tool, context({ paths: ['/workspace/a.ts', '/workspace/b.ts'] }));
+
+    expect(result.isError).toBeFalsy();
+    for (const [path, content] of [
+      ['/workspace/a.ts', contentA],
+      ['/workspace/b.ts', contentB],
+    ] as const) {
+      expect(store.recall(path)).toEqual({
+        content,
+        anchor: computeAnchor(content),
+        recordedAt: 'read',
+      });
+    }
   });
 });

@@ -1224,10 +1224,10 @@ export class ToolManager {
 
     this.builtinTools = new Map(
       [
-        new b.ReadTool(jian, workspace, this.lspRegistry, this.agent.repetitionGuard),
-        new b.ReadGroupTool(jian, workspace, this.lspRegistry, this.agent.repetitionGuard),
+        new b.ReadTool(jian, workspace, this.lspRegistry, this.agent.repetitionGuard, this.agent.editSnapshots),
+        new b.ReadGroupTool(jian, workspace, this.lspRegistry, this.agent.repetitionGuard, this.agent.editSnapshots),
         new b.WriteTool(jian, workspace, this.lspRegistry),
-        new b.EditTool(jian, workspace, this.lspRegistry, this.agent.workingSet),
+        new b.EditTool(jian, workspace, this.lspRegistry, this.agent.workingSet, this.agent.editSnapshots),
         new b.GrepTool(jian, workspace, this.agent.repetitionGuard),
         new b.GlobTool(jian, workspace),
         new b.BashTool(jian, cwd, background, {

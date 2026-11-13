@@ -10,6 +10,7 @@ import { WorkingSet } from '../../src/agent/working-set';
 import { type EditInput, EditInputSchema, EditTool } from '../../src/tools/builtin/file/edit';
 import { computeAnchor, toModelTextView } from '../../src/tools/builtin/file/line-endings';
 import { resetNoopLoop } from '../../src/tools/builtin/file/noop-loop-guard';
+import { EditSnapshotStore } from '../../src/tools/support/edit-snapshot-store';
 import { fileDiffSummary } from '../../src/tools/support/file-diff';
 import { testJian } from '../fixtures/test-jian';
 import { createFakeJian, PERMISSIVE_WORKSPACE } from './fixtures/fake-jian';
@@ -809,8 +810,637 @@ describe('EditTool', () => {
   });
 });
 
+describe('EditTool replace_range', () => {
+  it('keeps the two edit modes exclusive at the schema level', () => {
+    const parse = (args: Record<string, unknown>) => EditInputSchema.safeParse(args);
+
+    // replace_range: both fields together, anchor required, old_string and
+    // replace_all excluded.
+    expect(
+      parse({ path: '/tmp/a.txt', new_string: 'x', start_line: 2, end_line: 2, anchor: 'aaaaaaaa' })
+        .success,
+    ).toBe(true);
+    expect(
+      parse({ path: '/tmp/a.txt', new_string: 'x', end_line: 2, anchor: 'aaaaaaaa' }).success,
+    ).toBe(false);
+    expect(
+      parse({ path: '/tmp/a.txt', new_string: 'x', start_line: 2, anchor: 'aaaaaaaa' }).success,
+    ).toBe(false);
+    expect(
+      parse({
+        path: '/tmp/a.txt',
+        old_string: 'x',
+        new_string: 'y',
+        start_line: 1,
+        end_line: 2,
+        anchor: 'aaaaaaaa',
+      }).success,
+    ).toBe(false);
+    expect(
+      parse({
+        path: '/tmp/a.txt',
+        new_string: 'y',
+        start_line: 1,
+        end_line: 2,
+        replace_all: true,
+        anchor: 'aaaaaaaa',
+      }).success,
+    ).toBe(false);
+    expect(
+      parse({ path: '/tmp/a.txt', new_string: 'y', start_line: 3, end_line: 2, anchor: 'aaaaaaaa' })
+        .success,
+    ).toBe(false);
+    expect(
+      parse({ path: '/tmp/a.txt', new_string: 'y', start_line: 0, end_line: 2, anchor: 'aaaaaaaa' })
+        .success,
+    ).toBe(false);
+    expect(
+      parse({
+        path: '/tmp/a.txt',
+        new_string: 'y',
+        start_line: 1.5,
+        end_line: 2,
+        anchor: 'aaaaaaaa',
+      }).success,
+    ).toBe(false);
+
+    // old_string mode still requires old_string.
+    expect(parse({ path: '/tmp/a.txt', new_string: 'y' }).success).toBe(false);
+  });
+
+  it('carries dedicated messages for the mode rules it enforces', () => {
+    const messagesOf = (args: Record<string, unknown>): string[] => {
+      const parsed = EditInputSchema.safeParse(args);
+      if (parsed.success === true) throw new Error('expected schema rejection');
+      return parsed.error.issues.map((issue) => issue.message);
+    };
+
+    const missingAnchor = messagesOf({
+      path: '/tmp/a.txt',
+      new_string: 'y',
+      start_line: 1,
+      end_line: 2,
+    });
+    expect(missingAnchor).toContain(
+      'Line-range edits require the anchor from the most recent Read of this file — line numbers are only meaningful against that snapshot.',
+    );
+
+    const modeMix = messagesOf({
+      path: '/tmp/a.txt',
+      old_string: 'x',
+      new_string: 'y',
+      start_line: 1,
+      end_line: 2,
+      anchor: 'aaaaaaaa',
+    });
+    expect(
+      modeMix.some((message) =>
+        message.startsWith('old_string must be omitted when start_line/end_line'),
+      ),
+    ).toBe(true);
+
+    const halfRange = messagesOf({
+      path: '/tmp/a.txt',
+      new_string: 'y',
+      start_line: 2,
+      anchor: 'aaaaaaaa',
+    });
+    expect(halfRange).toContain('start_line and end_line must be provided together.');
+
+    const reversed = messagesOf({
+      path: '/tmp/a.txt',
+      new_string: 'y',
+      start_line: 3,
+      end_line: 2,
+      anchor: 'aaaaaaaa',
+    });
+    expect(
+      reversed.some((message) => message.startsWith('start_line (3) must not exceed end_line (2)')),
+    ).toBe(true);
+  });
+
+  it('replaces a multi-line window by range', async () => {
+    const content = 'one\ntwo\nthree\nfour\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/range.txt',
+        new_string: 'TWO\nTHREE',
+        start_line: 2,
+        end_line: 3,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('Replaced lines 2-3 in /tmp/range.txt');
+    expect(writeText).toHaveBeenCalledWith('/tmp/range.txt', 'one\nTWO\nTHREE\nfour\n');
+  });
+
+  it('replaces a single line when start_line equals end_line', async () => {
+    const content = 'one\ntwo\nthree\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/single.txt',
+        new_string: 'two!',
+        start_line: 2,
+        end_line: 2,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('Replaced line 2 in /tmp/single.txt');
+    expect(writeText).toHaveBeenCalledWith('/tmp/single.txt', 'one\ntwo!\nthree\n');
+  });
+
+  it('deletes a line window with an empty new_string', async () => {
+    const content = 'one\ntwo\nthree\nfour\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/delete.txt',
+        new_string: '',
+        start_line: 2,
+        end_line: 3,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('Replaced lines 2-3 in /tmp/delete.txt');
+    expect(writeText).toHaveBeenCalledWith('/tmp/delete.txt', 'one\nfour\n');
+  });
+
+  it('can empty the file by replacing the whole range with an empty new_string', async () => {
+    const content = 'one\ntwo\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/whole.txt',
+        new_string: '',
+        start_line: 1,
+        end_line: 2,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/whole.txt', '');
+  });
+
+  it('preserves the trailing-newline convention the file already had', async () => {
+    // No trailing newline in the source: none may appear in the result.
+    const content = 'one\ntwo\nthree';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/notrail.txt',
+        new_string: 'TWO',
+        start_line: 2,
+        end_line: 2,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/notrail.txt', 'one\nTWO\nthree');
+  });
+
+  it('rejects a range past the end of the file, naming the actual line count', async () => {
+    const content = 'one\ntwo\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/range.txt',
+        new_string: 'x',
+        start_line: 1,
+        end_line: 3,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('file has 2 lines');
+    expect(result.output).toContain('requested lines 1-3');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('rejects any range against an empty file', async () => {
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(''),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/empty.txt',
+        new_string: 'x',
+        start_line: 1,
+        end_line: 1,
+        anchor: computeAnchor(''),
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('file has 0 lines');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('still hard-rejects on an anchor mismatch in range mode', async () => {
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue('one\ntwo\n'),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/stale.txt',
+        new_string: 'x',
+        start_line: 2,
+        end_line: 2,
+        anchor: 'badbadbad',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('anchor no longer matches');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('numbers CRLF files by their LF model view and writes back CRLF', async () => {
+    const content = 'alpha\r\nbravo\r\ncharlie\r\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/crlf.txt',
+        new_string: 'bravo2',
+        start_line: 2,
+        end_line: 2,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/crlf.txt', 'alpha\r\nbravo2\r\ncharlie\r\n');
+  });
+
+  it('keeps CRLF output when the file has no trailing newline', async () => {
+    const content = 'alpha\r\nbravo\r\ncharlie';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/crlf-noend.txt',
+        new_string: '',
+        start_line: 3,
+        end_line: 3,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/crlf-noend.txt', 'alpha\r\nbravo');
+  });
+
+  it('keeps mixed line endings on untouched lines in range mode', async () => {
+    const content = 'alpha\r\nbeta\ngamma\r\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/mixed.txt',
+        new_string: 'beta2',
+        start_line: 2,
+        end_line: 2,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/mixed.txt', 'alpha\r\nbeta2\ngamma\r\n');
+  });
+
+  it('rejects mode mixing before file I/O when the schema is bypassed', async () => {
+    const readText = vi.fn().mockResolvedValue('one\ntwo\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(createFakeJian({ readText, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/a.txt',
+        old_string: 'one',
+        new_string: 'x',
+        start_line: 1,
+        end_line: 1,
+        anchor: 'aaaaaaaa',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('the two modes are exclusive');
+    expect(readText).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('rejects replace_all with a line range before file I/O', async () => {
+    const readText = vi.fn().mockResolvedValue('one\ntwo\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(createFakeJian({ readText, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/a.txt',
+        new_string: 'x',
+        start_line: 1,
+        end_line: 1,
+        replace_all: true,
+        anchor: 'aaaaaaaa',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('replace_all has no effect with start_line/end_line');
+    expect(readText).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('rejects a line range without an anchor before file I/O', async () => {
+    const readText = vi.fn().mockResolvedValue('one\ntwo\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(createFakeJian({ readText, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/a.txt',
+        new_string: 'x',
+        start_line: 1,
+        end_line: 1,
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('require the anchor from the most recent Read');
+    expect(readText).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('rejects a reversed range before file I/O', async () => {
+    const readText = vi.fn().mockResolvedValue('one\ntwo\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(createFakeJian({ readText, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/a.txt',
+        new_string: 'x',
+        start_line: 3,
+        end_line: 2,
+        anchor: 'aaaaaaaa',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('must not exceed end_line');
+    expect(readText).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('rejects a half-specified range before file I/O', async () => {
+    const readText = vi.fn().mockResolvedValue('one\ntwo\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(createFakeJian({ readText, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/a.txt',
+        new_string: 'x',
+        start_line: 2,
+        anchor: 'aaaaaaaa',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('must be provided together');
+    expect(readText).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('refuses a range strictly inside an unresolved merge conflict block', async () => {
+    const content = [
+      'function foo() {',
+      '<<<<<<< HEAD',
+      '  return 1;',
+      '=======',
+      '  return 2;',
+      '>>>>>>> branch',
+      '}',
+    ].join('\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/conflict.ts',
+        new_string: '  return 0;',
+        start_line: 3,
+        end_line: 5,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('fall inside unresolved merge conflict markers');
+    expect(result.output).toContain('lines 2-6');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('allows a range that covers the entire conflict block including markers', async () => {
+    const content = [
+      'function foo() {',
+      '<<<<<<< HEAD',
+      '  return 1;',
+      '=======',
+      '  return 2;',
+      '>>>>>>> branch',
+      '}',
+    ].join('\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/conflict.ts',
+        new_string: '  return 3;',
+        start_line: 2,
+        end_line: 6,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/conflict.ts', 'function foo() {\n  return 3;\n}');
+  });
+
+  it('appends the LSP diagnostics notice after a range edit', async () => {
+    const errorDiag: LspDiagnostic = {
+      range: { start: { line: 1, character: 5 }, end: { line: 1, character: 10 } },
+      severity: 1,
+      message: 'Type error',
+    };
+    const registry = {
+      getClient: vi.fn().mockResolvedValue({
+        didOpen: vi.fn(),
+        didChange: vi.fn(),
+        diagnostics: vi.fn().mockResolvedValue([errorDiag]),
+      }),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+      commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+
+    const content = 'const x = 1;\nconst y = 2;\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+      registry,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/a.ts',
+        new_string: 'const y = 20;',
+        start_line: 2,
+        end_line: 2,
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('Replaced line 2 in /tmp/a.ts');
+    expect(result.output).toContain('[LSP]');
+    expect(result.output).toContain('Type error');
+    expect(writeText).toHaveBeenCalledWith('/tmp/a.ts', 'const x = 1;\nconst y = 20;\n');
+    expect(result.message).toBeUndefined();
+  });
+});
+
 describe('EditTool noop-loop-guard', () => {
-  const NOOP_PATHS = ['/tmp/noop-a.txt', '/tmp/noop-b.txt', '/tmp/noop-c.txt'];
+  const NOOP_PATHS = ['/tmp/noop-a.txt', '/tmp/noop-b.txt', '/tmp/noop-c.txt', '/tmp/noop-range.txt'];
 
   beforeEach(() => {
     for (const p of NOOP_PATHS) resetNoopLoop(p);
@@ -924,6 +1554,81 @@ describe('EditTool noop-loop-guard', () => {
     expect(asError(r2).stopTurn).toBeUndefined();
     expect(r2.output).not.toContain('Warning: attempt');
     resetNoopLoop('/tmp/noop-c.txt');
+  });
+
+  it('warns on the second identical failed range edit and stops at the limit', async () => {
+    resetNoopLoop('/tmp/noop-range.txt');
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue('one\ntwo\n'),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const args: EditInput = {
+      path: '/tmp/noop-range.txt',
+      new_string: 'x',
+      start_line: 2,
+      end_line: 2,
+      anchor: 'badbadbad',
+    };
+
+    const r1 = await executeTool(tool, context(args));
+    expect(r1.isError).toBe(true);
+    expect(asError(r1).stopTurn).toBeUndefined();
+    expect(r1.output).not.toContain('Warning: attempt');
+
+    const r2 = await executeTool(tool, context(args));
+    expect(r2.isError).toBe(true);
+    expect(asError(r2).stopTurn).toBeUndefined();
+    expect(r2.output).toContain('Warning: attempt 2 of 3');
+
+    const r3 = await executeTool(tool, context(args));
+    expect(r3.isError).toBe(true);
+    expect(asError(r3).stopTurn).toBe(true);
+    expect(r3.output).toContain('stuck in a loop');
+    resetNoopLoop('/tmp/noop-range.txt');
+  });
+
+  it('treats range edits over different windows as different payloads', async () => {
+    resetNoopLoop('/tmp/noop-range.txt');
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue('one\ntwo\n'),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const r1 = await executeTool(
+      tool,
+      context({
+        path: '/tmp/noop-range.txt',
+        new_string: 'x',
+        start_line: 1,
+        end_line: 1,
+        anchor: 'badbadbad',
+      }),
+    );
+    expect(r1.isError).toBe(true);
+    expect(asError(r1).stopTurn).toBeUndefined();
+
+    // A different window hashes differently, so the failure counter restarts.
+    const r2 = await executeTool(
+      tool,
+      context({
+        path: '/tmp/noop-range.txt',
+        new_string: 'x',
+        start_line: 1,
+        end_line: 2,
+        anchor: 'badbadbad',
+      }),
+    );
+    expect(r2.isError).toBe(true);
+    expect(asError(r2).stopTurn).toBeUndefined();
+    expect(r2.output).not.toContain('Warning: attempt');
+    resetNoopLoop('/tmp/noop-range.txt');
   });
 });
 
@@ -1050,6 +1755,31 @@ describe('EditTool file_diff display', () => {
     expect(Object.keys(result)).not.toContain('display');
     expect(await readFile(path, 'utf8')).not.toBe(before);
   });
+
+  it('reports the real line delta for a range replacement', async () => {
+    const path = join(dir, 'range.ts');
+    const before = 'one\ntwo\nthree\nfour\nfive\n';
+    await writeFile(path, before, 'utf8');
+    const tool = new EditTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path,
+        new_string: 'X',
+        start_line: 2,
+        end_line: 4,
+        anchor: computeAnchor(before),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    const after = await readFile(path, 'utf8');
+    expect(after).toBe('one\nX\nfive\n');
+    expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 3 });
+    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 3 });
+  });
 });
 
 describe('EditTool stale-read warning', () => {
@@ -1136,5 +1866,544 @@ describe('EditTool stale-read warning', () => {
 
     expect(result.isError).toBeFalsy();
     expect(result.output).not.toContain('no recent read');
+  });
+});
+
+describe('EditTool stale-anchor recovery', () => {
+  /** Paths this block touches; each failure feeds the session noop-loop guard. */
+  const RECOVERY_PATHS = [
+    '/tmp/recover-insert.txt',
+    '/tmp/recover-after.txt',
+    '/tmp/recover-before.txt',
+    '/tmp/recover-overlap.txt',
+    '/tmp/recover-conflict-clean.txt',
+    '/tmp/recover-conflict-trap.txt',
+    '/tmp/recover-empty-store.txt',
+    '/tmp/recover-no-store.txt',
+    '/tmp/recover-str.txt',
+    '/tmp/recover-anchor.txt',
+    '/tmp/recover-rollback.ts',
+    '/tmp/recover-stable.ts',
+    '/tmp/recover-no-client.ts',
+    '/tmp/recover-edit-snap.txt',
+  ];
+
+  afterEach(() => {
+    for (const p of RECOVERY_PATHS) resetNoopLoop(p);
+  });
+
+  function readSnapshotOf(content: string): { content: string; anchor: string } {
+    return { content, anchor: computeAnchor(toModelTextView(content).text) };
+  }
+
+  function toolWithStore(
+    changedContent: string,
+    store: EditSnapshotStore,
+    writeText = vi.fn().mockResolvedValue(0),
+    lspRegistry?: LspRegistry,
+  ) {
+    return {
+      tool: new EditTool(
+        createFakeJian({
+          readText: vi.fn().mockResolvedValue(changedContent),
+          writeText,
+        }),
+        PERMISSIVE_WORKSPACE,
+        lspRegistry,
+        undefined,
+        store,
+      ),
+      writeText,
+    };
+  }
+
+  /**
+   * Registry whose single fake client returns one diagnostics array per
+   * fetch, in order (call 1 = recovery pre-check, call 2 = post-apply check,
+   * then the last array repeats).
+   */
+  function recoveryRegistry(diagnostics: LspDiagnostic[][]): LspRegistry {
+    let call = 0;
+    const fakeClient = {
+      didOpen: vi.fn(),
+      didChange: vi.fn(),
+      diagnostics: vi.fn().mockImplementation(async () => {
+        const next = diagnostics[Math.min(call, diagnostics.length - 1)] ?? [];
+        call += 1;
+        return next;
+      }),
+    };
+    return {
+      activeClientFor: vi.fn().mockResolvedValue(fakeClient),
+      getClient: vi.fn().mockResolvedValue(fakeClient),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+      commandForPath: vi.fn().mockReturnValue(['fake-lsp', '--stdio']),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+  }
+
+  function errorDiagnostics(count: number): LspDiagnostic[] {
+    return Array.from({ length: count }, (_, index) => ({
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+      severity: 1,
+      message: `Error ${String(index)}`,
+    }));
+  }
+
+  it('remaps a window across an external insertion above it and applies the shifted range', async () => {
+    const read = 'one\ntwo\nthree\nfour\n';
+    const changed = 'ZERO-A\nZERO-B\none\ntwo\nthree\nfour\n';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-insert.txt', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const { tool, writeText } = toolWithStore(changed, store);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-insert.txt',
+        new_string: 'TWO-NEW',
+        start_line: 2,
+        end_line: 3,
+        anchor: readSnapshotOf(read).anchor,
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/recover-insert.txt', 'ZERO-A\nZERO-B\none\nTWO-NEW\nfour\n');
+    expect(result.output).toContain('Replaced lines 4-5 in /tmp/recover-insert.txt');
+    expect(result.output).toContain(
+      'your line range was remapped (snapshot lines 2-3 → current lines 4-5)',
+    );
+    // The post-edit snapshot is recorded for the next stale-anchor attempt.
+    const after = store.recall('/tmp/recover-insert.txt');
+    expect(after?.recordedAt).toBe('edit');
+    expect(after?.content).toBe('ZERO-A\nZERO-B\none\nTWO-NEW\nfour\n');
+  });
+
+  it('recovers when the external change sits after the window', async () => {
+    const read = 'one\ntwo\nthree\n';
+    const changed = 'one\ntwo\nthree\nAPPEND-A\nAPPEND-B\n';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-after.txt', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const { tool, writeText } = toolWithStore(changed, store);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-after.txt',
+        new_string: 'TWO',
+        start_line: 2,
+        end_line: 2,
+        anchor: readSnapshotOf(read).anchor,
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    // The appended external lines are preserved.
+    expect(writeText).toHaveBeenCalledWith('/tmp/recover-after.txt', 'one\nTWO\nthree\nAPPEND-A\nAPPEND-B\n');
+    expect(result.output).toContain('Replaced line 2 in /tmp/recover-after.txt');
+    expect(result.output).toContain(
+      'your line range was remapped (snapshot lines 2-2 → current lines 2-2)',
+    );
+  });
+
+  it('recovers when the external change sits before the window', async () => {
+    const read = 'one\ntwo\nthree\nfour\n';
+    const changed = 'two\nthree\nfour\n';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-before.txt', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const { tool, writeText } = toolWithStore(changed, store);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-before.txt',
+        new_string: 'X',
+        start_line: 3,
+        end_line: 4,
+        anchor: readSnapshotOf(read).anchor,
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/recover-before.txt', 'two\nX\n');
+    expect(result.output).toContain('Replaced lines 2-3 in /tmp/recover-before.txt');
+  });
+
+  it('applies a remapped window that clears a conflict block the stale numbers fall inside', async () => {
+    // The model's window sits just below a conflict block in its view; an
+    // external insert above the file moves the block onto the stale
+    // coordinates. The stale-coordinate overlap used to refuse (false
+    // reject), although the remapped window lands below the moved block and
+    // the write is clean.
+    const readLines = [
+      'function foo() {',
+      '<<<<<<< HEAD',
+      '  return 1;',
+      '=======',
+      '  return 2;',
+      '>>>>>>> branch',
+      '}',
+      'function bar() {',
+      '  return 3;',
+      '}',
+    ];
+    const read = readLines.join('\n') + '\n';
+    const filler = Array.from({ length: 5 }, (_, index) => `// filler ${String(index + 1)}`);
+    const changed = [...filler, ...readLines].join('\n') + '\n';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-conflict-clean.txt', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const { tool, writeText } = toolWithStore(changed, store);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-conflict-clean.txt',
+        new_string: 'function bar() {\n  return 4;',
+        start_line: 8,
+        end_line: 9,
+        anchor: readSnapshotOf(read).anchor,
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    const written = [
+      ...filler,
+      'function foo() {',
+      '<<<<<<< HEAD',
+      '  return 1;',
+      '=======',
+      '  return 2;',
+      '>>>>>>> branch',
+      '}',
+      'function bar() {',
+      '  return 4;',
+      '}',
+    ].join('\n') + '\n';
+    expect(writeText).toHaveBeenCalledWith('/tmp/recover-conflict-clean.txt', written);
+    expect(result.output).toContain(
+      'your line range was remapped (snapshot lines 8-9 → current lines 13-14)',
+    );
+    expect(store.recall('/tmp/recover-conflict-clean.txt')?.recordedAt).toBe('edit');
+  });
+
+  it('refuses a remapped window that lands strictly inside an externally moved conflict block', async () => {
+    // The model's window sits strictly inside the conflict block of its
+    // view; the external change removes three block lines above it, so the
+    // block shrinks onto the remapped coordinates. The stale-coordinate
+    // check passes (the original window no longer sits strictly inside the
+    // moved block), but the window actually written would land between the
+    // markers — the final-coordinate check must refuse.
+    const readLines = [
+      '<<<<<<< HEAD',
+      '  alpha',
+      '  beta',
+      '  gamma',
+      '  delta',
+      '=======',
+      '  omega',
+      '>>>>>>> branch',
+      'tail',
+    ];
+    const read = readLines.join('\n') + '\n';
+    const changed = [
+      '<<<<<<< HEAD',
+      '  delta',
+      '=======',
+      '  omega',
+      '>>>>>>> branch',
+      'tail',
+    ].join('\n') + '\n';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-conflict-trap.txt', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const { tool, writeText } = toolWithStore(changed, store);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-conflict-trap.txt',
+        new_string: 'DELTA-NEW',
+        start_line: 5,
+        end_line: 5,
+        anchor: readSnapshotOf(read).anchor,
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('fall inside unresolved merge conflict markers');
+    expect(result.output).toContain('lines 2-2 of /tmp/recover-conflict-trap.txt');
+    expect(result.output).toContain('after the remap of your lines 5-5');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the external change deletes part of the targeted window', async () => {
+    const read = 'a\nb\nc\nd\ne\n';
+    const changed = 'a\nb\nd\ne\n';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-overlap.txt', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const { tool, writeText } = toolWithStore(changed, store);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-overlap.txt',
+        new_string: 'X',
+        start_line: 3,
+        end_line: 5,
+        anchor: readSnapshotOf(read).anchor,
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('The file changed externally in the region you are targeting');
+    expect(result.output).toContain('Re-read the file and re-anchor before retrying.');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('hard-rejects when the store is wired but holds no snapshot', async () => {
+    const store = new EditSnapshotStore();
+    const { tool, writeText } = toolWithStore('alpha beta', store);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-empty-store.txt',
+        new_string: 'X',
+        start_line: 1,
+        end_line: 1,
+        anchor: 'deadbeef',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toBe(
+      `File has changed since last read. The anchor no longer matches (expected deadbeef, got ${computeAnchor('alpha beta')}). Please re-read the file and retry.`,
+    );
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('hard-rejects replace_range when no store is wired (unchanged legacy behaviour)', async () => {
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue('one\ntwo\n'),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-no-store.txt',
+        new_string: 'X',
+        start_line: 1,
+        end_line: 1,
+        anchor: 'deadbeef',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toBe(
+      `File has changed since last read. The anchor no longer matches (expected deadbeef, got ${computeAnchor('one\ntwo\n')}). Please re-read the file and retry.`,
+    );
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('hard-rejects str_replace mode even with a usable snapshot', async () => {
+    const read = 'alpha beta';
+    const changed = 'alpha beta!';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-str.txt', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const { tool, writeText } = toolWithStore(changed, store);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-str.txt',
+        old_string: 'alpha',
+        new_string: 'X',
+        anchor: 'deadbeef',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toBe(
+      `File has changed since last read. The anchor no longer matches (expected deadbeef, got ${computeAnchor(changed)}). Please re-read the file and retry.`,
+    );
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('hard-rejects when the snapshot anchor differs from the supplied anchor', async () => {
+    const store = new EditSnapshotStore();
+    // Post-edit snapshots carry the anchor of what WE wrote, which can never
+    // be the anchor the model holds (it comes from a Read) — remapping the
+    // model's numbers against a foreign view would be wrong.
+    store.remember('/tmp/recover-anchor.txt', {
+      content: 'snapshot text\n',
+      anchor: 'otheranchor',
+      recordedAt: 'edit',
+    });
+    const { tool, writeText } = toolWithStore('current text\n', store);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-anchor.txt',
+        new_string: 'X',
+        start_line: 1,
+        end_line: 1,
+        anchor: 'deadbeef',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toBe(
+      `File has changed since last read. The anchor no longer matches (expected deadbeef, got ${computeAnchor('current text\n')}). Please re-read the file and retry.`,
+    );
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('rolls back when the recovery apply introduces new LSP errors', async () => {
+    const read = 'one\ntwo\nthree\n';
+    const changed = 'one\ntwo\nthree\nAPPEND\n';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-rollback.ts', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const writeText = vi.fn().mockResolvedValue(0);
+    const { tool } = toolWithStore(changed, store, writeText, recoveryRegistry([
+      errorDiagnostics(1),
+      errorDiagnostics(2),
+    ]));
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-rollback.ts',
+        new_string: 'TWO',
+        start_line: 2,
+        end_line: 2,
+        anchor: readSnapshotOf(read).anchor,
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain(
+      'Recovery applied but introduced 1 new error(s) reported by the language server; the edit was rolled back. Re-read the file and re-anchor.',
+    );
+    // First write applies the remapped edit, second write restores the
+    // pre-apply (externally changed) file.
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText.mock.calls[0]).toEqual(['/tmp/recover-rollback.ts', 'one\nTWO\nthree\nAPPEND\n']);
+    expect(writeText.mock.calls[1]).toEqual(['/tmp/recover-rollback.ts', changed]);
+    // The rolled-back apply must not be recorded as a post-edit snapshot.
+    expect(store.recall('/tmp/recover-rollback.ts')?.recordedAt).toBe('read');
+  });
+
+  it('does not roll back when pre-existing errors keep the same count', async () => {
+    const read = 'one\ntwo\nthree\n';
+    const changed = 'one\ntwo\nthree\nAPPEND\n';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-stable.ts', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const writeText = vi.fn().mockResolvedValue(0);
+    const { tool } = toolWithStore(changed, store, writeText, recoveryRegistry([
+      errorDiagnostics(1),
+      errorDiagnostics(1),
+    ]));
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-stable.ts',
+        new_string: 'TWO',
+        start_line: 2,
+        end_line: 2,
+        anchor: readSnapshotOf(read).anchor,
+      }),
+    );
+
+    // The apply went through once (no restore write) and the remap note
+    // stands; the pre-existing error keeps the fix-then-re-verify gate on.
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(result.output).not.toContain('rolled back');
+    expect(result.output).toContain(
+      'your line range was remapped (snapshot lines 2-2 → current lines 2-2)',
+    );
+    expect(store.recall('/tmp/recover-stable.ts')?.recordedAt).toBe('edit');
+  });
+
+  it('skips the diagnostics gate when no active client exists', async () => {
+    const read = 'one\ntwo\nthree\n';
+    const changed = 'one\ntwo\nthree\nAPPEND\n';
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/recover-no-client.ts', { ...readSnapshotOf(read), recordedAt: 'read' });
+    const writeText = vi.fn().mockResolvedValue(0);
+    // getClient would report errors, but activeClientFor finds no running
+    // client — the gate is skipped and the apply is never rolled back.
+    let call = 0;
+    const fakeClient = {
+      didOpen: vi.fn(),
+      didChange: vi.fn(),
+      diagnostics: vi.fn().mockImplementation(async () => {
+        call += 1;
+        return errorDiagnostics(call);
+      }),
+    };
+    const registry = {
+      activeClientFor: vi.fn().mockResolvedValue(undefined),
+      getClient: vi.fn().mockResolvedValue(fakeClient),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+      commandForPath: vi.fn().mockReturnValue(['fake-lsp', '--stdio']),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+    const { tool } = toolWithStore(changed, store, writeText, registry);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-no-client.ts',
+        new_string: 'TWO',
+        start_line: 2,
+        end_line: 2,
+        anchor: readSnapshotOf(read).anchor,
+      }),
+    );
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(result.output).not.toContain('rolled back');
+    expect(result.output).toContain(
+      'your line range was remapped (snapshot lines 2-2 → current lines 2-2)',
+    );
+  });
+
+  it('records a post-edit snapshot after a successful str_replace edit', async () => {
+    const content = 'alpha beta';
+    const store = new EditSnapshotStore();
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+      undefined,
+      undefined,
+      store,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/recover-edit-snap.txt',
+        old_string: 'alpha',
+        new_string: 'X',
+        anchor: computeAnchor(toModelTextView(content).text),
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    const after = store.recall('/tmp/recover-edit-snap.txt');
+    expect(after?.recordedAt).toBe('edit');
+    expect(after?.content).toBe('X beta');
+    expect(after?.anchor).toBe(computeAnchor('X beta'));
   });
 });

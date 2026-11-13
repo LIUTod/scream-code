@@ -105,6 +105,28 @@ describe('noop-loop-guard', () => {
     expect(modified).not.toBe(base);
   });
 
+  it('hashEditPayload keeps legacy hashes byte-identical with explicit undefined range fields', () => {
+    // The widened signature added start_line/end_line; JSON.stringify drops
+    // undefined keys and the key order is unchanged, so a legacy (old_string
+    // mode) payload must hash exactly the same with or without the explicit
+    // undefined range fields.
+    const legacy = hashEditPayload({
+      path: PATH_A,
+      old_string: 'foo',
+      new_string: 'bar',
+      anchor: 'cafe1234',
+    });
+    const widened = hashEditPayload({
+      path: PATH_A,
+      old_string: 'foo',
+      new_string: 'bar',
+      anchor: 'cafe1234',
+      start_line: undefined,
+      end_line: undefined,
+    });
+    expect(widened).toBe(legacy);
+  });
+
   it('escalates exactly at NOOP_HARD_LIMIT', () => {
     resetNoopLoop(PATH_A);
     const hash = hashEditPayload(PAYLOAD_1);

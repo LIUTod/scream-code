@@ -1,4 +1,4 @@
-import type { Jian } from '@scream-code/jian';
+import type { Jian, StatResult } from '@scream-code/jian';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { LspClient, LspSymbolOutline } from '../../src/lsp/client';
@@ -13,6 +13,7 @@ import {
 } from '../../src/tools/builtin/file/read';
 import { ReadGroupTool, type ReadGroupInput } from '../../src/tools/builtin/file/read-group';
 import { computeAnchor, toModelTextView } from '../../src/tools/builtin/file/line-endings';
+import { EditSnapshotStore } from '../../src/tools/support/edit-snapshot-store';
 import { MEDIA_SNIFF_BYTES } from '../../src/tools/support/file-type';
 import { RepetitionGuard } from '../../src/tools/support/repetition-guard';
 import type { WorkspaceConfig } from '../../src/tools/support/workspace';
@@ -1373,5 +1374,103 @@ describe('ReadTool repetition notice', () => {
     // The grouped read is the second identical fetch of this file: the inner
     // ReadTool's repetition notice surfaces inside the group's output.
     expect(toolContentString(group)).toContain('Note: this window is identical');
+  });
+});
+
+describe('ReadTool snapshot recording', () => {
+  function toolWithStore(
+    content: string,
+    store: EditSnapshotStore,
+    statOverrides: Partial<StatResult> = {},
+  ) {
+    const readText = vi.fn<Jian['readText']>().mockResolvedValue(content);
+    const tool = new ReadTool(
+      createFakeJian({
+        stat: vi
+          .fn<Jian['stat']>()
+          .mockResolvedValue({ ...REGULAR_FILE_STAT, ...statOverrides }),
+        readBytes: vi.fn<Jian['readBytes']>().mockImplementation(async (_path, n) => {
+          const bytes = Buffer.from(content, 'utf8');
+          return n === undefined ? bytes : bytes.subarray(0, n);
+        }),
+        readLines: vi.fn<Jian['readLines']>().mockImplementation(readLinesFromContent(content)),
+        readText,
+      }),
+      PERMISSIVE_WORKSPACE,
+      undefined,
+      undefined,
+      store,
+    );
+    return { tool, readText };
+  }
+
+  it('records a read snapshot when a snapshot store is wired', async () => {
+    const content = 'alpha\nbeta\n';
+    const store = new EditSnapshotStore();
+    const { tool, readText } = toolWithStore(content, store);
+
+    const result = await executeTool(tool, context({ path: '/tmp/snap.txt' }));
+
+    expect(result.isError).toBeFalsy();
+    // The snapshot re-read happens exactly once, on top of the streaming read.
+    expect(readText).toHaveBeenCalledTimes(1);
+    const snap = store.recall('/tmp/snap.txt');
+    expect(snap).toEqual({
+      content,
+      anchor: computeAnchor(toModelTextView(content).text),
+      recordedAt: 'read',
+    });
+  });
+
+  it('records a snapshot for tail reads too', async () => {
+    const content = 'one\ntwo\nthree\n';
+    const store = new EditSnapshotStore();
+    const { tool } = toolWithStore(content, store);
+
+    const result = await executeTool(tool, context({ path: '/tmp/tail.txt', line_offset: -2 }));
+
+    expect(result.isError).toBeFalsy();
+    expect(store.recall('/tmp/tail.txt')).toEqual({
+      content,
+      anchor: computeAnchor(toModelTextView(content).text),
+      recordedAt: 'read',
+    });
+  });
+
+  it('skips the snapshot for files over the content budget', async () => {
+    const content = 'one\ntwo\n';
+    const store = new EditSnapshotStore();
+    const { tool, readText } = toolWithStore(content, store, {
+      stSize: 2 * 1024 * 1024 + 1,
+    });
+
+    const result = await executeTool(tool, context({ path: '/tmp/big.txt' }));
+
+    expect(result.isError).toBeFalsy();
+    // No snapshot re-read for oversized files; nothing stored.
+    expect(readText).not.toHaveBeenCalled();
+    expect(store.recall('/tmp/big.txt')).toBeUndefined();
+  });
+
+  it('does not record anything without a wired store (legacy construction)', async () => {
+    const content = 'one\ntwo\n';
+    const readText = vi.fn<Jian['readText']>().mockResolvedValue(content);
+    const tool = new ReadTool(
+      createFakeJian({
+        stat: vi.fn<Jian['stat']>().mockResolvedValue(REGULAR_FILE_STAT),
+        readBytes: vi.fn<Jian['readBytes']>().mockImplementation(async (_path, n) => {
+          const bytes = Buffer.from(content, 'utf8');
+          return n === undefined ? bytes : bytes.subarray(0, n);
+        }),
+        readLines: vi.fn<Jian['readLines']>().mockImplementation(readLinesFromContent(content)),
+        readText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(tool, context({ path: '/tmp/plain.txt' }));
+
+    expect(result.isError).toBeFalsy();
+    expect(readText).not.toHaveBeenCalled();
   });
 });

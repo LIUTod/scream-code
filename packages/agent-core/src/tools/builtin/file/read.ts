@@ -13,6 +13,8 @@ import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
+import type { EditSnapshotStore } from '../../support/edit-snapshot-store';
+import { EDIT_SNAPSHOT_MAX_CONTENT_BYTES } from '../../support/edit-snapshot-store';
 import { MEDIA_SNIFF_BYTES, detectFileType } from '../../support/file-type';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { RepetitionGuard } from '../../support/repetition-guard';
@@ -24,7 +26,12 @@ import {
   suffixResolutionNotice,
 } from '../../support/suffix-match';
 import type { WorkspaceConfig } from '../../support/workspace';
-import { makeCarriageReturnsVisible, type LineEndingStyle } from './line-endings';
+import {
+  computeAnchor,
+  makeCarriageReturnsVisible,
+  toModelTextView,
+  type LineEndingStyle,
+} from './line-endings';
 import { formatConflictNotice, scanConflictLines } from './conflict-detect';
 import readDescriptionTemplate from './read.md';
 
@@ -232,6 +239,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     private readonly lspRegistry?: LspRegistry,
     /** Session-scoped repetition counter; absent when constructed outside an Agent (tests, ad-hoc). */
     private readonly repetitionGuard?: RepetitionGuard,
+    /** Session snapshot store behind stale-anchor recovery; absent when constructed outside an Agent. */
+    private readonly editSnapshots?: EditSnapshotStore,
   ) {}
 
   async resolveExecution(args: ReadInput): Promise<ToolExecution> {
@@ -344,6 +353,15 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       const requestedLines = args.n_lines ?? MAX_LINES;
       const effectiveLimit = Math.min(requestedLines, MAX_LINES);
 
+      // Snapshot for stale-anchor recovery: only when an Agent-held store is
+      // wired and the file fits the store's content budget. Oversized files
+      // skip the extra read entirely — recovery for them falls back to the
+      // plain hard reject anyway.
+      const snapshotPath =
+        this.editSnapshots !== undefined && stat.stSize <= EDIT_SNAPSHOT_MAX_CONTENT_BYTES
+          ? safePath
+          : undefined;
+
       // Declaration-outline footer: built here where `stat` is in scope (it
       // is the cache key) but kept lazy — the totalLines gate lives in
       // finishReadResult, so reads that cannot carry the footer never pay for
@@ -362,6 +380,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
           requestedLines,
           signal,
           outlineFooter,
+          snapshotPath,
         );
       }
       return await this.readForward(
@@ -372,6 +391,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
         requestedLines,
         signal,
         outlineFooter,
+        snapshotPath,
       );
     } catch (error) {
       // An abort must not be swallowed into a retryable-looking result: the
@@ -397,6 +417,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     requestedLines: number,
     signal?: AbortSignal,
     outlineFooter?: () => Promise<string>,
+    snapshotPath?: string,
   ): Promise<ExecutableToolResult> {
     const selectedEntries: ReadLineEntry[] = [];
     const flags: LineEndingFlags = { hasCrLf: false, hasLf: false, hasLoneCr: false };
@@ -473,20 +494,23 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       }
     }
 
-    return this.finishReadResult({
-      renderedLines,
-      truncatedLineNumbers,
-      maxLinesReached,
-      maxBytesReached,
-      lineEndingStyle,
-      startLine: renderedLines.length > 0 ? lineOffset : 0,
-      totalLines: currentLineNo,
-      requestedLines,
-      rawPath: displayPath,
-      lineOffset,
-      anchor,
-      outlineFooter,
-    });
+    return this.finishReadResult(
+      {
+        renderedLines,
+        truncatedLineNumbers,
+        maxLinesReached,
+        maxBytesReached,
+        lineEndingStyle,
+        startLine: renderedLines.length > 0 ? lineOffset : 0,
+        totalLines: currentLineNo,
+        requestedLines,
+        rawPath: displayPath,
+        lineOffset,
+        anchor,
+        outlineFooter,
+      },
+      snapshotPath,
+    );
   }
 
   private async readTail(
@@ -497,6 +521,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     requestedLines: number,
     signal?: AbortSignal,
     outlineFooter?: () => Promise<string>,
+    snapshotPath?: string,
   ): Promise<ExecutableToolResult> {
     const tailCount = Math.abs(lineOffset);
     const entries: ReadLineEntry[] = [];
@@ -562,23 +587,29 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       }
     }
 
-    return this.finishReadResult({
-      renderedLines,
-      truncatedLineNumbers,
-      maxLinesReached: false,
-      maxBytesReached,
-      lineEndingStyle,
-      startLine: renderedCandidates[0]?.entry.lineNo ?? 0,
-      totalLines: currentLineNo,
-      requestedLines,
-      rawPath: displayPath,
-      lineOffset,
-      anchor,
-      outlineFooter,
-    });
+    return this.finishReadResult(
+      {
+        renderedLines,
+        truncatedLineNumbers,
+        maxLinesReached: false,
+        maxBytesReached,
+        lineEndingStyle,
+        startLine: renderedCandidates[0]?.entry.lineNo ?? 0,
+        totalLines: currentLineNo,
+        requestedLines,
+        rawPath: displayPath,
+        lineOffset,
+        anchor,
+        outlineFooter,
+      },
+      snapshotPath,
+    );
   }
 
-  private async finishReadResult(input: FinishReadResultInput): Promise<ExecutableToolResult> {
+  private async finishReadResult(
+    input: FinishReadResultInput,
+    snapshotPath?: string,
+  ): Promise<ExecutableToolResult> {
     const message = this.finishMessage(input);
     // Scan the returned window (not the whole file) for merge conflict
     // markers so the agent is warned before editing a conflicted file. Strip
@@ -607,7 +638,40 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     const fullMessage = [message, notice, outlineFooter, repetitionNotice]
       .filter((part) => part.length > 0)
       .join(' ');
+    // Snapshot recording happens after the message chain is fixed up so it
+    // can never alter the result text: a failed or skipped snapshot only
+    // downgrades later recovery, never the read itself.
+    if (snapshotPath !== undefined) {
+      await this.rememberReadSnapshot(snapshotPath, input.anchor);
+    }
     return { output: this.finishOutput(input.renderedLines, fullMessage) };
+  }
+
+  /**
+   * Capture the read snapshot for stale-anchor recovery of a later
+   * replace_range Edit. The streaming read loop never materializes the whole
+   * file (a multi-GB file must not be buffered for a 50-line window), so this
+   * re-reads once — execution only routes files within the store's content
+   * budget here.
+   *
+   * The snapshot must hash to the anchor the model was given, or recovery
+   * would diff against a baseline the model's line numbers do not describe
+   * (possible when the file changes between the streaming loop and this
+   * re-read); a mismatch skips the snapshot instead. Best-effort overall: a
+   * vanished file or transient read error only means no snapshot, never a
+   * failed read.
+   */
+  private async rememberReadSnapshot(safePath: string, anchor: string): Promise<void> {
+    const store = this.editSnapshots;
+    if (store === undefined) return;
+    try {
+      const raw = await this.jian.readText(safePath);
+      const modelText = toModelTextView(raw).text;
+      if (computeAnchor(modelText) !== anchor) return;
+      store.remember(safePath, { content: modelText, anchor, recordedAt: 'read' });
+    } catch {
+      // Opportunistic memory aid: skip on any failure.
+    }
   }
 
   /**

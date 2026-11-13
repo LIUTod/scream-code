@@ -23,11 +23,17 @@ export function resetNoopLoop(canonicalPath: string): void {
   entries.delete(canonicalPath);
 }
 
+// Range fields participate so two failed replace_range edits over different
+// windows count as different payloads. Undefined keys are omitted by
+// JSON.stringify, which keeps legacy (old_string mode) payload hashes
+// byte-identical to before.
 export function hashEditPayload(input: {
   path: string;
-  old_string: string;
+  old_string?: string;
   new_string: string;
   replace_all?: boolean;
+  start_line?: number;
+  end_line?: number;
   anchor?: string;
 }): string {
   return createHash('sha256').update(JSON.stringify(input)).digest('hex');
