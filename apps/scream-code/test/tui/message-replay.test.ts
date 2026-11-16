@@ -113,7 +113,7 @@ function baseAgentState(
     },
     context: { tokenCount: 0 },
     replay,
-    permission: { mode: 'manual', rules: [] },
+    permission: { mode: 'yolo', rules: [] },
     plan: null,
     usage: {},
     tools: [],
@@ -135,7 +135,7 @@ function makeSession(
     getStatus: vi.fn(async () => ({
       model: 'k2',
       thinkingLevel: 'off',
-      permission: 'manual',
+      permission: 'yolo',
       planMode: 'off',
       contextTokens: 0,
       maxContextTokens: 100,
@@ -551,7 +551,9 @@ describe('ScreamTUI resume message replay', () => {
       { type: 'plan_updated', enabled: true },
       { type: 'permission_updated', mode: 'auto' },
       { type: 'permission_updated', mode: 'yolo' },
-      { type: 'permission_updated', mode: 'manual' },
+      // A record saved by an older build can still carry `manual`; replay keeps
+      // rendering it with the legacy "YES mode: OFF" wording.
+      { type: 'permission_updated', mode: 'manual' as never },
       {
         type: 'approval_result',
         record: {

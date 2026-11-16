@@ -67,7 +67,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     getStatus: vi.fn(async () => ({
       model: "k2",
       thinkingLevel: "off",
-      permission: "manual",
+      permission: "yolo",
       planMode: "off",
       contextTokens: 10,
       maxContextTokens: 100,
@@ -173,6 +173,36 @@ describe("ScreamTUI startup", () => {
     });
   });
 
+  it("starts a fresh session in yolo", async () => {
+    const session = makeSession();
+    const driver = makeDriver(makeHarness(session), makeStartupInput({}));
+
+    await expect(driver.init()).resolves.toBe(false);
+
+    expect(driver.state.editor.permissionMode).toBe("yolo");
+    expect(driver.state.appState.permissionMode).toBe("yolo");
+  });
+
+  it("normalizes a legacy manual mode restored from a saved session", async () => {
+    const session = makeSession({
+      getStatus: vi.fn(async () => ({
+        model: "k2",
+        thinkingLevel: "off",
+        permission: "manual",
+        planMode: "off",
+        contextTokens: 0,
+        maxContextTokens: 100,
+        contextUsage: 0,
+      })),
+    });
+    const driver = makeDriver(makeHarness(session), makeStartupInput({}));
+
+    await expect(driver.init()).resolves.toBe(false);
+
+    expect(driver.state.editor.permissionMode).toBe("yolo");
+    expect(driver.state.appState.permissionMode).toBe("yolo");
+  });
+
   it("resumes the latest session for --continue and marks history for replay", async () => {
     const session = makeSession({ id: "ses-latest" });
     const harness = makeHarness(session, {
@@ -227,7 +257,7 @@ describe("ScreamTUI startup", () => {
       getStatus: vi.fn(async () => ({
         model,
         thinkingLevel: "off",
-        permission: "manual",
+        permission: "yolo",
         planMode: "off",
         contextTokens: 10,
         maxContextTokens: 100,

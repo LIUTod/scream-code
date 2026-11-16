@@ -14,8 +14,9 @@ import { makePermissionHarness, toolContext } from './fixtures/manager-harness';
 const destructive = { destructiveHint: true } as const;
 
 describe('destructive-hint-ask', () => {
-  it('asks in manual mode even for a tool the catalog auto-approves', async () => {
+  it('asks in ask mode even for a tool the catalog auto-approves', async () => {
     const { manager, requestApproval } = makePermissionHarness({
+      mode: 'ask',
       handler: async () => ({ decision: 'rejected' }),
     });
 

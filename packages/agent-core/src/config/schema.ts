@@ -121,7 +121,12 @@ export const ThinkingConfigSchema = z.object({
 
 export type ThinkingConfig = z.infer<typeof ThinkingConfigSchema>;
 
-export const PermissionModeSchema = z.enum(['yolo', 'manual', 'auto', 'ask', 'bot']);
+// `manual` was removed as a posture. It is still accepted from persisted and
+// hand-written config so an old file keeps loading; it normalizes to `yolo`,
+// the mode the removed one used to fall back to when no rules matched.
+export const PermissionModeSchema = z
+  .enum(['yolo', 'manual', 'auto', 'ask', 'bot'])
+  .transform((mode) => (mode === 'manual' ? 'yolo' : mode));
 
 export const PermissionRuleDecisionSchema = z.enum(['allow', 'deny', 'ask']);
 export const PermissionRuleScopeSchema = z.enum([

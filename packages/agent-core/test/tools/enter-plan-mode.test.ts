@@ -49,7 +49,7 @@ function makeAgent(
         await enter();
       },
     },
-    permission: { mode: input.mode ?? 'manual' },
+    permission: { mode: input.mode ?? 'yolo' },
     rpc: { requestApproval },
     emit,
   } as unknown as Agent;
@@ -117,7 +117,7 @@ describe('EnterPlanModeTool', () => {
     expect(result.output).toContain('already active');
   });
 
-  it.each(['manual', 'auto', 'yolo'] satisfies PermissionMode[])(
+  it.each(['auto', 'yolo'] satisfies PermissionMode[])(
     'enters in %s mode without an approval request',
     async (mode) => {
       const { agent, requestApproval, emit } = makeAgent({ mode });

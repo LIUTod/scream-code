@@ -66,7 +66,7 @@ export type {
 export type { ScreamHostIdentity } from '@scream-code/config';
 export type { ContentPart, Role, ToolCall } from '@scream-code/ltod';
 
-export type PermissionMode = 'yolo' | 'manual' | 'auto' | 'ask' | 'bot';
+export type PermissionMode = 'yolo' | 'auto' | 'ask' | 'bot';
 
 export type TextPromptPart = Extract<ContentPart, { type: 'text' }>;
 export type PromptPart = Extract<ContentPart, { type: 'text' | 'image_url' | 'video_url' }>;
@@ -100,6 +100,8 @@ export interface CreateSessionOptions {
   readonly model?: string | undefined;
   readonly thinking?: string | undefined;
   readonly permission?: PermissionMode | undefined;
+  /** Tool names to deny for the whole session (project-scope deny rules, every mode). */
+  readonly permissionDenyRules?: readonly string[] | undefined;
   readonly planMode?: boolean;
   readonly metadata?: JsonObject | undefined;
   /**
@@ -118,6 +120,8 @@ export interface RenameSessionInput {
 
 export interface ResumeSessionInput {
   readonly id: string;
+  /** Tool names to deny for the whole session (project-scope deny rules, every mode). */
+  readonly permissionDenyRules?: readonly string[] | undefined;
 }
 
 export interface ForkSessionInput {

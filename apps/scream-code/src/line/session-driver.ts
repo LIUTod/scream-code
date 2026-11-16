@@ -1023,19 +1023,13 @@ export class LineSessionDriver {
     return session;
   }
 
-  /** Unattended approval handlers (port of the stream-json yolo/dontAsk cases). */
+  /**
+   * Unattended approval handler. `dontAsk` now runs in `bot`, and the bot policy
+   * is the gate: reversible in-workspace actions are approved, the rest are
+   * denied and parked for the user — so no `dontAsk` branch belongs here. What
+   * remains is the ExitPlanMode review for the approve-everything modes.
+   */
   private applyApprovalHandler(session: Session): void {
-    // `auto` is blanket-approved by the policy chain before this handler runs
-    // (and it denies AskUserQuestion there), so the handler is only a fallback
-    // for a mode that still asks. `dontAsk` is the deny-all escape hatch.
-    if (this.options.permissionMode === 'dontAsk') {
-      session.setApprovalHandler(() => ({
-        decision: 'rejected',
-        feedback: 'dontAsk mode: tool call auto-denied',
-      }));
-      return;
-    }
-    // yolo (the only other allowed mode) — approve everything.
     session.setApprovalHandler(() => ({ decision: 'approved' }));
   }
 }

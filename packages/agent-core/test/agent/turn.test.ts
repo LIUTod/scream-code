@@ -692,12 +692,21 @@ describe('Agent turn flow', () => {
 
   it('settles a pending approval when the turn is cancelled', async () => {
     const execWithEnv = vi.fn().mockRejectedValue(new Error('Bash should not execute'));
-    const ctx = testAgent({ jian: createFakeJian({ execWithEnv }) });
-    ctx.configure({ tools: ['Bash'] });
+    const ctx = testAgent({
+      jian: createFakeJian({
+        execWithEnv,
+        mkdir: async () => undefined,
+        readText: async () => '# Plan\n1. Present the review',
+      }),
+    });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    // Pin cwd so the plan-review display path stays machine-independent.
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('cancel-review-plan', false);
     ctx.newEvents();
-    ctx.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
+    ctx.mockNextResponse({ type: 'text', text: 'I will present the plan.' }, exitPlanCall());
 
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash' }] });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Present the plan' }] });
     // The turn is parked on the approval request; cancel it without answering.
     await ctx.takeApprovalRequest();
     await ctx.rpc.cancel({ turnId: 0 });
@@ -1324,45 +1333,52 @@ describe('Agent turn flow', () => {
   });
 
   it('cancels an active turn', async () => {
-    const ctx = testAgent({
-      jian: createCommandJian('should-not-run'),
-    });
-    ctx.configure({ tools: ['Bash'] });
+    const ctx = testAgent({ jian: planReviewJian() });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    // Pin cwd so the plan-review display path stays machine-independent.
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('cancel-active-review', false);
 
-    ctx.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
+    ctx.mockNextResponse({ type: 'text', text: 'I will present the plan.' }, exitPlanCall());
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run a command' }] });
 
     expect(await ctx.untilApprovalRequest()).toMatchInlineSnapshot(`
+      [wire] config.update               { "cwd": "<cwd>", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
+      [wire] plan_mode.enter             { "id": "cancel-active-review", "strategy": "normal", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": true, "planStrategy": "normal", "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run a command" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<plan-mode-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "plan_mode" }, "id": "m1" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [emit] assistant.delta             { "turnId": 0, "delta": "I will run Bash." }
-      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf should-not-run\\",\\"timeout\\":60}" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "ExitPlanMode" ], "messagesCount": 2, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [emit] assistant.delta             { "turnId": 0, "delta": "I will present the plan." }
+      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_exit_plan", "name": "ExitPlanMode", "argumentsPart": "{}" }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will run Bash." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will present the plan." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" }, "requestSummary": "Run a command", "sourceAgentId": "main", "sourceToolName": "Bash" }
+      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_exit_plan", "toolName": "ExitPlanMode", "action": "Presenting plan and exiting plan mode", "display": { "kind": "plan_review", "plan": "# Plan\\n1. Present the review", "path": "/workspace/.scream/plans/cancel-active-review.md" }, "requestSummary": "Run a command", "sourceAgentId": "main", "sourceToolName": "ExitPlanMode" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
-      tools: Bash
+      tools: ExitPlanMode
       messages:
         user: text "Run a command"
+        user: text <plan-mode-reminder>
     `);
     await ctx.rpc.cancel({ turnId: 0 });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] turn.cancel                  { "turnId": 0, "time": "<time>" }
-      [wire] permission.record_decision   { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "decision": "cancelled", "reason": "Approval request cancelled", "time": "<time>" }
+      [wire] permission.record_decision   { "turnId": 0, "toolCallId": "call_exit_plan", "toolName": "ExitPlanMode", "decision": "cancelled", "reason": "Approval request cancelled", "time": "<time>" }
       [wire] context.append_loop_event    { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [wire] context.append_loop_event    { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
-      [emit] tool.call.started            { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
+      [wire] context.append_loop_event    { "event": { "type": "tool.call", "uuid": "call_exit_plan", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_exit_plan", "name": "ExitPlanMode", "args": {}, "description": "Presenting plan and exiting plan mode", "display": { "kind": "plan_review", "plan": "# Plan\\n1. Present the review", "path": "/workspace/.scream/plans/cancel-active-review.md" } }, "time": "<time>" }
+      [emit] tool.call.started            { "turnId": 0, "toolCallId": "call_exit_plan", "name": "ExitPlanMode", "args": {}, "description": "Presenting plan and exiting plan mode", "display": { "kind": "plan_review", "plan": "# Plan\\n1. Present the review", "path": "/workspace/.scream/plans/cancel-active-review.md" } }
       [wire] context.append_loop_event    { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [wire] context.append_loop_event    { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true, "code": "aborted", "abortReason": "Aborted by the user" } }, "time": "<time>" }
-      [emit] tool.result                  { "turnId": 0, "toolCallId": "call_bash", "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true, "code": "aborted", "abortReason": "Aborted by the user" }
+      [wire] context.append_loop_event    { "event": { "type": "tool.result", "parentUuid": "call_exit_plan", "toolCallId": "call_exit_plan", "result": { "output": "The user manually interrupted \\"ExitPlanMode\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true, "code": "aborted", "abortReason": "Aborted by the user" } }, "time": "<time>" }
+      [emit] tool.result                  { "turnId": 0, "toolCallId": "call_exit_plan", "output": "The user manually interrupted \\"ExitPlanMode\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true, "code": "aborted", "abortReason": "Aborted by the user" }
       [emit] turn.step.interrupted        { "turnId": 0, "step": 1, "reason": "aborted" }
       [emit] turn.ended                   { "turnId": 0, "reason": "cancelled" }
     `);
@@ -1370,40 +1386,43 @@ describe('Agent turn flow', () => {
   });
 
   it('buffers steer input and includes it in the same turn after approval', async () => {
-    const bashCall: ToolCall = {
-      type: 'function',
-      id: 'call_bash',
-      name: 'Bash',
-      arguments: '{"command":"printf approved","timeout":60}',
-    };
     const ctx = testAgent({
-      jian: createCommandJian('approved'),
+      jian: planReviewJian(),
     });
-    ctx.configure({ tools: ['Bash'] });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    // Pin cwd so the plan-review display path stays machine-independent.
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('steer-after-review', false);
 
-    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, bashCall);
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash, then listen' }] });
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, exitPlanCall());
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Leave plan mode, then listen' }] });
 
     const approval = await ctx.takeApprovalRequest();
     expect(approval.events).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash, then listen" } ], "origin": { "kind": "user" }, "time": "<time>" }
+      [wire] config.update               { "cwd": "<cwd>", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
+      [wire] plan_mode.enter             { "id": "steer-after-review", "strategy": "normal", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": true, "planStrategy": "normal", "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Leave plan mode, then listen" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash, then listen" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Leave plan mode, then listen" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<plan-mode-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "plan_mode" }, "id": "m1" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "ExitPlanMode" ], "messagesCount": 2, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will ask first." }
-      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf approved\\",\\"timeout\\":60}" }
+      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_exit_plan", "name": "ExitPlanMode", "argumentsPart": "{}" }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will ask first." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf approved", "display": { "kind": "command", "command": "printf approved", "cwd": "<cwd>", "language": "bash" }, "requestSummary": "Run Bash, then listen", "sourceAgentId": "main", "sourceToolName": "Bash" }
+      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_exit_plan", "toolName": "ExitPlanMode", "action": "Presenting plan and exiting plan mode", "display": { "kind": "plan_review", "plan": "# Plan\\n1. Present the review", "path": "/workspace/.scream/plans/steer-after-review.md" }, "requestSummary": "Leave plan mode, then listen", "sourceAgentId": "main", "sourceToolName": "ExitPlanMode" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
-      tools: Bash
+      tools: ExitPlanMode
       messages:
-        user: text "Run Bash, then listen"
+        user: text "Leave plan mode, then listen"
+        user: text <plan-mode-reminder>
     `);
     expect(ctx.llmCalls).toHaveLength(1);
 
@@ -1418,57 +1437,64 @@ describe('Agent turn flow', () => {
     });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] permission.record_approval_result   { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf approved", "result": { "decision": "approved", "selectedLabel": "approve" }, "time": "<time>" }
+      [wire] permission.record_approval_result   { "turnId": 0, "toolCallId": "call_exit_plan", "toolName": "ExitPlanMode", "action": "Presenting plan and exiting plan mode", "result": { "decision": "approved", "selectedLabel": "approve" }, "time": "<time>" }
+      [wire] plan_mode.exit                      { "time": "<time>" }
+      [emit] agent.status.updated                { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
       [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf approved", "timeout": 60 }, "description": "Running: printf approved", "display": { "kind": "command", "command": "printf approved", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
-      [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf approved", "timeout": 60 }, "description": "Running: printf approved", "display": { "kind": "command", "command": "printf approved", "cwd": "<cwd>", "language": "bash" } }
+      [wire] context.append_loop_event           { "event": { "type": "tool.call", "uuid": "call_exit_plan", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_exit_plan", "name": "ExitPlanMode", "args": {}, "description": "Presenting plan and exiting plan mode", "display": { "kind": "plan_review", "plan": "# Plan\\n1. Present the review", "path": "/workspace/.scream/plans/steer-after-review.md" } }, "time": "<time>" }
+      [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_exit_plan", "name": "ExitPlanMode", "args": {}, "description": "Presenting plan and exiting plan mode", "display": { "kind": "plan_review", "plan": "# Plan\\n1. Present the review", "path": "/workspace/.scream/plans/steer-after-review.md" } }
       [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [emit] tool.progress                       { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "approved" } }
-      [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "approved", "message": "Command executed successfully." } }, "time": "<time>" }
-      [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "approved", "message": "Command executed successfully." }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 29, "maxContextTokens": 1000000, "contextUsage": 0.000029, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Also mention the steer." } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m3" }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_exit_plan", "toolCallId": "call_exit_plan", "result": { "output": "Exited plan mode. Plan mode deactivated. All tools are now available.\\nPlan saved to: /workspace/.scream/plans/steer-after-review.md\\n\\n## Approved Plan:\\n# Plan\\n1. Present the review" } }, "time": "<time>" }
+      [emit] tool.result                         { "turnId": 0, "toolCallId": "call_exit_plan", "output": "Exited plan mode. Plan mode deactivated. All tools are now available.\\nPlan saved to: /workspace/.scream/plans/steer-after-review.md\\n\\n## Approved Plan:\\n# Plan\\n1. Present the review" }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 294, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 294, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 294, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 306, "maxContextTokens": 1000000, "contextUsage": 0.000306, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 294, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 294, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 294, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 294, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Also mention the steer." } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m4" }, "time": "<time>" }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nPlan mode is no longer active. The read-only and plan-file-only restrictions from plan mode no longer apply. Continue with the approved plan using the normal tool and permission rules.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "plan_mode" }, "id": "m5" }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "ExitPlanMode" ], "messagesCount": 6, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta                     { "turnId": 0, "delta": "Approved, and I saw the steer." }
       [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "Approved, and I saw the steer." } }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-10>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 39, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 39, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 39, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 50, "maxContextTokens": 1000000, "contextUsage": 0.00005, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 416, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 416, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 416, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 427, "maxContextTokens": 1000000, "contextUsage": 0.000427, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 710, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 710, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 710, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 710, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                          { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       messages:
         <last>
-        assistant: text "I will ask first."  calls call_bash:Bash { "command": "printf approved", "timeout": 60 }
-        tool[call_bash]: text "approved"
+        assistant: text "I will ask first."  calls call_exit_plan:ExitPlanMode {}
+        tool[call_exit_plan]: text "Exited plan mode. Plan mode deactivated. All tools are now available.\\nPlan saved to: /workspace/.scream/plans/steer-after-review.md\\n\\n## Approved Plan:\\n# Plan\\n1. Present the review"
         user: text "Also mention the steer."
+        user: text "<system-reminder>\\nPlan mode is no longer active. The read-only and plan-file-only restrictions from plan mode no longer apply. Continue with the approved plan using the normal tool and permission rules.\\n</system-reminder>"
     `);
     expect(ctx.llmCalls).toHaveLength(2);
     await ctx.expectResumeMatches();
   });
 
   it('buffers a second prompt while a turn is active instead of agent_busy', async () => {
-    const ctx = testAgent({ jian: createCommandJian('approved') });
-    ctx.configure({ tools: ['Bash'] });
+    const ctx = testAgent({ jian: planReviewJian() });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    // Pin cwd so the plan-review display path stays machine-independent.
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('buffered-prompt-review', false);
 
-    ctx.mockNextResponse({ type: 'text', text: 'I will wait for approval.' }, bashCall());
+    ctx.mockNextResponse({ type: 'text', text: 'I will wait for approval.' }, exitPlanCall());
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Start the active turn' }] });
 
     // Single take: untilApprovalRequest would consume the pending request.
     const approval = await ctx.takeApprovalRequest();
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
-      tools: Bash
+      tools: ExitPlanMode
       messages:
         user: text "Start the active turn"
+        user: text <plan-mode-reminder>
     `);
 
     // Queue-drain / background-steer race: a prompt while busy must join as
@@ -1485,7 +1511,7 @@ describe('Agent turn flow', () => {
     expect(events).toContain('Queued while busy');
     expect(events).not.toContain('agent_busy');
     // Approval completed (not aborted by the interrupting steer).
-    expect(events).toContain('"output":"approved"');
+    expect(events).toContain('"decision":"approved"');
     expect(events).not.toContain('manually interrupted');
     expect(ctx.llmCalls).toHaveLength(2);
     // Second generate input must include the buffered prompt (not agent_busy).
@@ -1495,10 +1521,13 @@ describe('Agent turn flow', () => {
   });
 
   it('buffers the second prompt in the steer queue without agent_busy', async () => {
-    const ctx = testAgent({ jian: createCommandJian('approved') });
-    ctx.configure({ tools: ['Bash'] });
+    const ctx = testAgent({ jian: planReviewJian() });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    // Pin cwd so the plan-review display path stays machine-independent.
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('steer-queue-review', false);
 
-    ctx.mockNextResponse({ type: 'text', text: 'Waiting for approval.' }, bashCall());
+    ctx.mockNextResponse({ type: 'text', text: 'Waiting for approval.' }, exitPlanCall());
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'First prompt' }] });
     const approval = await ctx.takeApprovalRequest();
     expect(ctx.agent.turn.steerQueueLength).toBe(0);
@@ -1513,7 +1542,7 @@ describe('Agent turn flow', () => {
     const events = JSON.stringify(await ctx.untilTurnEnd());
     expect(events).toContain('Second prompt while busy');
     expect(events).not.toContain('agent_busy');
-    expect(events).toContain('"output":"approved"');
+    expect(events).toContain('"decision":"approved"');
     expect(ctx.agent.turn.steerQueueLength).toBe(0);
     expect(ctx.llmCalls).toHaveLength(2);
     await ctx.expectResumeMatches();
@@ -1601,16 +1630,17 @@ describe('Agent turn flow', () => {
   });
 
   it('does not inject the todo reconcile reminder when the turn never touched the list', async () => {
-    const ctx = testAgent({ jian: createCommandJian('ok') });
-    ctx.configure({ tools: ['Bash', 'TodoList'] });
+    const ctx = testAgent({ jian: planReviewJian() });
+    ctx.configure({ tools: ['ExitPlanMode', 'TodoList'] });
     // Leftover list from an earlier turn: non-empty and still unfinished, but
     // this turn never opened it — a stale list must not earn a nudge.
+    await ctx.agent.planMode.enter('todo-leftover-review', false);
     ctx.agent.tools.updateStore('todo', [
       { title: 'Left over from an earlier turn', status: 'pending' },
     ]);
 
-    ctx.mockNextResponse({ type: 'text', text: 'Running one command.' }, bashCall());
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run one command' }] });
+    ctx.mockNextResponse({ type: 'text', text: 'Presenting the plan.' }, exitPlanCall());
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Present the plan' }] });
     const approval = await ctx.takeApprovalRequest();
     ctx.mockNextResponse({
       type: 'text',
@@ -1695,28 +1725,35 @@ describe('Agent turn flow', () => {
   });
 
   it('suggests TodoList only from the third step of a genuinely multi-step turn', async () => {
-    const ctx = testAgent({ jian: createCommandJian('ok') });
-    ctx.configure({ tools: ['Bash'] });
+    const ctx = testAgent({ jian: planReviewJian() });
+    ctx.configure({ tools: ['ExitPlanMode', 'Grep'] });
+    // Step 1 is the plan review (the yolo-reachable approval round-trip); step 2
+    // is a plain auto-approved read tool; step 3 is the final answer. The turn
+    // never touches TodoList, so the suggestion is still due.
+    await ctx.agent.planMode.enter('todo-suggest-review', false);
 
-    // Steps 1 and 2 each issue a tool call; step 3 is the final answer.
     ctx.mockNextResponse(
-      { type: 'text', text: 'First command.' },
-      bashCallWithId('call_a', 'printf a'),
+      { type: 'text', text: 'Presenting the plan.' },
+      exitPlanCall(),
     );
     ctx.mockNextResponse(
-      { type: 'text', text: 'Second command.' },
-      bashCallWithId('call_b', 'printf b'),
+      { type: 'text', text: 'Searching the code.' },
+      {
+        type: 'function',
+        id: 'call_b',
+        name: 'Grep',
+        arguments: JSON.stringify({ pattern: 'TODO' }),
+      },
     );
     ctx.mockNextResponse({
       type: 'text',
-      text: 'Ran both commands and can now answer the user completely.',
+      text: 'Searched the code and can now answer the user completely.',
     });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run two commands, then answer' }] });
 
-    const firstApproval = await ctx.takeApprovalRequest();
-    firstApproval.respond({ decision: 'approved', selectedLabel: 'approve' });
-    const secondApproval = await ctx.takeApprovalRequest();
-    secondApproval.respond({ decision: 'approved', selectedLabel: 'approve' });
+    const review = await ctx.takeApprovalRequest();
+    review.respond({ decision: 'approved', selectedLabel: 'approve' });
+    // The Grep call needs no approval under yolo: it runs straight through.
 
     const events = JSON.stringify(await ctx.untilTurnEnd());
     expect(ctx.llmCalls).toHaveLength(3);
@@ -1761,6 +1798,23 @@ describe('Agent turn flow', () => {
   });
 });
 
+
+function planReviewJian(): Jian {
+  return createFakeJian({
+    mkdir: async () => undefined,
+    readText: async () => '# Plan\n1. Present the review',
+  });
+}
+
+function exitPlanCall(): ToolCall {
+  return {
+    type: 'function',
+    id: 'call_exit_plan',
+    name: 'ExitPlanMode',
+    arguments: '{}',
+  };
+}
+
 function bashCall(): ToolCall {
   return bashCallWithId('call_bash', 'printf should-not-run');
 }
@@ -1799,10 +1853,13 @@ describe('steer interrupt lanes', () => {
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
   it('default steer interrupts a pending approval and injects at the next step', async () => {
-    const ctx = testAgent({ jian: createCommandJian('approved') });
-    ctx.configure({ tools: ['Bash'] });
+    const ctx = testAgent({ jian: planReviewJian() });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    // Pin cwd so the plan-review display path stays machine-independent.
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('steer-lane-review', false);
 
-    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, bashCallWithId('call_bash', 'printf approved'));
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, exitPlanCall());
     ctx.mockNextResponse({ type: 'text', text: 'Saw the steer.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash, then listen' }] });
     await ctx.takeApprovalRequest();
@@ -1825,10 +1882,13 @@ describe('steer interrupt lanes', () => {
   });
 
   it('interrupt: false steer leaves the approval alone and joins after the tool', async () => {
-    const ctx = testAgent({ jian: createCommandJian('approved') });
-    ctx.configure({ tools: ['Bash'] });
+    const ctx = testAgent({ jian: planReviewJian() });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    // Pin cwd so the plan-review display path stays machine-independent.
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('steer-lane-review', false);
 
-    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, bashCallWithId('call_bash', 'printf approved'));
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, exitPlanCall());
     ctx.mockNextResponse({ type: 'text', text: 'Approved, and I saw the queue.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash, then listen' }] });
     const approval = await ctx.takeApprovalRequest();
@@ -1844,16 +1904,19 @@ describe('steer interrupt lanes', () => {
     expect(ctx.llmCalls).toHaveLength(2);
     const lastHistory = JSON.stringify(ctx.llmCalls.at(-1)?.history);
     // The tool ran normally (approval answered), then the queued message joined.
-    expect(lastHistory).toContain('approved');
+    expect(lastHistory).toContain('ExitPlanMode');
     expect(lastHistory).toContain('Queued follow-up.');
     await ctx.expectResumeMatches();
   });
 
   it('an interrupt: true steer from a non-user origin aborts the pending approval', async () => {
-    const ctx = testAgent({ jian: createCommandJian('approved') });
-    ctx.configure({ tools: ['Bash'] });
+    const ctx = testAgent({ jian: planReviewJian() });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    // Pin cwd so the plan-review display path stays machine-independent.
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('steer-lane-review', false);
 
-    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, bashCallWithId('call_bash', 'printf approved'));
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, exitPlanCall());
     ctx.mockNextResponse({ type: 'text', text: 'Saw the interjection.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash, then listen' }] });
     await ctx.takeApprovalRequest();
@@ -1884,10 +1947,13 @@ describe('steer interrupt lanes', () => {
   });
 
   it('a non-user steer without an interrupt flag keeps the boundary-only lane', async () => {
-    const ctx = testAgent({ jian: createCommandJian('approved') });
-    ctx.configure({ tools: ['Bash'] });
+    const ctx = testAgent({ jian: planReviewJian() });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    // Pin cwd so the plan-review display path stays machine-independent.
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('steer-lane-review', false);
 
-    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, bashCallWithId('call_bash', 'printf approved'));
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, exitPlanCall());
     ctx.mockNextResponse({ type: 'text', text: 'Approved, and I saw the note.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash, then listen' }] });
     const approval = await ctx.takeApprovalRequest();
@@ -1906,7 +1972,7 @@ describe('steer interrupt lanes', () => {
 
     expect(ctx.llmCalls).toHaveLength(2);
     const lastHistory = JSON.stringify(ctx.llmCalls.at(-1)?.history);
-    expect(lastHistory).toContain('approved');
+    expect(lastHistory).toContain('ExitPlanMode');
     expect(lastHistory).toContain('Background note.');
     await ctx.expectResumeMatches();
   });

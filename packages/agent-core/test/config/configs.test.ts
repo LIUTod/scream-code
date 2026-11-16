@@ -119,6 +119,12 @@ claim_stale_after_ms = 15000
 `;
 
 describe('harness config TOML loader', () => {
+  it('normalizes a legacy default_permission_mode = "manual" to yolo', () => {
+    const config = parseConfigString('default_permission_mode = "manual"\n', 'config.toml');
+
+    expect(config.defaultPermissionMode).toBe('yolo');
+  });
+
   it('parses the current config.toml shape through explicit field mappings', () => {
     const config = parseConfigString(COMPLETE_TOML, 'config.toml');
 

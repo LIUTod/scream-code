@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { InMemoryAgentRecordPersistence } from '../../../src/agent/records/persistence';
 import type { AgentRecord } from '../../../src/agent/records/types';
+import { WarningsAskPermissionPolicy } from '../../../src/agent/permission/policies/warnings-ask';
 import { testAgent } from '../harness/agent';
 import { bashContext, grantBashForSession, makePermissionHarness } from './fixtures/manager-harness';
 
@@ -45,13 +46,22 @@ describe('grant revocation across a resume', () => {
   it('keeps the grant revoked and asks again on the next matching call', async () => {
     const persistence = new InMemoryAgentRecordPersistence();
     const first = testAgent({ persistence });
-    grantBashForSession(first.agent.permission);
-    // The grant is live before the revocation: the call is approved without a
-    // prompt, so it settles straight away.
-    await expect(first.agent.permission.beforeToolCall(bashContext('printf ok'))).resolves
-      .toBeUndefined();
+    // A literal command grant stands in for a memorized approval: the
+    // dangerous-command warning honors it, so "silenced?" is observable.
+    first.agent.permission.recordApprovalResult({
+      turnId: 0,
+      toolCallId: 'call_grant_1',
+      toolName: 'Bash',
+      action: 'run command',
+      sessionApprovalRule: 'Bash(rm -rf /tmp/cache)',
+      result: {
+        decision: 'approved',
+        scope: 'session',
+        selectedLabel: 'Approve for this session',
+      },
+    });
 
-    expect(first.agent.permission.revokeSessionGrant('Bash')).toBe(true);
+    expect(first.agent.permission.revokeSessionGrant('Bash(rm -rf /tmp/cache)')).toBe(true);
     expect(first.agent.permission.sessionApprovalRulePatterns).toEqual([]);
 
     // The wire carries both the grant and its revocation.
@@ -69,12 +79,12 @@ describe('grant revocation across a resume', () => {
 
     expect(resumed.agent.permission.sessionApprovalRulePatterns).toEqual([]);
 
-    // And the revoked pattern is not silently approved any more: the call
-    // reaches the approval prompt instead of sailing through.
-    const pending = resumed.agent.permission.beforeToolCall(bashContext('printf ok'));
-    const { respond } = await resumed.takeApprovalRequest();
-    respond({ decision: 'rejected' });
-    await expect(pending).resolves.toMatchObject({ block: true });
+    // And the revoked pattern silences nothing any more: the dangerous-command
+    // warning (which honors session grants) asks again.
+    const verdict = new WarningsAskPermissionPolicy(resumed.agent).evaluate(
+      bashContext('rm -rf /tmp/cache'),
+    );
+    expect(verdict).toMatchObject({ kind: 'ask' });
   });
 
   it('replays a grant that was never revoked', async () => {

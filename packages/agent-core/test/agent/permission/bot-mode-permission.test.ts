@@ -25,14 +25,14 @@ function botPolicy(): BotModePermissionPolicy {
   } as unknown as Agent);
 }
 
-function manualPolicy(): BotModePermissionPolicy {
-  return new BotModePermissionPolicy({ permission: permissionStub('manual') } as unknown as Agent);
+function yoloPolicy(): BotModePermissionPolicy {
+  return new BotModePermissionPolicy({ permission: permissionStub('yolo') } as unknown as Agent);
 }
 
 describe('BotModePermissionPolicy', () => {
   it('is inert outside bot mode', () => {
-    expect(manualPolicy().evaluate(ctx('Bash', { command: 'rm -rf /' }))).toBeUndefined();
-    expect(manualPolicy().evaluate(ctx('Write', { path: '/tmp/x' }))).toBeUndefined();
+    expect(yoloPolicy().evaluate(ctx('Bash', { command: 'rm -rf /' }))).toBeUndefined();
+    expect(yoloPolicy().evaluate(ctx('Write', { path: '/tmp/x' }))).toBeUndefined();
   });
 
   it('approves read-only tools in bot mode', () => {

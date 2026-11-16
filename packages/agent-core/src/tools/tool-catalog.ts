@@ -73,8 +73,8 @@ export const CORE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Tools auto-approved without asking in manual mode, verbatim from the
- * former default-tool-approve record. `SetTodoList` is a legacy name kept
+ * Tools approved by the catalog without asking, verbatim from the former
+ * default-tool-approve record. `SetTodoList` is a legacy name kept
  * as-is: no current tool declares it, and removing it would be a behavior
  * change rather than a refactor.
  */

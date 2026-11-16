@@ -54,7 +54,7 @@ function makeTool(
       })),
   );
   const agent = {
-    permission: { mode: options.mode ?? 'manual' },
+    permission: { mode: options.mode ?? 'yolo' },
     rpc: { requestQuestion },
   } as unknown as Agent;
   return { tool: new AskUserQuestionTool(agent), requestQuestion };
@@ -106,7 +106,7 @@ describe('AskUserQuestionTool', () => {
     expect(labelSchema.description).toContain("append '(Recommended)'");
   });
 
-  it.each(['manual', 'yolo'] as const)(
+  it.each(['yolo', 'ask'] as const)(
     'dispatches questions through the agent rpc in %s mode',
     async (mode) => {
       const { tool, requestQuestion } = makeTool({ mode });

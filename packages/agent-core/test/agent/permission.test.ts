@@ -113,10 +113,9 @@ describe('Agent permission', () => {
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash in yolo mode" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash in yolo mode" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nYolo permission mode is active — every tool call is approved automatically, including irreversible ones.\\n  - Nothing will stop you, so verify destructive operations yourself before running them.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" }, "id": "m1" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 2, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "Running in yolo mode." }
       [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf permission-output\\",\\"timeout\\":60}" }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
@@ -129,21 +128,21 @@ describe('Agent permission', () => {
       [emit] tool.progress               { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "yolo-output" } }
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "yolo-output", "message": "Command executed successfully." } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_bash", "output": "yolo-output", "message": "Command executed successfully." }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 92, "maxContextTokens": 1000000, "contextUsage": 0.000092, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 32, "maxContextTokens": 1000000, "contextUsage": 0.000032, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 3, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The command printed yolo-output." }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "The command printed yolo-output." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-10>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 96, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 96, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 96, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 107, "maxContextTokens": 1000000, "contextUsage": 0.000107, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 163, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 163, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 163, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 163, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 36, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 36, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 36, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 47, "maxContextTokens": 1000000, "contextUsage": 0.000047, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -152,7 +151,6 @@ describe('Agent permission', () => {
         tools: Bash
         messages:
           user: text "Run Bash in yolo mode"
-          user: text "<system-reminder>\\nYolo permission mode is active — every tool call is approved automatically, including irreversible ones.\\n  - Nothing will stop you, so verify destructive operations yourself before running them.\\n</system-reminder>"
 
       call 2:
         messages:
@@ -171,28 +169,28 @@ describe('Agent permission', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Use auto first' }] });
     await ctx.untilTurnEnd();
 
-    await ctx.rpc.setPermission({ mode: 'manual' });
-    ctx.mockNextResponse({ type: 'text', text: 'Manual turn done.' });
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Back to manual' }] });
+    await ctx.rpc.setPermission({ mode: 'yolo' });
+    ctx.mockNextResponse({ type: 'text', text: 'Yolo turn done.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Back to yolo' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] permission.set_mode         { "mode": "manual", "time": "<time>" }
-      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 132, "maxContextTokens": 1000000, "contextUsage": 0.000132, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 125, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 125, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 125, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Back to manual" } ], "origin": { "kind": "user" }, "time": "<time>" }
+      [wire] permission.set_mode         { "mode": "yolo", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 132, "maxContextTokens": 1000000, "contextUsage": 0.000132, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 125, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 125, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 125, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Back to yolo" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 1, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Back to manual" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m3" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Back to yolo" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m3" }, "time": "<time>" }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<auto-mode-exit-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" }, "id": "m4" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-5>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 1, "step": 1, "stepId": "<uuid-5>" }
       [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [], "messagesCount": 5, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [emit] assistant.delta             { "turnId": 1, "delta": "Manual turn done." }
+      [emit] assistant.delta             { "turnId": 1, "delta": "Yolo turn done." }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-6>", "turnId": "1", "step": 1, "stepUuid": "<uuid-5>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-7>", "turnId": "1", "step": 1, "stepUuid": "<uuid-5>", "part": { "type": "text", "text": "Manual turn done." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-7>", "turnId": "1", "step": 1, "stepUuid": "<uuid-5>", "part": { "type": "text", "text": "Yolo turn done." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-8>", "turnId": "1", "step": 1, "stepUuid": "<uuid-5>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-5>", "turnId": "1", "step": 1, "usage": { "inputOther": 239, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-5>", "usage": { "inputOther": 239, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 239, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 247, "maxContextTokens": 1000000, "contextUsage": 0.000247, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 364, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 364, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 239, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 364, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-5>", "turnId": "1", "step": 1, "usage": { "inputOther": 246, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-5>", "usage": { "inputOther": 246, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 246, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 253, "maxContextTokens": 1000000, "contextUsage": 0.000253, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 371, "output": 14, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 371, "output": 14, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 246, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 371, "output": 14, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 1, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -207,13 +205,13 @@ describe('Agent permission', () => {
         messages:
           <last>
           assistant: text "Auto turn done."
-          user: text "Back to manual"
+          user: text "Back to yolo"
           user: text <auto-mode-exit-reminder>
     `);
     await ctx.expectResumeMatches();
   });
 
-  it('does not execute rejected builtin tools and feeds the rejection back to the LLM', async () => {
+  it('does not execute denied mutating tools in ask mode and feeds the denial back to the LLM', async () => {
     const execWithEnv = vi.fn().mockRejectedValue(new Error('Bash should not execute'));
     const bashCall: ToolCall = {
       type: 'function',
@@ -225,64 +223,17 @@ describe('Agent permission', () => {
       jian: createFakeJian({ execWithEnv }),
     });
     ctx.configure({ tools: ['Bash'] });
+    await ctx.rpc.setPermission({ mode: 'ask' });
 
     ctx.mockNextResponse({ type: 'text', text: 'I will try Bash.' }, bashCall);
+    ctx.mockNextResponse({ type: 'text', text: 'Ask mode is read-only, so I will answer instead.' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Try to run Bash' }] });
-    expect(await ctx.untilApproval(false)).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Try to run Bash" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Try to run Bash" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
-      [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [emit] assistant.delta             { "turnId": 0, "delta": "I will try Bash." }
-      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf should-not-run\\",\\"timeout\\":60}" }
-      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will try Bash." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" }, "requestSummary": "Try to run Bash", "sourceAgentId": "main", "sourceToolName": "Bash" }
-    `);
-    expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
-      system: <system-prompt>
-      tools: Bash
-      messages:
-        user: text "Try to run Bash"
-    `);
+    await ctx.untilTurnEnd();
 
-    ctx.mockNextResponse({ type: 'text', text: 'I will not run the command.' });
-    expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] permission.record_approval_result   { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "result": { "decision": "rejected", "selectedLabel": "reject" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
-      [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
-      [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "Tool \\"Bash\\" was not run because the user rejected the approval request. Do not re-attempt the exact same call - think about why it was rejected, then adjust your approach or ask the user what they would prefer.", "isError": true, "code": "blocked" } }, "time": "<time>" }
-      [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "Tool \\"Bash\\" was not run because the user rejected the approval request. Do not re-attempt the exact same call - think about why it was rejected, then adjust your approach or ask the user what they would prefer.", "isError": true, "code": "blocked" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 27, "maxContextTokens": 1000000, "contextUsage": 0.000027, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
-      [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 3, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [emit] assistant.delta                     { "turnId": 0, "delta": "I will not run the command." }
-      [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "I will not run the command." } }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-10>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 93, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 93, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 93, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 103, "maxContextTokens": 1000000, "contextUsage": 0.000103, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 98, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 98, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 98, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 98, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nA required tool (Bash) failed this turn. Analyze the error and fix it before reporting completion.\\n\\nDo not report completion until the above is resolved.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "convergence_gate" }, "id": "m4" }, "time": "<time>" }
-      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" }, "id": "m5" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-11>", "turnId": "0", "step": 3 }, "time": "<time>" }
-      [emit] turn.step.started                   { "turnId": 0, "step": 3, "stepId": "<uuid-11>" }
-      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 6, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [emit] turn.step.interrupted               { "turnId": 0, "step": 3, "reason": "error", "message": "Unexpected generate call #3" }
-      [emit] turn.ended                          { "turnId": 0, "reason": "failed", "error": { "code": "internal", "message": "Unexpected generate call #3", "name": "Error", "retryable": false, "details": { "turnId": 0 } } }
-    `);
-    await ctx.expectResumeMatches();
+    expect(execWithEnv).not.toHaveBeenCalled();
+    expect(JSON.stringify(ctx.agent.context.history)).toContain('not available in Ask mode');
   });
+
 });
 
 describe('Permission auto mode', () => {
@@ -322,14 +273,19 @@ describe('Permission auto mode', () => {
     );
   });
 
-  it('announces yolo mode and its destructive-action caveat', async () => {
+  it('announces yolo mode and its destructive-action caveat on a real transition', async () => {
     const appendSystemReminder = vi.fn();
     const agent = {
-      permission: { mode: 'yolo' },
+      permission: { mode: 'auto' },
       context: { history: [], appendSystemReminder },
     } as unknown as Agent;
     const injector = new PermissionModeInjector(agent);
 
+    // auto at session start announces auto, not yolo.
+    await injector.inject();
+    appendSystemReminder.mockClear();
+
+    (agent.permission as { mode: string }).mode = 'yolo';
     await injector.inject();
 
     expect(appendSystemReminder).toHaveBeenCalledWith(
@@ -342,15 +298,15 @@ describe('Permission auto mode', () => {
     );
   });
 
-  it('announces a return to manual mode only on a real transition', async () => {
+  it('announces a return to yolo mode only on a real transition', async () => {
     const appendSystemReminder = vi.fn();
     const agent = {
-      permission: { mode: 'manual' },
+      permission: { mode: 'yolo' },
       context: { history: [], appendSystemReminder },
     } as unknown as Agent;
     const injector = new PermissionModeInjector(agent);
 
-    // Session start in manual mode: nothing to announce.
+    // Session start in yolo mode — the default: nothing to announce.
     await injector.inject();
     expect(appendSystemReminder).not.toHaveBeenCalled();
 
@@ -358,11 +314,11 @@ describe('Permission auto mode', () => {
     await injector.inject();
 
     appendSystemReminder.mockClear();
-    (agent.permission as { mode: string }).mode = 'manual';
+    (agent.permission as { mode: string }).mode = 'yolo';
     await injector.inject();
 
     expect(appendSystemReminder).toHaveBeenCalledWith(
-      expect.stringContaining('Manual permission mode is active'),
+      expect.stringContaining('Yolo permission mode is active'),
       expect.anything(),
     );
   });
@@ -481,15 +437,15 @@ describe('Permission auto mode', () => {
   );
 
   it.each(
-    (['manual'] as const).flatMap((mode) =>
+    (['yolo'] as const).flatMap((mode) =>
       [
         [mode, 'Write', { path: '/tmp/notes.md', content: 'x' }, 'write', 'write file'],
         [mode, 'Edit', { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }, 'edit', 'edit file'],
       ] as const,
     ),
   )(
-    'requests approval in %s mode for %s outside the cwd',
-    async (mode, toolName, args, operation, action) => {
+    'approves %s outside the cwd in %s mode without prompting',
+    async (mode, toolName, args, _operation, _action) => {
       const { manager, requestApproval } = makePermissionManager(async () => ({
         decision: 'approved',
       }));
@@ -499,23 +455,14 @@ describe('Permission auto mode', () => {
         manager.beforeToolCall(hookContext({ id: `call_${toolName}`, toolName, args })),
       ).resolves.toBeUndefined();
 
-      expect(requestApproval).toHaveBeenCalledWith(
-        expect.objectContaining({
-          toolName,
-          action,
-          display: {
-            kind: 'file_io',
-            operation,
-            path: args.path,
-          },
-        }),
-        expect.any(Object),
-      );
+      // The prompt posture is gone: writes outside the cwd no longer ask, the
+      // mode policy approves them instead.
+      expect(requestApproval).not.toHaveBeenCalled();
     },
   );
 
   it.each(
-    (['manual', 'yolo'] as const).flatMap((mode) =>
+    (['auto', 'yolo'] as const).flatMap((mode) =>
       [
         [mode, 'Read', { path: '/tmp/notes.md' }],
         [mode, 'ReadMediaFile', { path: '/tmp/image.png' }],
@@ -634,30 +581,33 @@ describe('Permission auto mode', () => {
     const { manager, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
+    // ask mode is the only surviving posture where a user ask rule can fire:
+    // mutating tools are denied by the read-only guard before the rule chain.
+    manager.setMode('ask');
     manager.rules.push(
       {
         decision: 'allow',
         scope: 'project',
-        pattern: 'Bash',
+        pattern: 'Read',
       },
       {
         decision: 'ask',
         scope: 'user',
-        pattern: 'Bash',
+        pattern: 'Read',
       },
     );
 
     await expect(
       manager.beforeToolCall(
         hookContext({
-          id: 'call_bash_ask_allow',
+          id: 'call_read_ask_allow',
+          toolName: 'Read',
+          args: { path: '/workspace/notes.md' },
         }),
       ),
     ).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-    
   });
 
   it('reuses approve-for-session even when an ask rule still matches the call', async () => {
@@ -666,15 +616,18 @@ describe('Permission auto mode', () => {
       scope: 'session',
       selectedLabel: 'Approve for this session',
     }));
+    manager.setMode('ask');
     manager.rules.push({
       decision: 'ask',
       scope: 'user',
-      pattern: 'Bash',
+      pattern: 'Read',
     });
     const call = () =>
       manager.beforeToolCall(
         hookContext({
-          id: 'call_bash_session_after_ask',
+          id: 'call_read_session_after_ask',
+          toolName: 'Read',
+          args: { path: '/workspace/notes.md' },
         }),
       );
 
@@ -682,7 +635,6 @@ describe('Permission auto mode', () => {
     await expect(call()).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    
   });
 
   it('approves outside-workspace writes in yolo mode without prompting', async () => {
@@ -746,7 +698,7 @@ describe('Permission policy chain', () => {
 
 describe('Simple permission policy direct behavior', () => {
   it('approves only in auto mode for AutoModeApprovePermissionPolicy', () => {
-    const agent = { permission: { mode: 'manual' } } as unknown as Agent;
+    const agent = { permission: { mode: 'yolo' } } as unknown as Agent;
     const policy = new AutoModeApprovePermissionPolicy(agent);
 
     expect(policy.evaluate()).toBeUndefined();
@@ -755,7 +707,7 @@ describe('Simple permission policy direct behavior', () => {
   });
 
   it('denies AskUserQuestion only in auto mode', () => {
-    const agent = { permission: { mode: 'manual' } } as unknown as Agent;
+    const agent = { permission: { mode: 'yolo' } } as unknown as Agent;
     const policy = new AutoModeAskUserQuestionDenyPermissionPolicy(agent);
 
     expect(
@@ -789,7 +741,7 @@ describe('Simple permission policy direct behavior', () => {
   });
 
   it('approves only in yolo mode for YoloModeApprovePermissionPolicy', () => {
-    const agent = { permission: { mode: 'manual' } } as unknown as Agent;
+    const agent = { permission: { mode: 'ask' } } as unknown as Agent;
     const policy = new YoloModeApprovePermissionPolicy(agent);
     const bash = hookContext({ id: 'call_bash_yolo', toolName: 'Bash' });
 
@@ -866,12 +818,17 @@ describe('PreToolUse permission policy', () => {
       async () => ({ decision: 'approved' }),
       { hooks: { triggerBlock } as unknown as Agent['hooks'] },
     );
+    // The ask-mode read-only guard sits below the hook: Bash reaching it is
+    // proof the chain continued past a non-blocking PreToolUse hook.
+    manager.setMode('ask');
 
     await expect(manager.beforeToolCall(hookContext({ id: 'call_hook_allow' }))).resolves
-      .toBeUndefined();
+      .toMatchObject({
+        block: true,
+        reason: expect.stringContaining('not available in Ask mode'),
+      });
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
+    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it('passes an empty hook input object for non-plain arguments', async () => {
@@ -920,10 +877,13 @@ describe('Default tool approve policy', () => {
     ['Agent', { prompt: 'review this' }],
     ['AskUserQuestion', { questions: [] }],
     ['Skill', { name: 'test-skill' }],
-  ] as const)('approves %s in manual mode without requesting approval', async (toolName, args) => {
+  ] as const)('approves %s in ask mode without requesting approval', async (toolName, args) => {
     const { manager, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
+    // ask mode is the surviving mode where a read/dialogue tool must still be
+    // approved by the catalog rather than by a blanket mode policy.
+    manager.setMode('ask');
 
     await expect(
       manager.beforeToolCall(
@@ -936,18 +896,17 @@ describe('Default tool approve policy', () => {
     ).resolves.toBeUndefined();
 
     expect(requestApproval).not.toHaveBeenCalled();
-    
   });
 
   it.each([
     ['Bash', { command: 'printf first', timeout: 60 }],
     ['Write', { path: '/workspace/a.ts', content: 'x' }],
     ['Edit', { path: '/workspace/a.ts', old_string: 'a', new_string: 'b' }],
-    ['Custom', { value: 1 }],
-  ] as const)('does not default-approve %s', async (toolName, args) => {
+  ] as const)('denies %s in ask mode instead of default-approving it', async (toolName, args) => {
     const { manager, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
+    manager.setMode('ask');
 
     await expect(
       manager.beforeToolCall(
@@ -957,10 +916,28 @@ describe('Default tool approve policy', () => {
           args,
         }),
       ),
+    ).resolves.toMatchObject({ block: true });
+
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('falls back to an approval for a tool outside the default-approve catalog', async () => {
+    const { manager, requestApproval } = makePermissionManager(async () => ({
+      decision: 'approved',
+    }));
+    manager.setMode('ask');
+
+    await expect(
+      manager.beforeToolCall(
+        hookContext({
+          id: 'call_not_default_Custom',
+          toolName: 'Custom',
+          args: { value: 1 },
+        }),
+      ),
     ).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    
   });
 
   it('keeps auto-mode AskUserQuestion deny above default approval', async () => {
@@ -994,14 +971,14 @@ describe('Permission live derive', () => {
       parent: parent.manager,
     });
 
-    expect(child.manager.mode).toBe('manual');
-    parent.manager.setMode('yolo');
     expect(child.manager.mode).toBe('yolo');
-    expect(child.manager.data().mode).toBe('yolo');
+    parent.manager.setMode('ask');
+    expect(child.manager.mode).toBe('ask');
+    expect(child.manager.data().mode).toBe('ask');
 
-    child.manager.setMode('manual');
+    child.manager.setMode('bot');
     parent.manager.setMode('auto');
-    expect(child.manager.mode).toBe('manual');
+    expect(child.manager.mode).toBe('bot');
   });
 
   it('applies rule decision priority across child and parent rules', async () => {
@@ -1068,7 +1045,9 @@ describe('Permission live derive', () => {
     await expect(manager.beforeToolCall(hookContext({ id: 'call_legacy_session_rule' }))).resolves
       .toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
+    // The legacy rule never matches — the call approves via the default yolo
+    // posture instead of asking again.
+    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it('falls back to parent rules and session approvals when no child rule matches', async () => {
@@ -1109,10 +1088,10 @@ describe('Permission live derive', () => {
       .toBeUndefined();
     expect(child.requestApproval).not.toHaveBeenCalled();
 
-    child.manager.setMode('manual');
-    await expect(child.manager.beforeToolCall(hookContext({ id: 'call_local_manual' }))).resolves
-      .toBeUndefined();
-    expect(child.requestApproval).toHaveBeenCalledTimes(1);
+    child.manager.setMode('ask');
+    await expect(child.manager.beforeToolCall(hookContext({ id: 'call_local_ask' }))).resolves
+      .toMatchObject({ block: true });
+    expect(child.requestApproval).not.toHaveBeenCalled();
   });
 });
 
@@ -1155,7 +1134,8 @@ describe('User-configured permission policies', () => {
         }),
       ),
     ).resolves.toBeUndefined();
-    expect(allowed.requestApproval).toHaveBeenCalledTimes(1);
+    // The non-matching deny rule leaves the call to the default yolo posture.
+    expect(allowed.requestApproval).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1191,8 +1171,7 @@ describe('User-configured permission policies', () => {
     await expect(manager.beforeToolCall(hookContext({ id: 'call_bad_rule' }))).resolves
       .toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
+    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it('uses the first matching deny rule in effective order', async () => {
@@ -1243,27 +1222,52 @@ describe('User-configured permission policies', () => {
       });
   });
 
+  it('warns once when ask rules cannot prompt in the current mode', () => {
+    const warn = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      makePermissionManager(async () => ({ decision: 'approved' }), {
+        initialRules: [{ decision: 'ask', scope: 'user', pattern: 'Bash(git push *)' }],
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('Bash(git push *)');
+
+      // ask mode is where the rule still works: no warning there.
+      warn.mockClear();
+      const { manager } = makePermissionManager(async () => ({ decision: 'approved' }), {
+        initialRules: [{ decision: 'ask', scope: 'user', pattern: 'Bash(git push *)' }],
+        mode: 'ask',
+      });
+      expect(manager.mode).toBe('ask');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('requests approval for argument-aware ask rules with non-sensitive match details', async () => {
     const { manager, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
+    // Read survives the ask-mode guard, so a user ask rule is reachable there.
+    manager.setMode('ask');
     manager.rules.push({
       decision: 'ask',
       scope: 'user',
-      pattern: 'Bash(git *)',
+      pattern: 'Read(/workspace/**)',
     });
 
     await expect(
       manager.beforeToolCall(
         hookContext({
           id: 'call_ask_git',
-          args: { command: 'git status', timeout: 60 },
+          toolName: 'Read',
+          args: { path: '/workspace/src/app.ts' },
         }),
       ),
     ).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    
   });
 
   it('lets non-matching ask rules fall through to matching allow rules', async () => {
@@ -1296,7 +1300,7 @@ describe('User-configured permission policies', () => {
     
   });
 
-  it('falls back to approval when an allow rule argument does not match', async () => {
+  it('does not grant when an allow rule argument does not match', async () => {
     const { manager, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
@@ -1315,8 +1319,7 @@ describe('User-configured permission policies', () => {
       ),
     ).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
+    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it.each(['turn-override', 'project', 'user'] as const)(
@@ -1341,7 +1344,7 @@ describe('User-configured permission policies', () => {
 });
 
 describe('Plan mode tool approve policy', () => {
-  it('approves EnterPlanMode in manual mode without requesting approval', async () => {
+  it('approves EnterPlanMode in the default yolo mode without requesting approval', async () => {
     const { manager, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
@@ -1511,9 +1514,9 @@ describe('Plan mode tool approve policy', () => {
 });
 
 describe('Plan mode Bash permission policy', () => {
-  it('uses ordinary Bash approval in manual plan mode', async () => {
+  it('approves Bash in yolo plan mode without requesting approval', async () => {
     const { manager, requestApproval } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       approval: { decision: 'approved' },
     });
 
@@ -1527,53 +1530,7 @@ describe('Plan mode Bash permission policy', () => {
       ),
     ).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledWith(
-      {
-        turnId: 0,
-        toolCallId: 'call_plan_bash',
-        toolName: 'Bash',
-        action: 'run command',
-        display: {
-          kind: 'command',
-          command: 'ls -la',
-        },
-        sourceAgentId: 'main',
-        sourceToolName: 'Bash',
-      },
-      { signal: expect.any(AbortSignal) },
-    );
-  });
-
-  it('reuses ordinary Bash approve-for-session in plan mode', async () => {
-    const { manager, requestApproval } = makePlanPermissionManager({
-      mode: 'manual',
-    });
-    manager.recordApprovalResult({
-      turnId: 0,
-      toolCallId: 'call_ordinary_bash',
-      toolName: 'Bash',
-      action: 'run command',
-      sessionApprovalRule: 'Bash(ls -la)',
-      result: {
-        decision: 'approved',
-        scope: 'session',
-        selectedLabel: 'Approve for this session',
-      },
-    });
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_plan_bash',
-          toolName: 'Bash',
-          args: { command: 'ls -la', timeout: 60 },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
     expect(requestApproval).not.toHaveBeenCalled();
-    expect(manager.data().rules).toEqual([]);
-    expect(manager.sessionApprovalRulePatterns).toContain('Bash(ls -la)');
   });
 
   it.each(['yolo', 'auto'] as const)(
@@ -1677,7 +1634,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('reuses session approval for ExitPlanMode without re-prompting plan review', async () => {
     const { manager, requestApproval, exit } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Updated Plan',
       approval: { decision: 'approved' },
     });
@@ -1706,7 +1663,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('returns a synthetic stop-turn result when the user rejects the plan', async () => {
     const { manager, exit } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Draft Plan',
       approval: { decision: 'rejected', selectedLabel: 'Reject' },
     });
@@ -1732,7 +1689,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('keeps plan mode active when plan approval is cancelled', async () => {
     const { manager, exit } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Draft Plan',
       approval: { decision: 'cancelled', feedback: 'dismissed' },
     });
@@ -1757,7 +1714,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('runs the ExitPlanMode cancellation resolver when no approval handler exists', async () => {
     const { manager, exit, record } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Draft Plan',
       approvalHandlerAvailable: false,
     });
@@ -1791,7 +1748,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('keeps plan mode active when plan approval request fails', async () => {
     const { manager, exit, record } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Draft Plan',
       approvalError: new Error('approval transport closed'),
     });
@@ -1819,7 +1776,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('keeps plan mode active and returns revision feedback as a synthetic result', async () => {
     const { manager, exit } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Draft Plan',
       approval: {
         decision: 'rejected',
@@ -1848,7 +1805,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('returns approved plan output without a saved-to line when display has no path', async () => {
     const { manager } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Draft Plan',
       approval: { decision: 'approved' },
     });
@@ -1873,7 +1830,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('does not force a selected-approach prefix for labels that are not in the options', async () => {
     const { manager } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Draft Plan',
       approval: { decision: 'approved', selectedLabel: 'Approach C' },
     });
@@ -1897,7 +1854,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('returns the exit failure when reject-and-exit cannot leave plan mode', async () => {
     const { manager, exit } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Draft Plan',
       approval: { decision: 'rejected', selectedLabel: 'Reject and Exit' },
     });
@@ -1924,7 +1881,7 @@ describe('ExitPlanMode permission policy', () => {
 
   it('tracks approval transport errors before rethrowing', async () => {
     const { manager } = makePlanPermissionManager({
-      mode: 'manual',
+      mode: 'yolo',
       plan: '# Draft Plan',
       approvalError: new Error('approval transport closed'),
     });
@@ -1951,20 +1908,26 @@ describe('Agent-local approve for session', () => {
       scope: 'session',
       selectedLabel: 'Approve for this session',
     }));
-    const firstArgs = { command: 'printf first', timeout: 60 };
-    const firstRule = 'Bash(printf first)';
+    // ask mode plus a user ask rule is the surviving prompt path: Read passes
+    // the read-only guard and reaches the argument-aware ask rule.
+    manager.setMode('ask');
+    manager.rules.push({ decision: 'ask', scope: 'user', pattern: 'Read(/workspace/**)' });
+    const firstArgs = { path: '/workspace/src/app.ts' };
+    const firstRule = 'Read(/workspace/src/app.ts)';
 
-    await expect(manager.beforeToolCall(hookContext({ id: 'call_1' }))).resolves.toBeUndefined();
+    await expect(
+      manager.beforeToolCall(
+        hookContext({ id: 'call_1', toolName: 'Read', args: firstArgs }),
+      ),
+    ).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-    
     expect(record).toHaveBeenCalledWith({
       type: 'permission.record_approval_result',
       turnId: 0,
       toolCallId: 'call_1',
-      toolName: 'Bash',
-      action: 'run command',
+      toolName: 'Read',
+      action: 'read file',
       sessionApprovalRule: firstRule,
       result: {
         decision: 'approved',
@@ -1972,31 +1935,29 @@ describe('Agent-local approve for session', () => {
         selectedLabel: 'Approve for this session',
       },
     });
-    expect(manager.data().rules).toEqual([]);
+    expect(manager.data().rules.filter((rule) => rule.scope === 'session-runtime')).toEqual([]);
     expect(manager.sessionApprovalRulePatterns).toContain(firstRule);
 
     await expect(
       manager.beforeToolCall(
-        hookContext({
-          id: 'call_2',
-          args: firstArgs,
-        }),
+        hookContext({ id: 'call_2', toolName: 'Read', args: firstArgs }),
       ),
     ).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    
 
     await expect(
       manager.beforeToolCall(
         hookContext({
           id: 'call_3',
-          args: { command: 'printf second', timeout: 60 },
+          toolName: 'Read',
+          args: { path: '/workspace/src/other.ts' },
         }),
       ),
     ).resolves.toBeUndefined();
     expect(requestApproval).toHaveBeenCalledTimes(2);
   });
+
 
   it('caches session approvals for tools without argument matchers at tool granularity', async () => {
     const { manager, requestApproval } = makePermissionManager(async () => ({
@@ -2004,6 +1965,7 @@ describe('Agent-local approve for session', () => {
       scope: 'session',
       selectedLabel: 'Approve for this session',
     }));
+    manager.setMode('ask');
 
     await expect(
       manager.beforeToolCall(
@@ -2028,66 +1990,45 @@ describe('Agent-local approve for session', () => {
     expect(manager.sessionApprovalRulePatterns).toContain('Custom');
   });
 
-  it('stores runtime rules with literal glob escaping', async () => {
-    const { manager, requestApproval } = makePermissionManager(async () => ({
-      decision: 'approved',
-      scope: 'session',
-    }));
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_literal',
-          args: { command: 'printf *', timeout: 60 },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_other',
-          args: { command: 'printf hello', timeout: 60 },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(2);
-  });
-
   it('keeps approved once responses one-shot', async () => {
     const { manager, record, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
+    manager.setMode('ask');
+    manager.rules.push({ decision: 'ask', scope: 'user', pattern: 'Read(/workspace/**)' });
+    const read = (id: string) => hookContext({ id, toolName: 'Read', args: { path: '/workspace/src/app.ts' } });
 
-    await expect(manager.beforeToolCall(hookContext({ id: 'call_1' }))).resolves.toBeUndefined();
-    await expect(manager.beforeToolCall(hookContext({ id: 'call_2' }))).resolves.toBeUndefined();
+    await expect(manager.beforeToolCall(read('call_1'))).resolves.toBeUndefined();
+    await expect(manager.beforeToolCall(read('call_2'))).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(2);
-    expect(record).toHaveBeenCalledTimes(2);
-    expect(record).toHaveBeenNthCalledWith(1, {
+    const approvalRecords = record.mock.calls
+      .map(([entry]) => entry as { type: string })
+      .filter((entry) => entry.type === 'permission.record_approval_result');
+    expect(approvalRecords).toHaveLength(2);
+    expect(approvalRecords[0]).toEqual({
       type: 'permission.record_approval_result',
       turnId: 0,
       toolCallId: 'call_1',
-      toolName: 'Bash',
-      action: 'run command',
+      toolName: 'Read',
+      action: 'read file',
       sessionApprovalRule: undefined,
       result: {
         decision: 'approved',
       },
     });
-    expect(record).toHaveBeenNthCalledWith(2, {
+    expect(approvalRecords[1]).toEqual({
       type: 'permission.record_approval_result',
       turnId: 0,
       toolCallId: 'call_2',
-      toolName: 'Bash',
-      action: 'run command',
+      toolName: 'Read',
+      action: 'read file',
       sessionApprovalRule: undefined,
       result: {
         decision: 'approved',
       },
     });
-    expect(manager.data().rules).toEqual([]);
+    expect(manager.data().rules.filter((rule) => rule.scope === 'session-runtime')).toEqual([]);
   });
 
   it('does not let session approval override an explicit deny rule', async () => {
@@ -2157,26 +2098,6 @@ describe('Agent-local approve for session', () => {
     
   });
 
-  it('does not reuse a session approval whose tool name does not match', async () => {
-    const { manager, requestApproval } = makePermissionManager(async () => ({
-      decision: 'approved',
-    }));
-    manager.recordApprovalResult({
-      turnId: 0,
-      toolCallId: 'call_custom_session',
-      toolName: 'Custom',
-      action: 'call custom',
-      sessionApprovalRule: 'Custom',
-      result: { decision: 'approved', scope: 'session' },
-    });
-
-    await expect(manager.beforeToolCall(hookContext({ id: 'call_bash_no_session' }))).resolves
-      .toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
-
   it('replays session approval wire events into agent permission state', () => {
     const ctx = testAgent();
     const sessionApprovalRule = 'Bash(printf first)';
@@ -2233,33 +2154,73 @@ describe('Approval cancellation', () => {
       decision: 'cancelled',
       feedback: 'request closed',
     }));
+    // ask mode + a user ask rule on a read path: the surviving prompt path.
+    manager.setMode('ask');
+    manager.rules.push({ decision: 'ask', scope: 'user', pattern: 'Read' });
 
-    await expect(manager.beforeToolCall(hookContext({ id: 'call_1' }))).resolves.toMatchObject({
+    await expect(
+      manager.beforeToolCall(
+        hookContext({ id: 'call_1', toolName: 'Read', args: { path: '/workspace/notes.md' } }),
+      ),
+    ).resolves.toMatchObject({
       block: true,
       reason: expect.stringContaining('approval request was cancelled'),
     });
   });
 
-  it.each([
-    ['fallback ask', undefined],
-    ['user ask rule', { decision: 'ask', scope: 'user', pattern: 'Bash' } satisfies PermissionRule],
-  ] as const)('fails closed for %s when no approval handler is available', async (_label, rule) => {
+  it('fails closed for fallback ask when no approval handler is available', async () => {
     const { manager, record } = makePermissionManager(async () => ({ decision: 'approved' }), {
       approvalHandlerAvailable: false,
     });
-    if (rule !== undefined) manager.rules.push(rule);
+    // Custom is outside the default-approve catalog and not a mutating tool the
+    // ask guard denies, so it reaches fallback-ask.
+    manager.setMode('ask');
 
-    await expect(manager.beforeToolCall(hookContext({ id: 'call_no_handler' }))).resolves.toEqual({
+    await expect(
+      manager.beforeToolCall(
+        hookContext({ id: 'call_no_handler', toolName: 'Custom', args: { value: 1 } }),
+      ),
+    ).resolves.toEqual({
       block: true,
       reason:
-        'Tool "Bash" was not run because the approval request was cancelled. Reason: Approval handler is unavailable.',
+        'Tool "Custom" was not run because the approval request was cancelled. Reason: Approval handler is unavailable.',
     });
     expect(record).toHaveBeenCalledWith({
       type: 'permission.record_approval_result',
       turnId: 0,
       toolCallId: 'call_no_handler',
-      toolName: 'Bash',
-      action: 'run command',
+      toolName: 'Custom',
+      action: 'call Custom',
+      sessionApprovalRule: undefined,
+      result: {
+        decision: 'cancelled',
+        feedback: 'Approval handler is unavailable.',
+      },
+    });
+  });
+
+  it('fails closed for a user ask rule when no approval handler is available', async () => {
+    const { manager, record } = makePermissionManager(async () => ({ decision: 'approved' }), {
+      approvalHandlerAvailable: false,
+    });
+    manager.setMode('ask');
+    manager.rules.push({ decision: 'ask', scope: 'user', pattern: 'Read' });
+
+    await expect(
+      manager.beforeToolCall(
+        hookContext({ id: 'call_no_handler', toolName: 'Read', args: { path: '/workspace/notes.md' } }),
+      ),
+    ).resolves.toEqual({
+      block: true,
+      reason:
+        'Tool "Read" was not run because the approval request was cancelled. Reason: Approval handler is unavailable.',
+    });
+    expect(record).toHaveBeenCalledWith({
+      type: 'permission.record_approval_result',
+      turnId: 0,
+      toolCallId: 'call_no_handler',
+      toolName: 'Read',
+      action: 'read file',
       sessionApprovalRule: undefined,
       result: {
         decision: 'cancelled',
@@ -2367,26 +2328,6 @@ describe('Default git CWD Write/Edit permission', () => {
     return hookContext({ id, toolName: 'Edit', args });
   }
 
-  it('still requests approval for Bash inside a git cwd in manual mode', async () => {
-    const { jian, stat } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-
-    await expect(manager.beforeToolCall(hookContext({ id: 'call_bash_git_cwd' }))).resolves
-      .toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toolName: 'Bash',
-        action: 'run command',
-      }),
-      expect.any(Object),
-    );
-    
-    expect(stat).not.toHaveBeenCalled();
-  });
 
   it('bypasses approval for Write to a relative path inside a git cwd', async () => {
     const { jian } = gitJian();
@@ -2420,145 +2361,12 @@ describe('Default git CWD Write/Edit permission', () => {
     
   });
 
-  it('still requests approval when cwd is not inside a git work tree', async () => {
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian: nonGitJian() },
-    );
 
-    await expect(
-      manager.beforeToolCall(writeHook({ path: 'src/a.ts', content: 'x' })),
-    ).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
 
-  it('rechecks missing git marker checks across repeated Write/Edit calls in the same cwd', async () => {
-    const stat = vi.fn<Jian['stat']>().mockRejectedValue(new Error('ENOENT'));
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian: createFakeJian({ stat }) },
-    );
 
-    await expect(
-      manager.beforeToolCall(writeHook({ path: 'src/a.ts', content: 'x' }, 'call_1')),
-    ).resolves.toBeUndefined();
-    await expect(
-      manager.beforeToolCall(
-        editHook({ path: 'src/b.ts', old_string: 'A', new_string: 'B' }, 'call_2'),
-      ),
-    ).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(2);
-    expect(stat.mock.calls.map(([path]) => path)).toEqual([
-      '/workspace/.git',
-      '/.git',
-      '/workspace/.git',
-      '/.git',
-      '/workspace/.git',
-      '/.git',
-      '/workspace/.git',
-      '/.git',
-    ]);
-  });
 
-  it('still requests approval when a relative path escapes cwd via ..', async () => {
-    const { jian } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(writeHook({ path: '../outside.ts', content: 'x' })),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-  });
-
-  it('still requests approval for an absolute path outside the cwd', async () => {
-    const { jian } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(writeHook({ path: '/tmp/outside.ts', content: 'x' })),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-  });
-
-  it('still requests approval for a path inside the git root but outside the cwd', async () => {
-    const { jian } = gitJian({ markerPath: '/a/.git' });
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { cwd: '/a/b/c', jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(writeHook({ path: '/a/x.ts', content: 'x' })),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
-
-  it.each(['.git/config', '.git/hooks/pre-commit'])(
-    'still requests approval for git control file %s',
-    async (path) => {
-      const { jian } = gitJian();
-      const { manager, requestApproval } = makePermissionManager(
-        async () => ({ decision: 'approved' }),
-        { jian },
-      );
-
-      await expect(manager.beforeToolCall(writeHook({ path, content: 'x' }))).resolves
-        .toBeUndefined();
-
-      expect(requestApproval).toHaveBeenCalledTimes(1);
-      
-    },
-  );
-
-  it('still requests approval for case-variant git control files', async () => {
-    const { jian } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(writeHook({ path: '.GIT/config', content: 'x' })),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
-
-  it('still requests approval for a linked-worktree gitdir inside cwd', async () => {
-    const { jian } = gitJian({
-      markerMode: FILE_MODE,
-      statModes: { '/workspace/.gitdir': DIR_MODE },
-      readText: vi.fn<Jian['readText']>(async (path) => {
-        if (path === '/workspace/.git') return 'gitdir: .gitdir\n';
-        throw notFound(path);
-      }),
-    });
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(writeHook({ path: '/workspace/.gitdir/config', content: 'x' })),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
 
   it('does not ask for ordinary file access when a git marker exists', async () => {
     const { jian } = gitJian();
@@ -2581,17 +2389,21 @@ describe('Default git CWD Write/Edit permission', () => {
     
   });
 
+
   it('asks before accessing the .git marker path itself', async () => {
     const { jian } = gitJian();
     const { manager, requestApproval } = makePermissionManager(
       async () => ({ decision: 'approved' }),
       { jian },
     );
+    // ask mode lets Read through the read-only guard, so the git-control-path
+    // ask below it still fires.
+    manager.setMode('ask');
 
     await expect(
       manager.beforeToolCall(
         hookContext({
-          id: 'call_read_dot_git',
+          id: 'call_read_git_marker',
           toolName: 'Read',
           args: { path: '/workspace/.git' },
         }),
@@ -2599,7 +2411,27 @@ describe('Default git CWD Write/Edit permission', () => {
     ).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(1);
-    
+  });
+
+  it('detects Win32 .git path components case-insensitively', async () => {
+    const jian = createFakeJian({ pathClass: () => 'win32' });
+    const { manager, requestApproval } = makePermissionManager(
+      async () => ({ decision: 'approved' }),
+      { cwd: 'C:\\repo', jian },
+    );
+    manager.setMode('ask');
+
+    await expect(
+      manager.beforeToolCall(
+        hookContext({
+          id: 'call_win_git_control',
+          toolName: 'Read',
+          args: { path: 'C:\\repo\\.GIT\\config' },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(requestApproval).toHaveBeenCalledTimes(1);
   });
 
   it('does not check git control paths when cwd is empty', async () => {
@@ -2623,31 +2455,6 @@ describe('Default git CWD Write/Edit permission', () => {
     
   });
 
-  it('detects Win32 .git path components case-insensitively', async () => {
-    const jian = createFakeJian({ pathClass: () => 'win32' });
-    const args = { path: 'C:\\repo\\.GIT\\config' };
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { cwd: 'C:\\repo', jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_win_git',
-          toolName: 'Read',
-          args,
-          execution: {
-            ...testExecution('Read', args),
-            accesses: ToolAccesses.readFile('C:\\repo\\.GIT\\config'),
-          },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
 
   it.each([
     [
@@ -2681,6 +2488,9 @@ describe('Default git CWD Write/Edit permission', () => {
         async () => ({ decision: 'approved' }),
         { jian: createFakeJian({ stat, readText }) },
       );
+      // ask mode: reads survive the guard, and the git-marker recheck decides
+      // whether the sensitive-path ask fires below default approval.
+      manager.setMode('ask');
 
       await expect(
         manager.beforeToolCall(hookContext({ id: `call_${toolName}_before`, toolName, args: firstArgs })),
@@ -2693,7 +2503,6 @@ describe('Default git CWD Write/Edit permission', () => {
       ).resolves.toBeUndefined();
 
       expect(requestApproval).toHaveBeenCalledTimes(1);
-      
     },
   );
 
@@ -2731,79 +2540,7 @@ describe('Default git CWD Write/Edit permission', () => {
     
   });
 
-  it('still requests approval for a sensitive file inside the git cwd', async () => {
-    const { jian } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
 
-    await expect(
-      manager.beforeToolCall(writeHook({ path: '.env', content: 'SECRET=1' })),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(['.env.local', '.aws/credentials'])(
-    'still requests approval for sensitive file %s',
-    async (path) => {
-      const { jian } = gitJian({
-        statModes: path.includes('/') ? { '/workspace/.aws': DIR_MODE } : {},
-      });
-      const { manager, requestApproval } = makePermissionManager(
-        async () => ({ decision: 'approved' }),
-        { jian },
-      );
-
-      await expect(manager.beforeToolCall(writeHook({ path, content: 'secret' }))).resolves
-        .toBeUndefined();
-
-      expect(requestApproval).toHaveBeenCalledTimes(1);
-      
-    },
-  );
-
-  it.each(['src/config.ts', '.env.example', '.env.sample', '.env.template', 'id_rsa.pub'])(
-    'does not treat non-sensitive or exempt file %s as sensitive',
-    async (path) => {
-      const { jian } = gitJian({
-        statModes: path.includes('/') ? { '/workspace/src': DIR_MODE } : {},
-      });
-      const { manager, requestApproval } = makePermissionManager(
-        async () => ({ decision: 'approved' }),
-        { jian },
-      );
-
-      await expect(manager.beforeToolCall(writeHook({ path, content: 'x' }))).resolves
-        .toBeUndefined();
-
-      expect(requestApproval).not.toHaveBeenCalled();
-      
-      
-    },
-  );
-
-  it('requests approval for sensitive read access before default approval', async () => {
-    const { jian } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_read_env',
-          toolName: 'Read',
-          args: { path: '.env' },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
 
   it('detects sensitive Win32 paths case-insensitively', async () => {
     const jian = createFakeJian({ pathClass: () => 'win32' });
@@ -2811,6 +2548,7 @@ describe('Default git CWD Write/Edit permission', () => {
       async () => ({ decision: 'approved' }),
       { cwd: 'C:\\repo', jian },
     );
+    manager.setMode('ask');
 
     await expect(
       manager.beforeToolCall(
@@ -2824,6 +2562,27 @@ describe('Default git CWD Write/Edit permission', () => {
 
     expect(requestApproval).toHaveBeenCalledTimes(1);
     
+  });
+
+  it('requests approval for sensitive read access before default approval', async () => {
+    const { jian } = gitJian();
+    const { manager, requestApproval } = makePermissionManager(
+      async () => ({ decision: 'approved' }),
+      { jian },
+    );
+    manager.setMode('ask');
+
+    await expect(
+      manager.beforeToolCall(
+        hookContext({
+          id: 'call_read_env',
+          toolName: 'Read',
+          args: { path: '.env' },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(requestApproval).toHaveBeenCalledTimes(1);
   });
 
   it('bypasses approval for new files when SSH Jian reports numeric no-such-file', async () => {
@@ -2841,26 +2600,6 @@ describe('Default git CWD Write/Edit permission', () => {
     
   });
 
-  it('lets an explicit `ask` rule keep the approval prompt for Write', async () => {
-    const { jian } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-    manager.rules.push({
-      decision: 'ask',
-      scope: 'user',
-      pattern: 'Write',
-      reason: 'user requested manual confirmation',
-    });
-
-    await expect(
-      manager.beforeToolCall(writeHook({ path: 'src/a.ts', content: 'x' })),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
 
   it('lets an explicit `allow` rule take the original allow path without git cwd approval', async () => {
     const { jian } = gitJian();
@@ -2923,68 +2662,8 @@ describe('Default git CWD Write/Edit permission', () => {
     
   });
 
-  it('does not fire on Windows path semantics (Windows stMode unverified)', async () => {
-    const stat = vi
-      .fn<Jian['stat']>()
-      .mockImplementation(async (path) =>
-        path === '/workspace/.git'
-          ? statResult(0o040_755)
-          : Promise.reject(new Error('ENOENT')),
-      );
-    const jian = createFakeJian({ stat, pathClass: () => 'win32' });
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
 
-    await expect(
-      manager.beforeToolCall(writeHook({ path: 'src/a.ts', content: 'x' })),
-    ).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
-
-  it('does not approve when cwd is empty', async () => {
-    const { jian } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { cwd: '', jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(writeHook({ path: 'src/a.ts', content: 'x' })),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
-
-  it('does not approve Write when execution has no write file access', async () => {
-    const { jian } = gitJian();
-    const args = { path: 'src/a.ts', content: 'x' };
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_write_no_file_access',
-          toolName: 'Write',
-          args,
-          execution: {
-            ...testExecution('Write', args),
-            accesses: ToolAccesses.none(),
-          },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
 
   it('approves multiple write accesses when all are inside the git cwd', async () => {
     const { jian } = gitJian();
@@ -3015,153 +2694,11 @@ describe('Default git CWD Write/Edit permission', () => {
     
   });
 
-  it('does not approve when any write access is outside the cwd', async () => {
-    const { jian } = gitJian();
-    const args = { path: 'src/a.ts', content: 'x' };
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
 
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_multi_outside_write',
-          toolName: 'Write',
-          args,
-          execution: {
-            ...testExecution('Write', args),
-            accesses: [
-              { kind: 'file', operation: 'write', path: '/workspace/src/a.ts' },
-              { kind: 'file', operation: 'write', path: '/tmp/outside.ts' },
-            ],
-          },
-        }),
-      ),
-    ).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-    
-  });
-
-  it('does not approve non-Write/Edit tools even if they report write access', async () => {
-    const { jian } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_custom_write_access',
-          toolName: 'Custom',
-          args: {},
-          execution: {
-            ...testExecution('Custom', {}),
-            accesses: ToolAccesses.writeFile('/workspace/src/a.ts'),
-          },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
-
-  it('rechecks git marker hits across repeated Write/Edit calls in the same cwd', async () => {
-    const { jian, stat } = gitJian();
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { jian },
-    );
-
-    await expect(
-      manager.beforeToolCall(writeHook({ path: 'src/a.ts', content: 'x' }, 'call_1')),
-    ).resolves.toBeUndefined();
-    await expect(
-      manager.beforeToolCall(editHook({ path: 'src/b.ts', old_string: 'A', new_string: 'B' }, 'call_2')),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    const markerCalls = stat.mock.calls.filter(([path]) => path === '/workspace/.git');
-    expect(markerCalls).toHaveLength(4);
-  });
 });
 
 describe('CWD outside file write permission policy', () => {
-  it('falls through when cwd is empty', async () => {
-    const { manager, requestApproval } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { cwd: '' },
-    );
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_empty_cwd_write',
-          toolName: 'Write',
-          args: { path: '/tmp/outside.ts', content: 'x' },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
-
-  it('falls through when there are no file write accesses', async () => {
-    const args = { path: '/tmp/outside.ts', content: 'x' };
-    const { manager, requestApproval } = makePermissionManager(async () => ({
-      decision: 'approved',
-    }));
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_no_write_accesses',
-          toolName: 'Write',
-          args,
-          execution: {
-            ...testExecution('Write', args),
-            accesses: ToolAccesses.none(),
-          },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
-
-  it('asks when any write access is outside the cwd', async () => {
-    const args = { path: '/workspace/src/a.ts', content: 'x' };
-    const { manager, requestApproval } = makePermissionManager(async () => ({
-      decision: 'approved',
-    }));
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_mixed_write_accesses',
-          toolName: 'Write',
-          args,
-          execution: {
-            ...testExecution('Write', args),
-            accesses: [
-              { kind: 'file', operation: 'write', path: '/workspace/src/a.ts' },
-              { kind: 'file', operation: 'readwrite', path: '/tmp/outside.ts' },
-            ],
-          },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    
-  });
-
   it.each([
     ['Read', { path: '/tmp/outside.ts' }],
     ['Grep', { pattern: 'TODO', path: '/tmp' }],
@@ -3366,9 +2903,13 @@ describe('Approval timeout timer', () => {
     const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
     try {
       const { manager } = makePermissionManager(async () => ({ decision: 'approved' }));
+      manager.setMode('ask');
+      manager.rules.push({ decision: 'ask', scope: 'user', pattern: 'Read' });
 
       await expect(
-        manager.beforeToolCall(hookContext({ id: 'call_timeout_clear' })),
+        manager.beforeToolCall(
+          hookContext({ id: 'call_timeout_clear', toolName: 'Read', args: { path: '/workspace/notes.md' } }),
+        ),
       ).resolves.toBeUndefined();
 
       // The race settled via the response; the 5-minute rejection timer must
@@ -3386,8 +2927,12 @@ describe('Approval timeout timer', () => {
       const { manager, requestApproval } = makePermissionManager(
         () => new Promise<ApprovalResponse>(() => {}),
       );
+      manager.setMode('ask');
+      manager.rules.push({ decision: 'ask', scope: 'user', pattern: 'Read' });
 
-      const pending = manager.beforeToolCall(hookContext({ id: 'call_timeout_fire' }));
+      const pending = manager.beforeToolCall(
+        hookContext({ id: 'call_timeout_fire', toolName: 'Read', args: { path: '/workspace/notes.md' } }),
+      );
       const assertion = expect(pending).rejects.toThrow('Approval request timed out after 300000ms');
       await vi.advanceTimersByTimeAsync(300_000);
       await assertion;
@@ -3411,6 +2956,8 @@ function makePermissionManager(
     readonly approvalHandlerAvailable?: boolean;
     readonly wolfpackModeActive?: boolean;
     readonly promptSummary?: string;
+    readonly initialRules?: readonly PermissionRule[];
+    readonly mode?: PermissionMode;
   } = {},
 ): {
   manager: PermissionManager;

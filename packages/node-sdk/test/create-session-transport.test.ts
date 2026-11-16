@@ -342,9 +342,18 @@ effort = "medium"
       const explicit = await harness.createSession({
         id: 'ses_default_permission_explicit_override',
         workDir,
-        permission: 'manual',
+        permission: 'yolo',
       });
-      await expect(explicit.getStatus()).resolves.toMatchObject({ permission: 'manual' });
+      await expect(explicit.getStatus()).resolves.toMatchObject({ permission: 'yolo' });
+
+      // Legacy callers may still pass the removed `manual` mode: it must land
+      // on `yolo` instead of leaving an invalid posture in the engine.
+      const legacy = await harness.createSession({
+        id: 'ses_default_permission_legacy_manual',
+        workDir,
+        permission: 'manual' as never,
+      });
+      await expect(legacy.getStatus()).resolves.toMatchObject({ permission: 'yolo' });
     } finally {
       await harness.close();
     }

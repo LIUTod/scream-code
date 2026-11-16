@@ -13,7 +13,11 @@ import {
   type AgentRecordPersistence,
 } from '../../../src/agent';
 import type { CompactionStrategy } from '../../../src/agent/compaction';
-import type { ApprovalResponse } from '../../../src/agent/permission';
+import type {
+  ApprovalResponse,
+  PermissionPolicy,
+  PermissionPolicyContext,
+} from '../../../src/agent/permission';
 import {
   AGENT_WIRE_PROTOCOL_VERSION,
   InMemoryAgentRecordPersistence,
@@ -101,6 +105,13 @@ export interface TestAgentOptions {
   /** Session-scoped agent id (defaults to 'main' in the Agent constructor). */
   readonly agentId?: string | undefined;
   readonly permission?: AgentOptions['permission'];
+  /**
+   * Test-only seam: park calls to these tools on an approval the harness
+   * controls. `PermissionManager` has no policy-injection option, so the
+   * harness prepends a synthetic `ask` policy. Needed because no surviving
+   * permission mode prompts for a tool call now that `manual` is gone.
+   */
+  readonly askTools?: readonly string[];
   readonly providerManager?: ProviderManager;
   readonly initialConfig?: ScreamConfig;
   readonly providerManagerOverrides?: Omit<ConstructorParameters<typeof ProviderManager>[0], 'config'>;
@@ -145,6 +156,33 @@ export function createCommandJian(stdout: string): Jian {
 
 export function testAgent(options: TestAgentOptions = {}): AgentTestContext {
   return new AgentTestContext(options);
+}
+
+/**
+ * Test-only policy injection. `PermissionManager` builds its chain from
+ * `createPermissionDecisionPolicies()` and exposes no option to extend it, so
+ * the harness rewrites the (runtime-only `private`) `policies` array and puts a
+ * synthetic `ask` in front. The named tools then park on the harness-controlled
+ * approval (`untilApprovalRequest()` / `respond()`), which is the only way to
+ * get a cancellable in-flight tool now that `manual` is gone: yolo/auto approve
+ * above the ask policies, `ask` denies Bash, and bot denies non-reversible
+ * calls outright.
+ */
+function installSyntheticAskPolicy(agent: Agent, toolNames: readonly string[]): void {
+  const wanted = new Set(toolNames);
+  const ask: PermissionPolicy = {
+    name: 'synthetic-test-ask',
+    evaluate(context: PermissionPolicyContext) {
+      if (!wanted.has(context.toolCall.name)) return undefined;
+      return {
+        kind: 'ask',
+        reasons: ['synthetic test approval'],
+        grantOptions: ['once'] as const,
+      };
+    },
+  };
+  const manager = agent.permission as unknown as { policies: PermissionPolicy[] };
+  manager.policies = [ask, ...manager.policies];
 }
 
 /**
@@ -214,6 +252,9 @@ export class AgentTestContext {
       screamHomeDir: options.screamHomeDir,
     });
     this.rpc = this.createPromiseAgentApi(this.agent);
+    if (options.askTools !== undefined && options.askTools.length > 0) {
+      installSyntheticAskPolicy(this.agent, options.askTools);
+    }
     // The Agent constructor now eagerly binds a SIGUSR1 listener via
     // CronManager.start(). Without per-test cleanup, every Agent built
     // by this harness leaks one listener — Node prints a

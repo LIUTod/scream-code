@@ -69,27 +69,17 @@ describe('RunScript tool', () => {
     expect(serialized).toContain('console-segment');
   });
 
-  it('routes nested calls through the approval flow', async () => {
+  it('runs nested calls through the permission chain without prompting under yolo', async () => {
     const ctx = testAgent({ jian: createCommandJian('nested-output') });
     ctx.configure({ tools: ['Bash', 'RunScript'] });
-    // Default permission mode: EXECUTE tools need approval, so both the
-    // RunScript call itself and the nested Bash call ask.
+    // Nested calls still traverse the chain, but yolo approves them, so no
+    // approval request is raised for the script or its inner Bash call.
     ctx.mockNextResponse(
       { type: 'text', text: 'Running a batch.' },
       runScriptCall(SCRIPT_THAT_CALLS_BASH),
     );
     ctx.mockNextResponse({ type: 'text', text: 'Batch finished.' });
-    const prompt = ctx.rpc.prompt({ input: [{ type: 'text', text: 'Batch please' }] });
-
-    const scriptApproval = await ctx.takeApprovalRequest();
-    expect(JSON.stringify(scriptApproval.events)).toContain('RunScript');
-    scriptApproval.respond({ decision: 'approved', selectedLabel: 'approve' });
-
-    const nestedApproval = await ctx.takeApprovalRequest();
-    expect(JSON.stringify(nestedApproval.events)).toContain('Bash');
-    nestedApproval.respond({ decision: 'approved', selectedLabel: 'approve' });
-
-    await prompt;
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Batch please' }] });
     await ctx.untilTurnEnd();
 
     const messages = toolMessages(ctx);
@@ -100,19 +90,17 @@ describe('RunScript tool', () => {
   it('fails the script with the denial text when a nested call is rejected', async () => {
     const ctx = testAgent({ jian: createCommandJian('nested-output') });
     ctx.configure({ tools: ['Bash', 'RunScript'] });
+    // A user deny rule fires above the yolo blanket approval, so the nested Bash
+    // call is rejected while the script itself still runs.
+    ctx.agent.permission.rules = [
+      { decision: 'deny', scope: 'user', pattern: 'Bash' },
+    ];
     ctx.mockNextResponse(
       { type: 'text', text: 'Running a batch.' },
       runScriptCall(SCRIPT_THAT_CALLS_BASH),
     );
     ctx.mockNextResponse({ type: 'text', text: 'Batch finished.' });
-    const prompt = ctx.rpc.prompt({ input: [{ type: 'text', text: 'Batch please' }] });
-
-    const scriptApproval = await ctx.takeApprovalRequest();
-    scriptApproval.respond({ decision: 'approved', selectedLabel: 'approve' });
-    const nestedApproval = await ctx.takeApprovalRequest();
-    nestedApproval.respond({ decision: 'rejected', selectedLabel: 'reject' });
-
-    await prompt;
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Batch please' }] });
     await ctx.untilTurnEnd();
 
     const messages = toolMessages(ctx);
@@ -121,7 +109,7 @@ describe('RunScript tool', () => {
     // A denied nested call rejects inside the script (mirroring the reference
     // runner), so the script fails with the denial text instead of silently
     // continuing with a placeholder result.
-    expect(serialized).toMatch(/rejected|not run/i);
+    expect(serialized).toMatch(/denied|rejected|not run/i);
     expect(serialized).toContain('Script failed');
   });
 

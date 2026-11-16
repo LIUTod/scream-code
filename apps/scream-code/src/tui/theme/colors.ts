@@ -64,7 +64,6 @@ export interface ColorPalette {
   /** line channel dot for the Lark channel (blue); WeChat reuses `success`. */
   lineLark: string;
   // Permission mode labels
-  permissionManual: string;
   permissionYolo: string;
   permissionAuto: string;
   permissionAsk: string;
@@ -127,7 +126,6 @@ export const darkColors: ColorPalette = {
   wolfpackMode: dark.violet,
   rlmMode: dark.gold,
   lineLark: dark.blue400,
-  permissionManual: dark.yellowGreen,
   permissionYolo: dark.gold,
   permissionAuto: dark.coral,
   permissionAsk: dark.skyBlue,
@@ -186,7 +184,6 @@ export const lightColors: ColorPalette = {
   wolfpackMode: light.violet,
   rlmMode: light.gold,
   lineLark: light.blue,
-  permissionManual: light.yellowGreen700,
   permissionYolo: light.gold,
   permissionAuto: light.orange,
   permissionAsk: light.blue,

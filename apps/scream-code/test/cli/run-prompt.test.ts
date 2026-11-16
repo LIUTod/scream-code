@@ -390,7 +390,7 @@ describe('runPrompt', () => {
     expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_existing' });
     expect(mocks.session.getStatus).toHaveBeenCalled();
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(1, 'auto');
-    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'manual');
+    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'yolo');
   });
 
   it('applies the CLI model override to resumed prompt sessions', async () => {
@@ -475,7 +475,7 @@ describe('runPrompt', () => {
     expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_existing' });
     expect(mocks.harnessCreateSession).not.toHaveBeenCalled();
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(1, 'auto');
-    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'manual');
+    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'yolo');
   });
 
 
@@ -488,7 +488,7 @@ describe('runPrompt', () => {
     expect(mocks.harnessListSessions).toHaveBeenCalledWith({ workDir: process.cwd() });
     expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_previous' });
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(1, 'auto');
-    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'manual');
+    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'yolo');
   });
 
   it('continues a previous session without a configured default model', async () => {
@@ -530,7 +530,7 @@ describe('runPrompt', () => {
     ).rejects.toThrow('provider.error: model failed');
 
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(1, 'auto');
-    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'manual');
+    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'yolo');
     expect(mocks.session.setPermission.mock.invocationCallOrder[1]).toBeLessThan(
       mocks.harnessClose.mock.invocationCallOrder[0]!,
     );
@@ -562,7 +562,7 @@ describe('runPrompt', () => {
 
     await processMock.listener('SIGINT')?.();
 
-    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'manual');
+    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'yolo');
     expect(mocks.session.setPermission.mock.invocationCallOrder[1]).toBeLessThan(
       processMock.exit.mock.invocationCallOrder[0]!,
     );
@@ -619,7 +619,7 @@ describe('runPrompt', () => {
     releaseAutoPermission();
     await signalCleanup;
 
-    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'manual');
+    expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'yolo');
     expect(processMock.exit).toHaveBeenCalledWith(130);
 
     await waitForAssertion(() => {

@@ -453,21 +453,88 @@ interface MappedMode {
   planMode: boolean;
 }
 
+/**
+ * Translate a Claude-style `--disallowedTools` entry onto the permission-rule
+ * DSL. Only two shapes are accepted:
+ *
+ *   `Bash`          -> `Bash`               (bare tool name)
+ *   `Bash(git:*)`   -> `Bash(git *)`        (command family, `cmd:*` -> `cmd *`)
+ *   `Read(/secrets/*)` -> unchanged         (argument pattern, picomatch)
+ *
+ * Anything else (unknown shape, unbalanced parens, empty argument glob, or a
+ * `cmd:*` on a non-command tool) would compile to a pattern that can never
+ * match, so it is reported on stderr and dropped instead of silently installing
+ * a dead deny rule.
+ */
+export function parseDisallowedToolNames(
+  value: string | undefined,
+  warn: (message: string) => void = (message) => process.stderr.write(`${message}\n`),
+): string[] | undefined {
+  if (value === undefined) return undefined;
+  const names: string[] = [];
+  for (const raw of value.split(",")) {
+    const entry = raw.trim();
+    if (entry === "") continue;
+    const translated = translateDisallowedTool(entry);
+    if (translated === undefined) {
+      warn(`stream-json: ignoring unmatchable --disallowedTools entry "${entry}"`);
+      continue;
+    }
+    names.push(translated);
+  }
+  return names.length > 0 ? names : undefined;
+}
+
+const TOOL_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*(?:__[A-Za-z0-9_]+)*$/;
+const TOOL_WITH_ARG_RE = /^([A-Za-z][A-Za-z0-9_]*(?:__[A-Za-z0-9_]+)*)\(([^()]*)\)$/;
+
+/** Map one entry, or undefined when it cannot match anything. */
+function translateDisallowedTool(entry: string): string | undefined {
+  if (TOOL_NAME_RE.test(entry)) return entry;
+  const match = TOOL_WITH_ARG_RE.exec(entry);
+  if (match === null) return undefined;
+  const [, tool, rawPattern] = match;
+  const pattern = rawPattern?.trim() ?? "";
+  if (pattern === "") return undefined;
+  // `cmd:*` is Claude's command-family shorthand; the rule DSL spells it `cmd *`.
+  const family = /^(.*):\*$/.exec(pattern);
+  if (family !== null) {
+    const command = family[1]?.trim() ?? "";
+    if (tool !== "Bash" || command === "") return undefined;
+    return `Bash(${command} *)`;
+  }
+  return `${tool}(${pattern})`;
+}
+
+/**
+ * Map a Claude-CLI `--permission-mode` value onto a surviving engine posture.
+ *
+ * The prompting posture (`manual`) no longer exists: a mode that used to route
+ * unmatched calls to the approval handler now runs in the closest surviving
+ * posture. The approve-everything modes land on `auto`; `plan` lands on `yolo`
+ * because `yolo` exempts ExitPlanMode from its blanket approval, so the plan
+ * review still reaches the approval handler; `dontAsk` lands on `bot`
+ * (reversible in-workspace work approves, anything its allowlist does not
+ * cover is denied outright — bot never asks). `--disallowedTools` is enforced as session deny rules (deny
+ * rules fire in every mode); the `--allowedTools` allowlist fallback is
+ * unsupported because no policy asks below `auto`/`yolo`/`bot`. The approval
+ * handler wired below therefore receives only the ExitPlanMode review.
+ */
 export function mapStreamJsonMode(mode: string | undefined): MappedMode {
   switch (mode) {
     case "default":
-      return { permission: "manual", planMode: false };
+      return { permission: "auto", planMode: false };
     case "acceptEdits":
-      return { permission: "manual", planMode: false };
+      return { permission: "auto", planMode: false };
     case "plan":
-      return { permission: "manual", planMode: true };
+      return { permission: "yolo", planMode: true };
     case "auto":
       return { permission: "auto", planMode: false };
     case "yolo":
     case "bypassPermissions":
       return { permission: "yolo", planMode: false };
     case "dontAsk":
-      return { permission: "manual", planMode: false };
+      return { permission: "bot", planMode: false };
     default:
       return { permission: "auto", planMode: false };
   }
@@ -665,12 +732,20 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       const { permission: mappedPermission, planMode: mappedPlanMode } = mapStreamJsonMode(
         opts.permissionMode,
       );
+      // `--disallowedTools` becomes session deny rules: deny rules fire in every
+      // permission mode, unlike the approval handler, which no longer receives
+      // tool calls. The `--allowedTools` allowlist fallback needs a prompting
+      // posture that no longer exists and stays unsupported.
+      const permissionDenyRules = parseDisallowedToolNames(opts.disallowedTools);
       if (!session) {
         // Try to resume an existing session first
         const existing = await harness.listSessions({ sessionId: sessionKey, workDir });
         if (existing.length > 0) {
           try {
-            session = await harness.resumeSession({ id: sessionKey });
+            session = await harness.resumeSession({
+              id: sessionKey,
+              permissionDenyRules,
+            });
             log.info("stream-json: resumed session", { sessionId: session.id });
           } catch (error) {
             // The session is in an inconsistent state: either the directory
@@ -701,6 +776,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
               workDir,
               model,
               permission: mappedPermission,
+              permissionDenyRules,
               planMode: mappedPlanMode,
               thinking: opts.effort,
               metadata: { source: 'cc-connect', agentType: 'scream-code' },
@@ -716,6 +792,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             workDir,
             model,
             permission: mappedPermission,
+            permissionDenyRules,
             planMode: mappedPlanMode,
             thinking: opts.effort,
             metadata: { source: 'cc-connect', agentType: 'scream-code' },
@@ -753,65 +830,14 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           return promise;
         }
 
-        // Build tool whitelist/blacklist from the reference flags.
-        const allowedSet = opts.allowedTools
-          ? new Set(opts.allowedTools.split(",").map((t) => t.trim()).filter(Boolean))
-          : undefined;
-        const disallowedSet = opts.disallowedTools
-          ? new Set(opts.disallowedTools.split(",").map((t) => t.trim()).filter(Boolean))
-          : undefined;
-
-        function isToolBlocked(toolName: string): boolean {
-          if (disallowedSet?.has(toolName)) return true;
-          if (allowedSet && allowedSet.size > 0 && !allowedSet.has(toolName)) return true;
-          return false;
-        }
-
-        switch (opts.permissionMode) {
-          case "yolo":
-          case "bypassPermissions":
-            session.setApprovalHandler((request) => {
-              if (isToolBlocked(request.toolName)) {
-                return { decision: "rejected", feedback: `Tool ${request.toolName} is disallowed` };
-              }
-              return { decision: "approved" };
-            });
-            break;
-          case "dontAsk":
-            session.setApprovalHandler((request) => {
-              if (disallowedSet?.has(request.toolName)) {
-                return { decision: "rejected", feedback: `Tool ${request.toolName} is disallowed` };
-              }
-              if (allowedSet?.has(request.toolName)) {
-                return { decision: "approved" };
-              }
-              return ({
-                decision: "rejected",
-                feedback: "dontAsk mode: tool call auto-denied",
-              });
-            });
-            break;
-          case "acceptEdits":
-            session.setApprovalHandler((request) => {
-              if (isToolBlocked(request.toolName)) {
-                return { decision: "rejected", feedback: `Tool ${request.toolName} is disallowed` };
-              }
-              if (["Edit", "Write"].includes(request.toolName)) {
-                return { decision: "approved" };
-              }
-              return sendControlRequest(request);
-            });
-            break;
-          default:
-            // default / plan / auto → all route through control_request
-            session.setApprovalHandler((request) => {
-              if (isToolBlocked(request.toolName)) {
-                return { decision: "rejected", feedback: `Tool ${request.toolName} is disallowed` };
-              }
-              return sendControlRequest(request);
-            });
-            break;
-        }
+        // `--disallowedTools` is enforced as session deny rules at
+        // createSession (deny rules fire in every mode), so this handler never
+        // inspects tool lists. It now only receives the ExitPlanMode review —
+        // no surviving mode routes a plain tool call to an approval prompt —
+        // and forwards that review to the client. The `--allowedTools`
+        // fallback (deny anything not listed) needs a prompting posture that no
+        // longer exists; it stays unsupported.
+        session.setApprovalHandler((request) => sendControlRequest(request));
         session.setQuestionHandler(() => null);
       }
       let resolve: () => void;

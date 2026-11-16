@@ -158,7 +158,7 @@ function makeReplaySession() {
     replay: [
       { type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'old prompt' }] } },
     ],
-    permission: { mode: 'manual' },
+    permission: { mode: 'yolo' },
     plan: null,
     usage: {},
     tools: [],
@@ -512,7 +512,7 @@ describe('session switch and /new clear the selection end-to-end', () => {
         getStatus: vi.fn(async () => ({
           model: 'k2',
           thinkingLevel: 'off',
-          permission: 'manual',
+          permission: 'yolo',
           planMode: 'off',
           contextTokens: 10,
           maxContextTokens: 100,

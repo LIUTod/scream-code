@@ -238,3 +238,166 @@ describe('createSession exactWorkDir', () => {  it('skips the ancestor walk only
     expect(exact.sessionDir).not.toBe(walked.sessionDir);
   });
 });
+
+describe('createSession permission deny rules', () => {
+  function toolContext(agent: Agent, name: string, args: Record<string, unknown>) {
+    return {
+      turnId: '0',
+      stepNumber: 1,
+      signal: new AbortController().signal,
+      llm: {},
+      args,
+      toolCall: { type: 'function', id: 'call_deny', name, arguments: JSON.stringify(args) },
+      execution: {
+        description: `call ${name}`,
+        display: { kind: 'other' },
+        accesses: [],
+        approvalRule: name,
+        // The real Bash tool resolves command-family patterns; the harness
+        // mirrors that so deny rules with an argument glob can match.
+        matchesRule:
+          name === 'Bash' && typeof args['command'] === 'string'
+            ? (pattern: string) => {
+                const command = args['command'] as string;
+                if (pattern.endsWith('*')) return command.startsWith(pattern.slice(0, -1));
+                return command === pattern;
+              }
+            : undefined,
+        execute: async () => ({ output: '' }),
+      },
+    } as never;
+  }
+
+  it('maps the host deny list onto session deny rules that fire in yolo', async () => {
+    const homeDir = await makeTempDir('scream-deny-home-');
+    await writeFile(join(homeDir, 'config.toml'), TEST_CONFIG, 'utf-8');
+    const workDir = await makeTempDir('scream-deny-work-');
+    const { core, rpc } = await createCore(homeDir);
+    let createdId = '';
+
+    try {
+      const created = await rpc.createSession({
+        workDir,
+        permission: 'yolo',
+        permissionDenyRules: ['Bash'],
+      });
+      createdId = created.id;
+      const agent = mainAgentOf(core, created.id);
+
+      expect(agent.permission.mode).toBe('yolo');
+      expect(agent.permission.rules).toEqual([
+        {
+          decision: 'deny',
+          scope: 'project',
+          pattern: 'Bash',
+          reason: 'denied by the session host',
+        },
+      ]);
+      // Deny rules outrank the mode: yolo would otherwise approve this call.
+      await expect(
+        agent.permission.beforeToolCall(
+          toolContext(agent, 'Bash', { command: 'printf blocked', timeout: 60 }),
+        ),
+      ).resolves.toMatchObject({
+        block: true,
+        reason: expect.stringContaining('denied by the session host'),
+      });
+      // Tools outside the deny list are unaffected.
+      await expect(
+        agent.permission.beforeToolCall(toolContext(agent, 'Read', { path: 'README.md' })),
+      ).resolves.toBeUndefined();
+    } finally {
+      await core.sessions.get(createdId)?.close();
+    }
+  });
+
+  it('reapplies host deny rules on resume', async () => {
+    const homeDir = await makeTempDir('scream-resume-deny-home-');
+    await writeFile(join(homeDir, 'config.toml'), TEST_CONFIG, 'utf-8');
+    const workDir = await makeTempDir('scream-resume-deny-work-');
+    const { core, rpc } = await createCore(homeDir);
+
+    try {
+      const created = await rpc.createSession({
+        workDir,
+        permission: 'yolo',
+        permissionDenyRules: ['Bash'],
+      });
+      await core.sessions.get(created.id)?.close();
+
+      // A resumed session is rebuilt, so the host must send its deny list again.
+      const resumed = await rpc.resumeSession({
+        sessionId: created.id,
+        permissionDenyRules: ['Bash'],
+      });
+      const agent = mainAgentOf(core, resumed.id);
+
+      expect(agent.permission.rules).toEqual([
+        {
+          decision: 'deny',
+          scope: 'project',
+          pattern: 'Bash',
+          reason: 'denied by the session host',
+        },
+      ]);
+      await expect(
+        agent.permission.beforeToolCall(
+          toolContext(agent, 'Bash', { command: 'printf still-blocked', timeout: 60 }),
+        ),
+      ).resolves.toMatchObject({
+        block: true,
+        reason: expect.stringContaining('denied by the session host'),
+      });
+      await core.sessions.get(resumed.id)?.close();
+    } finally {
+      /* temp dirs are removed by afterEach */
+    }
+  });
+
+  it('denies a command family from the translated CLI shorthand', async () => {
+    const homeDir = await makeTempDir('scream-family-deny-home-');
+    await writeFile(join(homeDir, 'config.toml'), TEST_CONFIG, 'utf-8');
+    const workDir = await makeTempDir('scream-family-deny-work-');
+    const { core, rpc } = await createCore(homeDir);
+
+    try {
+      // `Bash(git:*)` in a --disallowedTools list arrives here as `Bash(git *)`.
+      const created = await rpc.createSession({
+        workDir,
+        permission: 'yolo',
+        permissionDenyRules: ['Bash(git *)'],
+      });
+      const agent = mainAgentOf(core, created.id);
+
+      await expect(
+        agent.permission.beforeToolCall(
+          toolContext(agent, 'Bash', { command: 'git push origin main', timeout: 60 }),
+        ),
+      ).resolves.toMatchObject({ block: true });
+      await expect(
+        agent.permission.beforeToolCall(
+          toolContext(agent, 'Bash', { command: 'printf allowed', timeout: 60 }),
+        ),
+      ).resolves.toBeUndefined();
+      await core.sessions.get(created.id)?.close();
+    } finally {
+      /* temp dirs are removed by afterEach */
+    }
+  });
+
+  it('adds no rules when the host sends no deny list', async () => {
+    const homeDir = await makeTempDir('scream-nodeny-home-');
+    await writeFile(join(homeDir, 'config.toml'), TEST_CONFIG, 'utf-8');
+    const workDir = await makeTempDir('scream-nodeny-work-');
+    const { core, rpc } = await createCore(homeDir);
+    let createdId = '';
+
+    try {
+      const created = await rpc.createSession({ workDir, permission: 'yolo' });
+      createdId = created.id;
+      expect(mainAgentOf(core, created.id).permission.rules).toHaveLength(0);
+    } finally {
+      await core.sessions.get(createdId)?.close();
+    }
+  });
+});

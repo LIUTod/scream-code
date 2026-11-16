@@ -465,7 +465,9 @@ export class SessionReplayRenderer {
       replayEntry(
         context,
         'status',
-        mode === 'manual' ? t('replay.yes_mode_off') : t('replay.permission_mode', { mode }),
+        // Replay records from older sessions can still carry the removed
+        // `manual` mode; keep the legacy "YES mode: OFF" wording for them.
+        (mode as string) === 'manual' ? t('replay.yes_mode_off') : t('replay.permission_mode', { mode }),
         'notice',
       ),
     );

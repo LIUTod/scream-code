@@ -1086,8 +1086,6 @@ export const zh: Record<string, string> = {
   'mcpstatus.more_summary': 'MCP 服务器: {count} 个更多 ({detail})',
 
   // ─── permission-selector ───────
-  'permission.manual': '手动',
-  'permission.manual_desc': '执行命令、编辑等风险操作前询问。读取/搜索工具直接运行；会话审批规则生效。',
   'permission.auto': '自动',
   'permission.auto_desc': '完全无交互运行。工具操作自动批准，跳过代理问题以便其自行决策。',
   'permission.yolo_desc': '自动批准工具操作（含危险命令）。需要您决策时（提问、计划评审）代理仍会来找您。',
@@ -1591,6 +1589,8 @@ export const zh: Record<string, string> = {
   'badge.goal': '目标',
   'badge.auto': '自动',
   'badge.yes': 'YES',
+  'badge.bot': 'BOT',
+  'badge.ask': 'ASK',
 
   // ─── Knowledge Web (in-browser) ────
   'kw.lang_toggle': 'English',

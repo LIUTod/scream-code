@@ -26,7 +26,7 @@ Parsed by `packages/agent-core/src/config/schema.ts`.
 | `providers` | Named endpoints: `type`, `apiKey`, `baseUrl`, `defaultModel`, `oauth`, `env`, `customHeaders`, `sessionHeader` |
 | `models` | Model aliases (see below) |
 | `defaultProvider` / `defaultModel` | What a new session uses |
-| `defaultPermissionMode` | `yolo` \| `manual` \| `auto` \| `ask` \| `bot` |
+| `defaultPermissionMode` | `yolo` \| `auto` \| `ask` \| `bot` |
 | `defaultThinking` / `thinking` | Thinking mode and effort |
 | `planMode` / `defaultPlanMode` | Plan-mode defaults |
 | `yolo` | Yolo-mode defaults |
@@ -39,6 +39,15 @@ Parsed by `packages/agent-core/src/config/schema.ts`.
 | `extraSkillDirs` | Additional skill roots |
 | `mergeAllAvailableSkills` | Merge every discovered skill instead of the project-scoped set |
 | `raw` | Escape hatch for keys the schema does not model |
+
+A fresh session starts in `yolo`. The old `manual` mode no longer exists: a
+legacy `defaultPermissionMode = "manual"` (or a stored session still carrying
+that value) is accepted and normalized to `yolo`.
+
+`permission.rules[]` with `decision = "ask"` only prompt in `ask` mode, and only
+for tools the read-only guard does not deny. In `yolo` / `auto` those rules sit
+below the blanket approve policies, so they never fire for Bash or file writes;
+config load warns once about such rules instead of rejecting them.
 
 ### Provider types
 

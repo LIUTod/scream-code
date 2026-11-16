@@ -1,6 +1,7 @@
 import type { PermissionMode } from '@scream-code/scream-code-sdk';
 
 import { t } from '@scream-code/config';
+import { permissionModeLabel } from '#/tui/permission-mode-label';
 import { ChoicePickerComponent, type ChoiceOption } from './choice-picker';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -8,35 +9,30 @@ import type { ColorPalette } from '#/tui/theme/colors';
 function getPermissionOptions(): readonly ChoiceOption[] {
   return [
     {
-      value: 'manual',
-      label: t('permission.manual'),
-      description: t('permission.manual_desc'),
-    },
-    {
       value: 'auto',
       label: t('permission.auto'),
       description: t('permission.auto_desc'),
     },
     {
       value: 'yolo',
-      label: 'YES',
+      label: permissionModeLabel('yolo'),
       description: t('permission.yolo_desc'),
     },
     {
       value: 'bot',
-      label: 'BOT',
+      label: permissionModeLabel('bot'),
       description: t('permission.bot_desc'),
     },
     {
       value: 'ask',
-      label: 'ASK',
+      label: permissionModeLabel('ask'),
       description: t('permission.ask_desc'),
     },
   ];
 }
 
 function isPermissionModeChoice(value: string): value is PermissionMode {
-  return value === 'manual' || value === 'auto' || value === 'yolo' || value === 'bot' || value === 'ask';
+  return value === 'auto' || value === 'yolo' || value === 'bot' || value === 'ask';
 }
 
 export interface PermissionSelectorOptions {

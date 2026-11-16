@@ -78,7 +78,7 @@ describe('Ask mode permission policy', () => {
   });
 
   it('is a no-op outside ask mode', () => {
-    for (const mode of ['manual', 'yolo', 'auto'] as const) {
+    for (const mode of ['yolo', 'auto'] as const) {
       const agent = askAgent(mode);
       expect(evaluateAskPolicy(agent, 'Bash', {}), mode).toBeUndefined();
       expect(evaluateAskPolicy(agent, 'Write', {}), mode).toBeUndefined();

@@ -1096,8 +1096,6 @@ export const en: Record<string, string> = {
   'mcpstatus.more_summary': 'MCP servers: {count} more ({detail})',
 
   // ─── permission-selector ───────
-  'permission.manual': 'Manual',
-  'permission.manual_desc': 'Ask before risky operations like running commands or editing files. Read/search tools run directly; session approval rules apply.',
   'permission.auto': 'Auto',
   'permission.auto_desc': 'Run fully without interaction. Tool operations are auto-approved; agent questions are skipped so it can decide on its own.',
   'permission.yolo_desc': 'Auto-approve tool operations (dangerous commands included). The agent still brings its questions and plan reviews to you.',
@@ -1600,6 +1598,8 @@ export const en: Record<string, string> = {
   'badge.goal': 'Goal',
   'badge.auto': 'Auto',
   'badge.yes': 'YES',
+  'badge.bot': 'BOT',
+  'badge.ask': 'ASK',
 
   // ─── Knowledge Web (in-browser) ────
   'kw.lang_toggle': '中文',

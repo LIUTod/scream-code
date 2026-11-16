@@ -11,13 +11,13 @@ Only use this tool for tasks that require planning implementation steps. For res
 ## Multiple Approaches
 If your plan contains multiple alternative approaches:
 - If you recommend one option, append "(Recommended)" to its label.
-- In yolo and manual modes, the user will see all options alongside Reject and Revise choices.
+- In yolo mode, the user will see all options alongside Reject and Revise choices.
 - Passing a single option is allowed and is equivalent to a plain plan approval (no approach choice is surfaced to the user).
 
 ## Before Using
 - In auto permission mode, do NOT use AskUserQuestion; make the best decision from available context.
 - In auto permission mode, this tool exits plan mode without asking the user.
-- In yolo and manual modes, this tool still presents the plan to the user for approval.
+- In yolo mode, this tool still presents the plan to the user for approval.
 - If auto permission mode is not active and you have unresolved questions, use AskUserQuestion first.
 - If auto permission mode is not active and you have multiple approaches and haven't narrowed down yet, consider using AskUserQuestion first to let the user choose, then write a plan for the chosen approach only.
 - Once your plan is finalized, use THIS tool to request approval.

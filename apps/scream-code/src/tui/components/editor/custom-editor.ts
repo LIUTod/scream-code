@@ -6,6 +6,7 @@ import { Editor, isKeyRelease, matchesKey, Key, visibleWidth, type TUI } from '@
 import type { PermissionMode, ThinkingEffort } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 
+import { permissionModeLabel } from '#/tui/permission-mode-label';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { createEditorTheme } from '#/tui/theme/pi-tui-theme';
 
@@ -246,7 +247,7 @@ export class CustomEditor extends Editor {
    *  When set to skill/mcp, a "First" badge is shown before the think badge. */
   toolPriority: 'default' | 'skill' | 'mcp' | undefined;
   /** Current permission mode — always shown as a badge at the top-left of the input box border. */
-  permissionMode: PermissionMode = 'manual';
+  permissionMode: PermissionMode = 'yolo';
   /** Current border colour hex — kept in sync with borderColor by the host. */
   borderHex = '#79eb00';
 
@@ -611,7 +612,6 @@ const MODE_BADGE_MARK = '✎﹏';
 
 function getPermissionModeColor(mode: PermissionMode, colors: ColorPalette): string {
   const modeColors: Record<PermissionMode, string> = {
-    manual: colors.permissionManual,
     yolo: colors.permissionYolo,
     auto: colors.permissionAuto,
     ask: colors.permissionAsk,
@@ -672,7 +672,7 @@ function injectBorderBadges(lines: string[], width: number, opts: BorderBadgeOpt
   // derived from the badge's real width (label + mark + padding + the two
   // leading border cells), so it stays honest as the text grows: below that
   // the badge would leave no fill at all.
-  const badgeLeft = paint('──') + chalk.hex(opts.modeHex).bold(` ${opts.mode} ${MODE_BADGE_MARK} `);
+  const badgeLeft = paint('──') + chalk.hex(opts.modeHex).bold(` ${permissionModeLabel(opts.mode)} ${MODE_BADGE_MARK} `);
   if (width >= visibleWidth(badgeLeft) + 1) {
     left = badgeLeft;
   }

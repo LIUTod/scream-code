@@ -5,8 +5,20 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ApprovalResponse } from '../../../src/agent/permission/types';
+import type { ApprovalResponse, PermissionPolicyContext } from '../../../src/agent/permission/types';
 import { makePermissionHarness, toolContext } from './fixtures/manager-harness';
+
+/** Sensitive read: the surviving prompt path (ask mode lets Read pass the guard). */
+function readAsk(path: string): PermissionPolicyContext {
+  const context = toolContext('Read', { path });
+  return {
+    ...context,
+    execution: {
+      ...context.execution,
+      accesses: [{ kind: 'file', operation: 'read', path }],
+    },
+  };
+}
 
 function decisionCalls(record: ReturnType<typeof vi.fn>): unknown[] {
   return record.mock.calls
@@ -37,11 +49,12 @@ describe('permission decision records', () => {
 
   it('records a cancelled approval', async () => {
     const { agent, manager } = makePermissionHarness({
+      mode: 'ask',
       handler: () => new Promise<ApprovalResponse>(() => {}),
     });
     const record = agent.records.logRecord as unknown as ReturnType<typeof vi.fn>;
 
-    const pending = manager.beforeToolCall(toolContext('Write', { path: '/workspace/a.ts' }));
+    const pending = manager.beforeToolCall(readAsk('.env'));
     // Settle the rejection now so the assertion below cannot leave it hanging.
     const outcome = pending.then(
       () => 'resolved',
@@ -55,7 +68,7 @@ describe('permission decision records', () => {
 
     expect(decisionCalls(record)).toEqual([
       expect.objectContaining({
-        toolName: 'Write',
+        toolName: 'Read',
         decision: 'cancelled',
         reason: 'Approval request cancelled',
       }),
@@ -67,11 +80,12 @@ describe('permission decision records', () => {
     vi.useFakeTimers();
     try {
       const { agent, manager } = makePermissionHarness({
+        mode: 'ask',
         handler: () => new Promise<ApprovalResponse>(() => {}),
       });
       const record = agent.records.logRecord as unknown as ReturnType<typeof vi.fn>;
 
-      const pending = manager.beforeToolCall(toolContext('Write', { path: '/workspace/a.ts' }));
+      const pending = manager.beforeToolCall(readAsk('.env'));
       const assertion = expect(pending).rejects.toThrow(
         'Approval request timed out after 300000ms. The user is likely away',
       );
@@ -80,7 +94,7 @@ describe('permission decision records', () => {
 
       expect(decisionCalls(record)).toEqual([
         expect.objectContaining({
-          toolName: 'Write',
+          toolName: 'Read',
           decision: 'timeout',
           reason: expect.stringContaining('Approval request timed out after 300000ms.'),
         }),
@@ -91,16 +105,16 @@ describe('permission decision records', () => {
   });
 
   it('records a cancelled approval when no handler is available', async () => {
-    const { agent, manager } = makePermissionHarness();
+    const { agent, manager } = makePermissionHarness({ mode: 'ask' });
     const record = agent.records.logRecord as unknown as ReturnType<typeof vi.fn>;
     delete (agent.rpc as { requestApproval?: unknown }).requestApproval;
 
-    await expect(manager.beforeToolCall(toolContext('Write', { path: '/workspace/a.ts' })))
+    await expect(manager.beforeToolCall(readAsk('.env')))
       .resolves.toMatchObject({ block: true });
 
     expect(decisionCalls(record)).toEqual([
       expect.objectContaining({
-        toolName: 'Write',
+        toolName: 'Read',
         decision: 'cancelled',
         reason: 'Approval handler is unavailable.',
       }),
@@ -111,7 +125,7 @@ describe('permission decision records', () => {
     const { agent, manager } = makePermissionHarness();
     const record = agent.records.logRecord as unknown as ReturnType<typeof vi.fn>;
 
-    await manager.beforeToolCall(toolContext('Write', { path: '/workspace/a.ts' }));
+    await manager.beforeToolCall(readAsk('.env'));
 
     expect(decisionCalls(record)).toEqual([]);
   });

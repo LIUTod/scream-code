@@ -6,7 +6,7 @@ Scream 可以给自己写插件：遇到技能和 MCP 都覆盖不了的需求�
 
 ## 快速开始
 
-**先征得同意**：动手写之前用 `AskUserQuestion` 问一句（"要不要我做一个插件来完成这个？"）。审批弹窗在 auto/yolo 下不会出现，所以 yolo 里问句是唯一还会出现的同意步骤（与 `/make-skill` 的确认方式一致）。auto 模式连问句也被禁（`AutoModeAskUserQuestionDenyPermissionPolicy`），因此自产插件属于交互模式的用法，无人值守场景请显式 `install`。manual 模式下 `register_generated` 仍会单独弹一次审批。
+**先征得同意**：动手写之前用 `AskUserQuestion` 问一句（"要不要我做一个插件来完成这个？"）。审批弹窗在 auto/yolo 下不会出现，所以 yolo 里问句是唯一还会出现的同意步骤（与 `/make-skill` 的确认方式一致）。auto 模式连问句也被禁（`AutoModeAskUserQuestionDenyPermissionPolicy`），因此自产插件属于交互模式的用法，无人值守场景请显式 `install`。bot 模式下 `register_generated` 会被拒绝（bot 不会询问，决定只记入审计）；ask 模式下该调用仍会弹出一次审批（它不经 ask 模式的只读拦截），随后的写入才会被拒绝。
 
 目录约定 `<scream home>/plugins/generated/<id>/`（`<scream home>` 默认 `~/.scream-code`）。放在别处的目录也能注册，但任何目录都不会被自动扫描——注册必须显式发生。
 

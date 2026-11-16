@@ -22,9 +22,20 @@ export * from './types';
 /** Default timeout for user approval requests (ms). */
 const APPROVAL_TIMEOUT_MS = 300_000;
 
+/**
+ * Coerce a mode coming from replay or an older client onto a live posture.
+ * `manual` was removed; anything unrecognized lands on the `yolo` default
+ * rather than throwing mid-replay.
+ */
+function normalizePermissionMode(value: unknown): PermissionMode {
+  return value === 'auto' || value === 'ask' || value === 'bot' ? value : 'yolo';
+}
+
 export interface PermissionManagerOptions {
   readonly initialRules?: readonly PermissionRule[];
   readonly parent?: PermissionManager;
+  /** Initial mode; same as calling `setMode` right after construction. */
+  readonly mode?: PermissionMode;
 }
 
 interface PendingApproval {
@@ -91,7 +102,26 @@ export class PermissionManager {
   ) {
     this.rules = [...(options.initialRules ?? [])];
     this.parent = options.parent;
+    this.modeOverride = options.mode;
     this.policies = createPermissionDecisionPolicies(this.agent);
+    this.warnAskRulesThatCannotPrompt();
+  }
+
+  /**
+   * `ask` rules only prompt in `ask` mode, and only for tools the read-only
+   * guard lets through. In `yolo` / `auto` they sit below the blanket approve
+   * policies and in `bot` the mode policy decides first, so an inert rule must
+   * not look like protection: say so once, at load, without rejecting config.
+   */
+  private warnAskRulesThatCannotPrompt(): void {
+    if (this.mode === 'ask') return;
+    const askRules = this.rules.filter((rule) => rule.decision === 'ask');
+    if (askRules.length === 0) return;
+    process.stderr.write(
+      `[permission] ${askRules.length} rule(s) with decision "ask" only prompt in ask mode ` +
+        `(current mode: ${this.mode}); they never prompt in yolo/auto/bot. ` +
+        `Patterns: ${askRules.map((rule) => rule.pattern).join(', ')}\n`,
+    );
   }
 
   /** List all currently pending approval requests. */
@@ -138,11 +168,11 @@ export class PermissionManager {
   }
 
   get mode(): PermissionMode {
-    return this.modeOverride ?? this.parent?.mode ?? 'manual';
+    return this.modeOverride ?? this.parent?.mode ?? 'yolo';
   }
 
   set mode(mode: PermissionMode) {
-    this.modeOverride = mode;
+    this.modeOverride = normalizePermissionMode(mode);
   }
 
   data(): PermissionData {
@@ -153,15 +183,19 @@ export class PermissionManager {
   }
 
   setMode(mode: PermissionMode): void {
+    // This is the single write path for RPC and for record replay. A session
+    // persisted by an older build can still replay `manual` (or any value that
+    // no longer exists); land on `yolo` instead of failing the session.
+    const normalized = normalizePermissionMode(mode);
     this.agent.records.logRecord({
       type: 'permission.set_mode',
-      mode,
+      mode: normalized,
     });
     this.agent.replayBuilder.push({
       type: 'permission_updated',
-      mode,
+      mode: normalized,
     });
-    this.modeOverride = mode;
+    this.modeOverride = normalized;
     this.agent.emitStatusUpdated();
   }
 

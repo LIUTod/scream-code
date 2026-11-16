@@ -27,7 +27,7 @@ const ASK_MODE_EXIT_REMINDER = [
 const BOT_MODE_ENTER_REMINDER = [
   'Bot permission mode is active — unattended execution.',
   '  - Reversible work (reads, in-workspace edits, read-only commands) runs without approval.',
-  '  - Irreversible actions (push, publish, delete, sensitive files, unclassified operations) are denied automatically and queued for the user to review; the denial reason is returned to you.',
+  '  - Irreversible actions (push, publish, delete, sensitive files, unclassified operations) are denied automatically — bot never asks, so nothing is queued or reviewed interactively; the denial reason is returned to you.',
   '  - Do not retry a denied call unchanged. Continue with what is allowed and report what needs the user.',
 ].join('\n');
 
@@ -42,11 +42,6 @@ const YOLO_MODE_ENTER_REMINDER = [
 
 const YOLO_MODE_EXIT_REMINDER = [
   'Yolo permission mode is no longer active. Approvals follow the current mode again.',
-].join('\n');
-
-const MANUAL_MODE_ENTER_REMINDER = [
-  'Manual permission mode is active — tool calls that need approval will ask the user.',
-  '  - Expect waits on approval; state intent before long or destructive operations.',
 ].join('\n');
 
 export class PermissionModeInjector extends DynamicInjector {
@@ -91,10 +86,9 @@ export class PermissionModeInjector extends DynamicInjector {
     if (previousMode === 'ask') parts.push(ASK_MODE_EXIT_REMINDER);
     if (mode === 'bot') parts.push(BOT_MODE_ENTER_REMINDER);
     if (previousMode === 'bot') parts.push(BOT_MODE_EXIT_REMINDER);
-    if (mode === 'yolo') parts.push(YOLO_MODE_ENTER_REMINDER);
+    // Yolo is the default at session start, so only announce a return to it.
+    if (mode === 'yolo' && previousMode !== undefined) parts.push(YOLO_MODE_ENTER_REMINDER);
     if (previousMode === 'yolo') parts.push(YOLO_MODE_EXIT_REMINDER);
-    // Manual is the default at session start, so only announce a return to it.
-    if (mode === 'manual' && previousMode !== undefined) parts.push(MANUAL_MODE_ENTER_REMINDER);
     return parts.length > 0 ? parts.join('\n\n') : undefined;
   }
 }

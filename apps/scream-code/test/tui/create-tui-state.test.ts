@@ -10,7 +10,7 @@ function fakeInitialAppState(): AppState {
     detachedModel: null,
     workDir: '/tmp/scream-test',
     sessionId: 'sess-1',
-    permissionMode: 'manual',
+    permissionMode: 'yolo',
     planMode: 'off',
     thinkingLevel: 'off',
     contextUsage: 0,

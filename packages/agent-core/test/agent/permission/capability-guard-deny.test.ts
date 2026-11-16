@@ -157,6 +157,9 @@ function makeManager(options: FakeAgentOptions): {
   } as unknown as Agent;
   const manager = new PermissionManager(agent);
   Object.assign(agent, { permission: manager });
+  // ask mode is the surviving posture where a non-catalog read tool (LSP) still
+  // reaches the approval handler.
+  manager.mode = 'ask';
   return { manager, requestApproval };
 }
 

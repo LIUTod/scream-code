@@ -14,13 +14,15 @@ export type PermissionRuleScope = 'turn-override' | 'session-runtime' | 'project
  * are treated when the closure is constructed. Independent of rule
  * merging: deny rules always fire regardless of mode.
  *
- *   - `manual` — rule set drives decision; unmatched tool calls ask
- *   - `yolo`   — only deny rules can block; everything else allows
+ *   - `yolo`   — only deny rules can block; everything else allows.
+ *     The default posture when no mode is selected.
  *   - `auto`   — caller may bypass rule checks entirely
  *   - `ask`    — read-only Q&A: mutating tools (incl. Bash and MCP) are
  *     denied; only read/search/dialogue tools may run
+ *   - `bot`    — unattended: reversible allowlist auto-approves; everything
+ *     else is denied and parked for the user
  */
-export type PermissionMode = 'manual' | 'yolo' | 'auto' | 'ask' | 'bot';
+export type PermissionMode = 'yolo' | 'auto' | 'ask' | 'bot';
 
 /**
  * A single permission rule. `pattern` is the DSL form (`Read(/etc/**)`,

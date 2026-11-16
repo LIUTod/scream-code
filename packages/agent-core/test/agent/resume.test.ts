@@ -21,6 +21,18 @@ const MOCK_PROVIDER = {
 } as const;
 
 describe('Agent resume', () => {
+  it('normalizes a persisted manual mode to yolo while replaying', async () => {
+    const persistence = new RecordingAgentPersistence([
+      // A session saved by an older build: `manual` no longer exists.
+      { type: 'permission.set_mode', mode: 'manual' as never },
+    ] as unknown as readonly AgentRecord[]);
+    const ctx = testAgent({ persistence });
+
+    await ctx.agent.resume();
+
+    expect(ctx.agent.permission.mode).toBe('yolo');
+  });
+
   it('replays persisted records without restarting turns, compactions, plan turns, or tools', async () => {
     const persistence = new RecordingAgentPersistence(resumeHistory());
     const execWithEnv = vi.fn().mockRejectedValue(new Error('Bash should not execute on resume'));
@@ -60,7 +72,6 @@ describe('Agent resume', () => {
           assistant: text "Historical compacted summary."
           user: text "Fresh prompt after resume"
           user: text <plan-mode-reminder>
-          user: text "<system-reminder>\\nYolo permission mode is active — every tool call is approved automatically, including irreversible ones.\\n  - Nothing will stop you, so verify destructive operations yourself before running them.\\n</system-reminder>"
     `);
   });
 

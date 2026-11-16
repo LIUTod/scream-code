@@ -52,6 +52,13 @@ export interface CreateSessionPayload {
   readonly model?: string | undefined;
   readonly thinking?: string | undefined;
   readonly permission?: PermissionMode | undefined;
+  /**
+   * Tool-name patterns injected as project-scope DENY rules on the main agent
+   * (the scope `UserConfiguredDenyPermissionPolicy` consults). The session host
+   * uses this for CLI-compat deny lists: deny rules fire in every permission
+   * mode, unlike the approval handler, which no longer sees tool calls.
+   */
+  readonly permissionDenyRules?: readonly string[] | undefined;
   readonly metadata?: JsonObject | undefined;
   /** Session-scoped agent profile (name / system prompt / tool subset). Omitted ⇒ default agent profile. */
   readonly profile?: SessionAgentProfile | undefined;
@@ -72,6 +79,12 @@ export interface DeleteSessionPayload {
 
 export interface ResumeSessionPayload {
   readonly sessionId: string;
+  /**
+   * Tool-name patterns to inject as project-scope DENY rules when the session
+   * is restored. A resumed session is rebuilt from scratch, so a host that
+   * enforces a CLI-compat deny list must send it again on every resume.
+   */
+  readonly permissionDenyRules?: readonly string[] | undefined;
 }
 
 export interface ForkSessionPayload {

@@ -6,6 +6,7 @@ import {
   extractUserText,
   installStdoutEpipeGuard,
   mapStreamJsonMode,
+  parseDisallowedToolNames,
 } from '../../src/cli/run-stream-json';
 
 describe('stream-json runtime system prompt', () => {
@@ -60,12 +61,52 @@ interface Event {
   [key: string]: unknown;
 }
 
+describe('parseDisallowedToolNames', () => {
+  const noWarn = () => {};
+
+  it('splits, trims and drops blanks', () => {
+    expect(parseDisallowedToolNames(' Bash , Write,,Edit ', noWarn)).toEqual([
+      'Bash',
+      'Write',
+      'Edit',
+    ]);
+  });
+
+  it('translates the Claude command-family shorthand', () => {
+    // `cmd:*` -> `cmd *`; a plain tool name is already a valid rule.
+    expect(parseDisallowedToolNames('Bash(git:*)', noWarn)).toEqual(['Bash(git *)']);
+    expect(parseDisallowedToolNames('Bash(git push:*)', noWarn)).toEqual(['Bash(git push *)']);
+    expect(parseDisallowedToolNames('Bash', noWarn)).toEqual(['Bash']);
+    // Argument globs that already use the DSL pass through untouched.
+    expect(parseDisallowedToolNames('Read(/secrets/*)', noWarn)).toEqual(['Read(/secrets/*)']);
+  });
+
+  it('warns about and drops entries that could never match', () => {
+    const warned: string[] = [];
+
+    const parsed = parseDisallowedToolNames('Bash, NotATool(, Edit(x:*)', (message) =>
+      warned.push(message),
+    );
+
+    // Unbalanced parens and a command family on a non-command tool.
+    expect(parsed).toEqual(['Bash']);
+    expect(warned).toHaveLength(2);
+    expect(warned[0]).toContain('NotATool(');
+    expect(warned[1]).toContain('Edit(x:*)');
+  });
+
+  it('returns undefined for an absent or blank list', () => {
+    expect(parseDisallowedToolNames(undefined, noWarn)).toBeUndefined();
+    expect(parseDisallowedToolNames('   ', noWarn)).toBeUndefined();
+  });
+});
+
 describe('mapStreamJsonMode', () => {
   it.each([
-    ['default', 'manual', false],
-    ['acceptEdits', 'manual', false],
-    ['dontAsk', 'manual', false],
-    ['plan', 'manual', true],
+    ['default', 'auto', false],
+    ['acceptEdits', 'auto', false],
+    ['dontAsk', 'bot', false],
+    ['plan', 'yolo', true],
     ['auto', 'auto', false],
     ['bypassPermissions', 'yolo', false],
     ['yolo', 'yolo', false],

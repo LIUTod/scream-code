@@ -10,7 +10,7 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
     model: 'scream-s3',
     workDir: '/tmp',
     sessionId: 'sess_1',
-    permissionMode: 'manual',
+    permissionMode: 'yolo',
     planMode: 'off',
     thinkingLevel: 'off',
     contextUsage: 0,

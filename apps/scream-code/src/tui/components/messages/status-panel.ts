@@ -9,6 +9,8 @@ import chalk from 'chalk';
 
 import { PRODUCT_NAME } from '#/constant/app';
 import { t } from '@scream-code/config';
+
+import { permissionModeLabel } from '#/tui/permission-mode-label';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { PlanModeState } from '#/tui/types';
 import {
@@ -96,7 +98,7 @@ export function buildStatusReportLines(options: StatusReportOptions): string[] {
   const errorStyle = chalk.hex(colors.error);
   const severityHex = (sev: 'ok' | 'warn' | 'danger'): string =>
     sev === 'danger' ? colors.error : sev === 'warn' ? colors.warning : colors.success;
-  const permission = options.status?.permission ?? options.permissionMode;
+  const permission = permissionModeLabel(options.status?.permission ?? options.permissionMode);
   const planMode: PlanModeState =
     options.planMode !== 'off'
       ? options.planMode

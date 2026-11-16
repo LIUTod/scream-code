@@ -62,6 +62,12 @@ export interface SessionOptions {
   readonly background?: BackgroundConfig | undefined;
   readonly hooks?: readonly HookDef[];
   readonly permissionRules?: readonly PermissionRule[];
+  /**
+   * Tool-name patterns the session host wants denied for this whole session
+   * (CLI-compat `--disallowedTools`). Injected as session-scope deny rules on
+   * the main agent, so they fire in every permission mode.
+   */
+  readonly sessionDenyPatterns?: readonly string[] | undefined;
   readonly skills?: SessionSkillConfig;
   readonly mcpConfig?: SessionMcpConfig;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
@@ -74,6 +80,24 @@ export interface SessionOptions {
   readonly modelTierBindings?: (() => ModelTierBindings) | undefined;
   /** Process supervisor tracking this session's LSP children (shared core-wide). */
   readonly lspSupervisor?: LspProcessSupervisor | undefined;
+}
+
+/**
+ * Map session-host tool names onto deny rules. Deny rules outrank every
+ * permission mode, which is what makes them usable for CLI-compat deny lists
+ * now that no mode routes an unmatched call to an approval prompt.
+ *
+ * `project` is the scope the deny policy actually consults (a `session`-scoped
+ * rule is invisible to it), and it lives as long as the session's config view.
+ */
+function sessionDenyRules(patterns: readonly string[] | undefined): PermissionRule[] {
+  if (patterns === undefined || patterns.length === 0) return [];
+  return patterns.map((pattern) => ({
+    decision: 'deny' as const,
+    scope: 'project' as const,
+    pattern,
+    reason: 'denied by the session host',
+  }));
 }
 
 export interface SessionSkillConfig {  readonly userHomeDir?: string;
@@ -1027,7 +1051,10 @@ export class Session {
     if (parentAgentId === null) {
       return {
         ...input,
-        initialRules: input?.initialRules ?? this.options.permissionRules,
+        initialRules: [
+          ...(input?.initialRules ?? this.options.permissionRules ?? []),
+          ...sessionDenyRules(this.options.sessionDenyPatterns),
+        ],
       };
     }
     return {

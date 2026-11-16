@@ -21,9 +21,9 @@ describe('ChoicePickerComponent', () => {
       title: 'Select permission mode',
       options: [
         {
-          value: 'manual',
-          label: 'Manual',
-          description: 'Ask before commands, edits, and other risky actions.',
+          value: 'ask',
+          label: 'ASK',
+          description: 'Answer in conversation without modifying anything.',
         },
         {
           value: 'auto',
@@ -31,7 +31,7 @@ describe('ChoicePickerComponent', () => {
           description: 'Automatically approve tool actions and plan transitions.',
         },
       ],
-      currentValue: 'manual',
+      currentValue: 'ask',
       colors: darkColors,
       onSelect: vi.fn(),
       onCancel: vi.fn(),
@@ -39,8 +39,8 @@ describe('ChoicePickerComponent', () => {
 
     const out = picker.render(120).map(strip);
 
-    expect(out).toContain('  ❯ Manual ← current');
-    expect(out).toContain('    Ask before commands, edits, and other risky actions.');
+    expect(out).toContain('  ❯ ASK ← current');
+    expect(out).toContain('    Answer in conversation without modifying anything.');
     expect(out).toContain('    Automatically approve tool actions and plan transitions.');
   });
 
@@ -90,12 +90,12 @@ describe('ChoicePickerComponent', () => {
     expect(theme.render(120).map(strip)).toContain('  ❯ 浅色 ← current');
 
     const permission = new PermissionSelectorComponent({
-      currentValue: 'manual',
+      currentValue: 'yolo',
       colors: darkColors,
       onSelect,
       onCancel,
     });
-    expect(permission.render(120).map(strip)).toContain('  ❯ 手动 ← current');
+    expect(permission.render(120).map(strip)).toContain('  ❯ YES ← current');
 
     const settings = new SettingsSelectorComponent({
       colors: darkColors,
@@ -105,6 +105,23 @@ describe('ChoicePickerComponent', () => {
     const settingsOutput = settings.render(120).map(strip);
     expect(settingsOutput).toContain('  ❯ 模型');
     expect(settingsOutput).toContain('    切换当前模型和思考模式。');
+  });
+
+  it('lists exactly the four surviving permission modes', () => {
+    const picker = new PermissionSelectorComponent({
+      currentValue: 'yolo',
+      colors: darkColors,
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    const out = picker.render(120).map(strip);
+
+    for (const label of ['自动', 'YES', 'BOT', 'ASK']) {
+      expect(out.some((line) => line.includes(label))).toBe(true);
+    }
+    // The removed posture must not come back as a row or a label.
+    expect(out.some((line) => line.includes('手动'))).toBe(false);
   });
 
   it('submits the selected model and inline thinking state', () => {

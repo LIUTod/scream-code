@@ -1,23 +1,37 @@
 import { describe, expect, it } from 'vitest';
 
 import { PermissionManager } from '../../../src/agent/permission';
+import { WarningsAskPermissionPolicy } from '../../../src/agent/permission/policies/warnings-ask';
 import { bashContext, grantBashForSession, makePermissionHarness } from './fixtures/manager-harness';
 
 describe('revokeSessionGrant', () => {
-  it('drops the memorized pattern so the next call asks again', async () => {
-    const { manager, requestApproval } = makePermissionHarness();
-    grantBashForSession(manager);
+  it('drops the memorized pattern so the next call asks again', () => {
+    const { agent, manager } = makePermissionHarness();
+    manager.recordApprovalResult({
+      turnId: 0,
+      toolCallId: 'call_danger_1',
+      toolName: 'Bash',
+      action: 'run command',
+      sessionApprovalRule: 'Bash(rm -rf /tmp/cache)',
+      result: {
+        decision: 'approved',
+        scope: 'session',
+        selectedLabel: 'Approve for this session',
+      },
+    });
+    // The dangerous-command warning honors the exact-command grant, so it is
+    // the surviving probe for "is this pattern silenced?".
+    const policy = () =>
+      new WarningsAskPermissionPolicy(agent).evaluate(bashContext('rm -rf /tmp/cache'));
 
-    // The grant is live: the same call sails through without a prompt.
-    await expect(manager.beforeToolCall(bashContext('printf ok'))).resolves.toBeUndefined();
-    expect(requestApproval).not.toHaveBeenCalled();
+    // The grant is live: the call sails through without a prompt.
+    expect(policy()).toBeUndefined();
 
-    expect(manager.revokeSessionGrant('Bash')).toBe(true);
+    expect(manager.revokeSessionGrant('Bash(rm -rf /tmp/cache)')).toBe(true);
     expect(manager.sessionApprovalRulePatterns).toEqual([]);
 
-    // Revoked: the same call now falls through to the approval prompt.
-    await manager.beforeToolCall(bashContext('printf ok'));
-    expect(requestApproval).toHaveBeenCalledTimes(1);
+    // Revoked: the call falls through to the approval prompt again.
+    expect(policy()).toMatchObject({ kind: 'ask' });
   });
 
   it('returns false for a pattern that was never granted', () => {

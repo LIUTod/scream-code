@@ -122,11 +122,8 @@ export interface ScreamTUIStartupInput {
 }
 
 function createInitialAppState(input: ScreamTUIStartupInput): AppState {
-  const startupPermission: PermissionMode = input.cliOptions.auto
-    ? 'auto'
-    : input.cliOptions.yolo
-      ? 'yolo'
-      : 'manual';
+  // `--yes`/`--yolo` is the default; only `--auto` needs to branch here.
+  const startupPermission: PermissionMode = input.cliOptions.auto ? 'auto' : 'yolo';
   setLocale(input.tuiConfig.language);
   return {
     model: '',
@@ -791,6 +788,15 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   setAppState(patch: Partial<AppState>): void {
+    // A session restored from an older store can still carry the removed
+    // `manual` mode; normalize it here so no consumer ever sees it.
+    if ('permissionMode' in patch) {
+      const restored = patch.permissionMode as PermissionMode | 'manual' | undefined;
+      patch = {
+        ...patch,
+        permissionMode: restored === undefined || restored === 'manual' ? 'yolo' : restored,
+      };
+    }
     // Auto-stamp streamingStartTime whenever streamingPhase transitions.
     // Callers no longer need to pair streamingPhase with a manual timestamp.
     // Guard against undefined: a caller could legally pass
@@ -851,7 +857,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       this.state.editor.toolPriority = patch.like?.toolPriority;
     }
     if ('permissionMode' in patch) {
-      this.state.editor.permissionMode = patch.permissionMode ?? 'manual';
+      this.state.editor.permissionMode = patch.permissionMode ?? 'yolo';
     }
     // Stop the welcome breathing animation once the first message is sent —
     // the panel scrolls off-screen but the 40 ms timer keeps firing

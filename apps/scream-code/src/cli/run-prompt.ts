@@ -208,9 +208,13 @@ async function resolvePromptSession(
 
 async function forcePromptPermission(
   session: Session,
-  previousPermission: SessionStatus['permission'],
+  restoredPermission: SessionStatus['permission'],
   setRestorePermission: (restorePermission: () => Promise<void>) => void,
 ): Promise<() => Promise<void>> {
+  // A session saved by an older build can still carry the removed `manual`
+  // mode; restore into `yolo` instead of a posture the engine no longer has.
+  const previousPermission: SessionStatus['permission'] =
+    (restoredPermission as string) === 'manual' ? 'yolo' : restoredPermission;
   let overridePermission: Promise<void> | undefined;
   const restorePermission = async () => {
     await overridePermission?.catch(() => {});

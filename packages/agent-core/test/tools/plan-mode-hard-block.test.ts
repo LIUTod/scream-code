@@ -49,7 +49,7 @@ function hookContext(toolName: string, args: unknown): ToolExecutionHookContext 
 function policyContext(
   toolName: string,
   args: unknown,
-  _mode: PermissionMode = 'manual',
+  _mode: PermissionMode = 'yolo',
   accesses = toolAccesses(toolName, args),
 ): PermissionPolicyContext {
   return {
@@ -66,7 +66,7 @@ function evaluatePlanPolicy(
   agent: Agent,
   toolName: string,
   args: unknown,
-  mode: PermissionMode = 'manual',
+  mode: PermissionMode = 'yolo',
 ) {
   return new PlanModeGuardDenyPermissionPolicy(agent).evaluate(policyContext(toolName, args, mode));
 }
@@ -144,13 +144,13 @@ describe('Plan mode permission policy', () => {
     const { agent } = await activePlanAgent();
 
     const write = new PlanModeGuardDenyPermissionPolicy(agent).evaluate(
-      policyContext('Write', { content: 'x' }, 'manual', ToolAccesses.none()),
+      policyContext('Write', { content: 'x' }, 'yolo', ToolAccesses.none()),
     );
     const edit = new PlanModeGuardDenyPermissionPolicy(agent).evaluate(
       policyContext(
         'Edit',
         { old_string: 'A', new_string: 'B' },
-        'manual',
+        'yolo',
         ToolAccesses.none(),
       ),
     );
@@ -168,7 +168,7 @@ describe('Plan mode permission policy', () => {
       policyContext(
         'Write',
         { path: planPath, content: 'x' },
-        'manual',
+        'yolo',
         [
           { kind: 'file', operation: 'write', path: planPath },
           { kind: 'file', operation: 'readwrite', path: planPath },
@@ -188,7 +188,7 @@ describe('Plan mode permission policy', () => {
       policyContext(
         'Edit',
         { path: planPath, old_string: 'A', new_string: 'B' },
-        'manual',
+        'yolo',
         [
           { kind: 'file', operation: 'readwrite', path: planPath },
           { kind: 'file', operation: 'write', path: '/workspace/src/main.ts' },
@@ -207,7 +207,7 @@ describe('Plan mode permission policy', () => {
     expect(evaluatePlanPolicy(agent, 'Grep', { pattern: 'TODO', path: '/workspace' })).toBeUndefined();
   });
 
-  it.each(['manual', 'yolo', 'auto'] as const)(
+  it.each(['yolo', 'auto'] as const)(
     'defers Bash to ordinary %s permission handling while plan mode is active',
     async (mode) => {
       const { agent } = await activePlanAgent();
@@ -217,7 +217,7 @@ describe('Plan mode permission policy', () => {
     },
   );
 
-  it.each(['manual', 'yolo', 'auto'] as const)(
+  it.each(['yolo', 'auto'] as const)(
     'blocks TaskStop while plan mode is active in %s mode',
     async (mode) => {
       const { agent } = await activePlanAgent();

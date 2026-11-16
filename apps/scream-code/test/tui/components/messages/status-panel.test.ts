@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { permissionModeLabel } from '#/tui/permission-mode-label';
+
 import { buildStatusReportLines } from '#/tui/components/messages/status-panel';
 import { darkColors } from '#/tui/theme/colors';
 
@@ -17,7 +19,7 @@ describe('status panel report lines', () => {
       sessionId: 'ses-1',
       sessionTitle: 'Implement status',
       thinkingLevel: 'high',
-      permissionMode: 'manual',
+      permissionMode: 'yolo',
       planMode: 'plan',
       contextUsage: 0.25,
       contextTokens: 2500,
@@ -58,7 +60,9 @@ describe('status panel report lines', () => {
     expect(output).toContain('>_ Scream Code (v1.2.3)');
     expect(output).toMatch(/模型名称\s+Scream K2 \(thinking on\)/);
     expect(output).toMatch(/工作目录\s+\/tmp\/project/);
-    expect(output).toMatch(/权限模式\s+auto/);
+    // The panel prints the mode's label, not its raw id.
+    expect(output).toContain(`权限模式`);
+    expect(output).toContain(permissionModeLabel('auto'));
     expect(output).toMatch(/计划模式\s+plan/);
     expect(output).toMatch(/会话编号\s+ses-1/);
     expect(output).toMatch(/会话标题\s+Implement status/);
@@ -80,7 +84,7 @@ describe('status panel report lines', () => {
       sessionId: 'ses-1',
       sessionTitle: null,
       thinkingLevel: 'off',
-      permissionMode: 'manual',
+      permissionMode: 'yolo',
       planMode: 'off',
       contextUsage: 0,
       contextTokens: 0,
@@ -112,7 +116,7 @@ describe('status panel report lines', () => {
       sessionId: '',
       sessionTitle: null,
       thinkingLevel: 'off',
-      permissionMode: 'manual',
+      permissionMode: 'yolo',
       planMode: 'off',
       contextUsage: 0,
       contextTokens: 0,

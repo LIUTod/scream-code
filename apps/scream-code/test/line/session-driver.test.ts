@@ -9,8 +9,8 @@ describe('permission mapping (reuse of run-stream-json mapStreamJsonMode)', () =
     expect(mapStreamJsonMode('bypassPermissions')).toEqual({ permission: 'yolo', planMode: false });
   });
 
-  it('maps dontAsk to manual (the approval handler does the denying)', () => {
-    expect(mapStreamJsonMode('dontAsk')).toEqual({ permission: 'manual', planMode: false });
+  it('maps dontAsk to bot (irreversible calls deny and park)', () => {
+    expect(mapStreamJsonMode('dontAsk')).toEqual({ permission: 'bot', planMode: false });
   });
 
   it('maps auto to permission auto (channel parity)', () => {
@@ -22,8 +22,8 @@ describe('permission mapping (reuse of run-stream-json mapStreamJsonMode)', () =
     expect(mapStreamJsonMode('nonsense')).toEqual({ permission: 'auto', planMode: false });
   });
 
-  it('maps plan to plan mode', () => {
-    expect(mapStreamJsonMode('plan')).toEqual({ permission: 'manual', planMode: true });
+  it('maps plan to plan mode under yolo so the review still reaches the handler', () => {
+    expect(mapStreamJsonMode('plan')).toEqual({ permission: 'yolo', planMode: true });
   });
 });
 

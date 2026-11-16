@@ -9,13 +9,26 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ApprovalResponse } from '../../../src/agent/permission/types';
+import type { ApprovalResponse, PermissionPolicyContext } from '../../../src/agent/permission/types';
 
-import { bashContext, makePermissionHarness } from './fixtures/manager-harness';
+import { makePermissionHarness, toolContext } from './fixtures/manager-harness';
 
 const APPROVAL_TIMEOUT_MS = 300_000;
 
 describe('approval timeout stop-loss', () => {
+  // A sensitive read is the surviving prompt path: ask mode lets Read through
+  // the read-only guard and the sensitive-file ask raises the approval.
+  function readAsk(path: string): PermissionPolicyContext {
+    const context = toolContext('Read', { path });
+    return {
+      ...context,
+      execution: {
+        ...context.execution,
+        accesses: [{ kind: 'file', operation: 'read', path }],
+      },
+    };
+  }
+
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -23,10 +36,11 @@ describe('approval timeout stop-loss', () => {
   it('tells the model the user is away when an approval times out', async () => {
     vi.useFakeTimers();
     const { manager, requestApproval } = makePermissionHarness({
+      mode: 'ask',
       handler: () => new Promise(() => {}),
     });
 
-    const pending = manager.beforeToolCall(bashContext('sudo rm -rf /'));
+    const pending = manager.beforeToolCall(readAsk('.env'));
     const rejection = expect(pending).rejects.toThrow(/The user is likely away/);
     await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS);
     await rejection;
@@ -37,15 +51,16 @@ describe('approval timeout stop-loss', () => {
   it('denies a second request for the same tool in the same turn without asking again', async () => {
     vi.useFakeTimers();
     const { manager, requestApproval } = makePermissionHarness({
+      mode: 'ask',
       handler: () => new Promise(() => {}),
     });
 
-    const first = manager.beforeToolCall(bashContext('sudo rm -rf /tmp/a', 'call_bash_a'));
+    const first = manager.beforeToolCall(readAsk('.env'));
     const rejection = expect(first).rejects.toThrow(/The user is likely away/);
     await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS);
     await rejection;
 
-    const second = await manager.beforeToolCall(bashContext('sudo rm -rf /tmp/b', 'call_bash_b'));
+    const second = await manager.beforeToolCall(readAsk('.env.local'));
 
     expect(second).toMatchObject({ block: true });
     expect((second as { reason: string }).reason).toContain('already timed out earlier in this turn');
@@ -56,6 +71,7 @@ describe('approval timeout stop-loss', () => {
     vi.useFakeTimers();
     let calls = 0;
     const { manager, requestApproval } = makePermissionHarness({
+      mode: 'ask',
       handler: async (): Promise<ApprovalResponse> => {
         calls += 1;
         if (calls === 1) return new Promise<ApprovalResponse>(() => {});
@@ -63,13 +79,13 @@ describe('approval timeout stop-loss', () => {
       },
     });
 
-    const turnZero = bashContext('sudo rm -rf /tmp/a', 'call_bash_a');
+    const turnZero = readAsk('.env');
     const first = manager.beforeToolCall(turnZero);
     const rejection = expect(first).rejects.toThrow(/The user is likely away/);
     await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS);
     await rejection;
 
-    const turnOne = { ...bashContext('sudo rm -rf /tmp/b', 'call_bash_b'), turnId: '1' };
+    const turnOne = { ...readAsk('.env.local'), turnId: '1' };
     await expect(manager.beforeToolCall(turnOne)).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledTimes(2);

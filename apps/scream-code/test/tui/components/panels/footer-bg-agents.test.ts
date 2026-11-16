@@ -14,7 +14,7 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
     model: 'k2',
     workDir: '/tmp/proj',
     sessionId: 'sess_1',
-    permissionMode: 'manual',
+    permissionMode: 'yolo',
     planMode: 'off',
     thinking: false,
     contextUsage: 0,

@@ -2,12 +2,13 @@ import {
   ErrorCodes,
   ScreamError,
   type AgentContextData,
+  type PluginExtensionSummary,
   type RegisterToolPayload,
   type ScreamErrorCode,
 } from '@scream-code/agent-core';
 import { type ApprovalHandler, type Event, type QuestionHandler } from '#/events';
-import type { PluginExtensionSummary } from '@scream-code/agent-core';
 import type { CreateCronTaskRpcInput, SDKRpcClient } from '#/rpc';
+import { normalizePermissionMode } from '#/permission-mode';
 import type {
   BackgroundTaskInfo,
   CompactOptions,
@@ -185,13 +186,16 @@ export class Session {
 
   async setPermission(mode: PermissionMode): Promise<void> {
     this.ensureOpen();
-    if (!isPermissionMode(mode)) {
+    // Legacy callers may still pass the removed `manual` mode; it normalizes to
+    // `yolo` (the current default) instead of failing their upgrades.
+    const normalized = normalizePermissionMode(mode);
+    if (normalized === undefined) {
       throw new ScreamError(
         ErrorCodes.SESSION_PERMISSION_MODE_INVALID,
-        'Session permission mode must be yolo, manual, auto, ask, or bot',
+        'Session permission mode must be yolo, auto, ask, or bot',
       );
     }
-    await this.rpc.setPermission({ sessionId: this.id, mode });
+    await this.rpc.setPermission({ sessionId: this.id, mode: normalized });
   }
 
   async setPlanMode(enabled: boolean, strategy?: 'normal' | 'fusion'): Promise<void> {
@@ -745,12 +749,6 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   if (value === undefined) return undefined;
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : undefined;
-}
-
-function isPermissionMode(value: unknown): value is PermissionMode {
-  return (
-    value === 'yolo' || value === 'manual' || value === 'auto' || value === 'ask' || value === 'bot'
-  );
 }
 
 function resumeStateFromSummary(

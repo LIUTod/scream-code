@@ -57,15 +57,19 @@ function makeManager(options: FakeAgentOptions = {}): {
   } as unknown as Agent;
   const manager = new PermissionManager(agent);
   Object.assign(agent, { permission: manager });
+  // ask mode is the surviving posture where a read can still raise an approval.
+  manager.mode = 'ask';
   return { manager, requestApproval };
 }
 
-function bashContext(): PermissionPolicyContext {
-  const args = { command: 'printf approval-source', timeout: 60 } as const;
+function readAskContext(): PermissionPolicyContext {
+  // A sensitive read is the surviving prompt path: ask mode lets Read through
+  // the read-only guard, and the sensitive-file ask raises the approval.
+  const args = { path: '/workspace/.env' } as const;
   const toolCall: ToolCall = {
     type: 'function',
-    id: 'call_bash',
-    name: 'Bash',
+    id: 'call_read',
+    name: 'Read',
     arguments: JSON.stringify(args),
   };
   return {
@@ -76,10 +80,10 @@ function bashContext(): PermissionPolicyContext {
     args,
     toolCall,
     execution: {
-      description: 'Running: printf approval-source',
-      display: { kind: 'command', command: args.command, cwd: '/workspace', language: 'bash' },
-      accesses: [],
-      approvalRule: 'Bash',
+      description: 'read file',
+      display: { kind: 'file_io', operation: 'read', path: args.path },
+      accesses: [{ kind: 'file', operation: 'read', path: args.path }],
+      approvalRule: 'Read(/workspace/.env)',
       execute: async () => ({ output: '' }),
     },
   } as unknown as PermissionPolicyContext;
@@ -92,14 +96,14 @@ describe('approval source attribution', () => {
       profileName: 'reviewer',
     });
 
-    await expect(manager.beforeToolCall(bashContext())).resolves.toBeUndefined();
+    await expect(manager.beforeToolCall(readAskContext())).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledWith(
       expect.objectContaining({
-        toolName: 'Bash',
+        toolName: 'Read',
         sourceAgentId: 'agent-7',
         sourceAgentName: 'reviewer',
-        sourceToolName: 'Bash',
+        sourceToolName: 'Read',
       }),
       expect.any(Object),
     );
@@ -116,12 +120,12 @@ describe('approval source attribution', () => {
       capabilityMode: 'execute',
     });
 
-    await expect(manager.beforeToolCall(bashContext())).resolves.toBeUndefined();
+    await expect(manager.beforeToolCall(readAskContext())).resolves.toBeUndefined();
 
     expect(requestApproval).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceAgentId: 'agent-9',
-        sourceToolName: 'Bash',
+        sourceToolName: 'Read',
         sourceCapabilityMode: 'execute',
       }),
       expect.any(Object),
@@ -131,7 +135,7 @@ describe('approval source attribution', () => {
   it('carries the turn prompt summary, and omits the field without one', async () => {
     const withSummary = makeManager({ promptSummary: 'deploy the release' });
 
-    await expect(withSummary.manager.beforeToolCall(bashContext())).resolves.toBeUndefined();
+    await expect(withSummary.manager.beforeToolCall(readAskContext())).resolves.toBeUndefined();
 
     expect(withSummary.requestApproval).toHaveBeenCalledWith(
       expect.objectContaining({ requestSummary: 'deploy the release' }),
@@ -140,7 +144,7 @@ describe('approval source attribution', () => {
 
     const withoutSummary = makeManager();
 
-    await expect(withoutSummary.manager.beforeToolCall(bashContext())).resolves.toBeUndefined();
+    await expect(withoutSummary.manager.beforeToolCall(readAskContext())).resolves.toBeUndefined();
 
     const [request] = withoutSummary.requestApproval.mock.calls[0] as [Record<string, unknown>];
     expect(request).not.toHaveProperty('requestSummary');
@@ -149,7 +153,7 @@ describe('approval source attribution', () => {
   it("attributes the root agent as 'main'", async () => {
     const { manager, requestApproval } = makeManager({ agentId: 'main', profileName: 'agent' });
 
-    await manager.beforeToolCall(bashContext());
+    await manager.beforeToolCall(readAskContext());
 
     expect(requestApproval).toHaveBeenCalledWith(
       expect.objectContaining({ sourceAgentId: 'main', sourceAgentName: 'agent' }),
@@ -164,7 +168,7 @@ describe('approval source attribution', () => {
       profileName: 'explore',
       handler: () => answer,
     });
-    const pending = manager.beforeToolCall(bashContext());
+    const pending = manager.beforeToolCall(readAskContext());
 
     // The request stays pending until the RPC handler answers: the payload
     // handed to `requestApproval` is the single carrier the TUI/web panels
@@ -174,7 +178,7 @@ describe('approval source attribution', () => {
         expect.objectContaining({
           sourceAgentId: 'agent-3',
           sourceAgentName: 'explore',
-          sourceToolName: 'Bash',
+          sourceToolName: 'Read',
         }),
         expect.any(Object),
       );

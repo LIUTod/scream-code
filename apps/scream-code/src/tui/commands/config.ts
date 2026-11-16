@@ -167,15 +167,17 @@ export async function handleYoloCommand(host: SlashCommandHost, args: string): P
       host.showNotice(t('config.yolo_already_off'));
       return;
     }
-    await session.setPermission('manual');
-    host.setAppState({ permissionMode: 'manual' });
+    // Turning blanket-yes off drops into the unattended posture: approvals
+    // still resolve without the terminal, via the bot channel.
+    await session.setPermission('bot');
+    host.setAppState({ permissionMode: 'bot' });
     return;
   }
 
   // toggle
   if (currentMode === 'yolo') {
-    await session.setPermission('manual');
-    host.setAppState({ permissionMode: 'manual' });
+    await session.setPermission('bot');
+    host.setAppState({ permissionMode: 'bot' });
   } else {
     await session.setPermission('yolo');
     host.setAppState({ permissionMode: 'yolo' });
@@ -207,15 +209,16 @@ export async function handleBotCommand(host: SlashCommandHost, args: string): Pr
       host.showNotice(t('config.bot_already_off'));
       return;
     }
-    await session.setPermission('manual');
-    host.setAppState({ permissionMode: 'manual' });
+    // Leaving the unattended posture returns to the startup default.
+    await session.setPermission('yolo');
+    host.setAppState({ permissionMode: 'yolo' });
     return;
   }
 
   // toggle
   if (currentMode === 'bot') {
-    await session.setPermission('manual');
-    host.setAppState({ permissionMode: 'manual' });
+    await session.setPermission('yolo');
+    host.setAppState({ permissionMode: 'yolo' });
   } else {
     await session.setPermission('bot');
     host.setAppState({ permissionMode: 'bot' });
@@ -247,15 +250,15 @@ export async function handleAskCommand(host: SlashCommandHost, args: string): Pr
       host.showNotice(t('config.ask_already_off'));
       return;
     }
-    await session.setPermission('manual');
-    host.setAppState({ permissionMode: 'manual' });
+    await session.setPermission('yolo');
+    host.setAppState({ permissionMode: 'yolo' });
     return;
   }
 
   // toggle
   if (currentMode === 'ask') {
-    await session.setPermission('manual');
-    host.setAppState({ permissionMode: 'manual' });
+    await session.setPermission('yolo');
+    host.setAppState({ permissionMode: 'yolo' });
   } else {
     await session.setPermission('ask');
     host.setAppState({ permissionMode: 'ask' });
@@ -376,15 +379,15 @@ export async function handleAutoCommand(host: SlashCommandHost, args: string): P
       host.showNotice(t('config.auto_already_off'));
       return;
     }
-    await session.setPermission('manual');
-    host.setAppState({ permissionMode: 'manual' });
+    await session.setPermission('yolo');
+    host.setAppState({ permissionMode: 'yolo' });
     return;
   }
 
   // toggle
   if (currentMode === 'auto') {
-    await session.setPermission('manual');
-    host.setAppState({ permissionMode: 'manual' });
+    await session.setPermission('yolo');
+    host.setAppState({ permissionMode: 'yolo' });
   } else {
     await session.setPermission('auto');
     host.setAppState({ permissionMode: 'auto' });

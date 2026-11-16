@@ -378,7 +378,7 @@ describe('SessionSubagentHost', () => {
     parent.configure();
     parent.newEvents();
 
-    const child = testAgent();
+    const child = testAgent({ askTools: ['Bash'] });
     child.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
     const session = fakeSession(parent.agent, child.agent);
     const host = new SessionSubagentHost(session, 'main');
@@ -1067,11 +1067,11 @@ describe('SessionSubagentHost', () => {
   });
 
   it('stops the subagent lsp servers when the run is stopped', async () => {
-    const parent = testAgent();
+    const parent = testAgent({ askTools: ['Bash'] });
     parent.configure();
 
     const controller = new AbortController();
-    const child = testAgent();
+    const child = testAgent({ askTools: ['Bash'] });
     const childDispose = vi.spyOn(child.agent.tools, 'disposeLsp');
     child.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
     const session = fakeSession(parent.agent, child.agent);
@@ -1358,12 +1358,12 @@ describe('SessionSubagentHost', () => {
   });
 
   it('cancels the child turn when the caller signal aborts', async () => {
-    const parent = testAgent();
+    const parent = testAgent({ askTools: ['Bash'] });
     parent.configure();
     parent.newEvents();
 
     const controller = new AbortController();
-    const child = testAgent();
+    const child = testAgent({ askTools: ['Bash'] });
     child.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
     const session = fakeSession(parent.agent, child.agent);
     const host = new SessionSubagentHost(session, 'main');
@@ -1401,11 +1401,11 @@ describe('SessionSubagentHost', () => {
   });
 
   it('cancelAll aborts foreground children', async () => {
-    const parent = testAgent();
+    const parent = testAgent({ askTools: ['Bash'] });
     parent.configure();
     parent.newEvents();
 
-    const child = testAgent();
+    const child = testAgent({ askTools: ['Bash'] });
     child.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
     const session = fakeSession(parent.agent, child.agent);
     const host = new SessionSubagentHost(session, 'main');
@@ -1432,12 +1432,12 @@ describe('SessionSubagentHost', () => {
   });
 
   it("tells a cancelled subagent's in-flight tools the user interrupted them", async () => {
-    const parent = testAgent();
+    const parent = testAgent({ askTools: ['Bash'] });
     parent.configure();
     parent.newEvents();
 
     const controller = new AbortController();
-    const child = testAgent();
+    const child = testAgent({ askTools: ['Bash'] });
     child.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
     const session = fakeSession(parent.agent, child.agent);
     const host = new SessionSubagentHost(session, 'main');
@@ -1463,12 +1463,12 @@ describe('SessionSubagentHost', () => {
   });
 
   it('does not mislabel a non-user subagent abort (e.g. a deadline) as a user interruption', async () => {
-    const parent = testAgent();
+    const parent = testAgent({ askTools: ['Bash'] });
     parent.configure();
     parent.newEvents();
 
     const controller = new AbortController();
-    const child = testAgent();
+    const child = testAgent({ askTools: ['Bash'] });
     child.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
     const session = fakeSession(parent.agent, child.agent);
     const host = new SessionSubagentHost(session, 'main');
@@ -1495,12 +1495,12 @@ describe('SessionSubagentHost', () => {
   });
 
   it('cancelAll leaves background children running until their task signal aborts', async () => {
-    const parent = testAgent();
+    const parent = testAgent({ askTools: ['Bash'] });
     parent.configure();
     parent.newEvents();
 
     const backgroundController = new AbortController();
-    const child = testAgent();
+    const child = testAgent({ askTools: ['Bash'] });
     child.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
     const session = fakeSession(parent.agent, child.agent);
     const host = new SessionSubagentHost(session, 'main');
@@ -1753,7 +1753,6 @@ describe('SessionSubagentHost', () => {
       messages:
         user: text "Earlier context"
         user: text "Continue from context"
-        user: text "<system-reminder>\\nYolo permission mode is active — every tool call is approved automatically, including irreversible ones.\\n  - Nothing will stop you, so verify destructive operations yourself before running them.\\n</system-reminder>"
     `);
     expect(parent.allEvents).toContainEqual(
       expect.objectContaining({
@@ -2760,8 +2759,8 @@ describe('SessionSubagentHost interject', () => {
   }
 
   it('interrupts the in-flight tool batch of a running child', async () => {
-    const parent = testAgent();
-    const child = testAgent();
+    const parent = testAgent({ askTools: ['Bash'] });
+    const child = testAgent({ askTools: ['Bash'] });
     parent.configure();
     child.configure();
     parent.newEvents();
@@ -2854,7 +2853,7 @@ describe('SessionSubagentHost interject', () => {
     parent.configure();
     parent.newEvents();
 
-    const child = testAgent();
+    const child = testAgent({ askTools: ['Bash'] });
     child.mockNextResponse({
       type: 'text',
       text: `Read the queued note and continued. ${'x'.repeat(220)}`,
@@ -3340,6 +3339,10 @@ function childBashToolResultOutput(child: AgentTestContext): string | undefined 
   }
   return undefined;
 }
+
+
+
+
 
 function bashCall(): ToolCall {
   return {

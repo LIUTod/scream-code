@@ -2,6 +2,7 @@ import type { ModelCapability, ProviderConfig, ToolCall } from '@scream-code/lto
 import { describe, expect, it } from 'vitest';
 
 import type { ResolvedAgentProfile } from '../../src/profile';
+import { createFakeJian } from '../tools/fixtures/fake-jian';
 import { createCommandJian, testAgent } from './harness/agent';
 import { DEFAULT_TEST_SYSTEM_PROMPT } from './harness/snapshots';
 import type { WireSnapshotEntry } from './harness/snapshots';
@@ -89,7 +90,7 @@ describe('Agent config', () => {
 
     expect(ctx.newEvents()).toMatchInlineSnapshot(`
       [wire] config.update            { "profileName": "test-profile", "systemPrompt": "Profile system prompt.", "activeTools": [ "Bash" ], "time": "<time>" }
-      [emit] agent.status.updated     { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual" }
+      [emit] agent.status.updated     { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
       [wire] tools.set_active_tools   { "names": [ "Bash" ], "time": "<time>" }
     `);
     await ctx.expectResumeMatches();
@@ -108,38 +109,55 @@ describe('Agent config', () => {
   });
 
   it('keeps turn-start config for later steps and applies updates to the next turn', async () => {
-    const bashCall: ToolCall = {
-      type: 'function',
-      id: 'call_bash',
-      name: 'Bash',
-      arguments: '{"command":"printf original-result","timeout":60}',
-    };
-    const ctx = testAgent({ jian: createCommandJian('original-result') });
-    ctx.configure({ tools: ['Bash'] });
+    // The turn pauses on the ExitPlanMode review — the approval round-trip that
+    // survives under the default yolo mode.
+    const ctx = testAgent({
+      jian: createFakeJian({
+        mkdir: async () => undefined,
+        readText: async () => '# Plan\n1. Keep the turn config',
+      }),
+    });
+    ctx.configure({ tools: ['ExitPlanMode'] });
+    ctx.agent.config.update({ cwd: '/workspace' });
+    await ctx.agent.planMode.enter('config-hold-plan', false);
 
-    ctx.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall);
+    ctx.mockNextResponse(
+      { type: 'text', text: 'I will present the plan.' },
+      {
+        type: 'function',
+        id: 'call_exit_plan',
+        name: 'ExitPlanMode',
+        arguments: '{}',
+      },
+    );
     await ctx.rpc.prompt({
-      input: [{ type: 'text', text: 'Run Bash before config changes' }],
+      input: [{ type: 'text', text: 'Present the plan before config changes' }],
     });
     expect(await ctx.untilApproval(true)).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash before config changes" } ], "origin": { "kind": "user" }, "time": "<time>" }
+      [wire] config.update               { "cwd": "<cwd>", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
+      [wire] plan_mode.enter             { "id": "config-hold-plan", "strategy": "normal", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": true, "planStrategy": "normal", "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Present the plan before config changes" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash before config changes" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Present the plan before config changes" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<plan-mode-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "plan_mode" }, "id": "m1" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [emit] assistant.delta             { "turnId": 0, "delta": "I will run Bash." }
-      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf original-result\\",\\"timeout\\":60}" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "ExitPlanMode" ], "messagesCount": 2, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [emit] assistant.delta             { "turnId": 0, "delta": "I will present the plan." }
+      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_exit_plan", "name": "ExitPlanMode", "argumentsPart": "{}" }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will run Bash." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will present the plan." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf original-result", "display": { "kind": "command", "command": "printf original-result", "cwd": "<cwd>", "language": "bash" }, "requestSummary": "Run Bash before config changes", "sourceAgentId": "main", "sourceToolName": "Bash" }
+      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_exit_plan", "toolName": "ExitPlanMode", "action": "Presenting plan and exiting plan mode", "display": { "kind": "plan_review", "plan": "# Plan\\n1. Keep the turn config", "path": "/workspace/.scream/plans/config-hold-plan.md" }, "requestSummary": "Present the plan before config changes", "sourceAgentId": "main", "sourceToolName": "ExitPlanMode" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
-      tools: Bash
+      tools: ExitPlanMode
       messages:
-        user: text "Run Bash before config changes"
+        user: text "Present the plan before config changes"
+        user: text <plan-mode-reminder>
     `);
 
     ctx.configureRuntimeModel({
@@ -153,40 +171,43 @@ describe('Agent config', () => {
     ctx.mockNextResponse({ type: 'text', text: 'Still using the original turn config.' });
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] config.update                       { "modelAlias": "changed-model", "time": "<time>" }
-      [emit] agent.status.updated                { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual" }
+      [emit] agent.status.updated                { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": true, "planStrategy": "normal", "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
       [wire] config.update                       { "systemPrompt": "Changed system prompt.", "time": "<time>" }
-      [emit] agent.status.updated                { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual" }
+      [emit] agent.status.updated                { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": true, "planStrategy": "normal", "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
       [wire] tools.set_active_tools              { "names": [], "time": "<time>" }
-      [wire] permission.record_approval_result   { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf original-result", "result": { "decision": "approved", "selectedLabel": "approve" }, "time": "<time>" }
+      [wire] permission.record_approval_result   { "turnId": 0, "toolCallId": "call_exit_plan", "toolName": "ExitPlanMode", "action": "Presenting plan and exiting plan mode", "result": { "decision": "approved", "selectedLabel": "approve" }, "time": "<time>" }
+      [wire] plan_mode.exit                      { "time": "<time>" }
+      [emit] agent.status.updated                { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo" }
       [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf original-result", "timeout": 60 }, "description": "Running: printf original-result", "display": { "kind": "command", "command": "printf original-result", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
-      [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf original-result", "timeout": 60 }, "description": "Running: printf original-result", "display": { "kind": "command", "command": "printf original-result", "cwd": "<cwd>", "language": "bash" } }
+      [wire] context.append_loop_event           { "event": { "type": "tool.call", "uuid": "call_exit_plan", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_exit_plan", "name": "ExitPlanMode", "args": {}, "description": "Presenting plan and exiting plan mode", "display": { "kind": "plan_review", "plan": "# Plan\\n1. Keep the turn config", "path": "/workspace/.scream/plans/config-hold-plan.md" } }, "time": "<time>" }
+      [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_exit_plan", "name": "ExitPlanMode", "args": {}, "description": "Presenting plan and exiting plan mode", "display": { "kind": "plan_review", "plan": "# Plan\\n1. Keep the turn config", "path": "/workspace/.scream/plans/config-hold-plan.md" } }
       [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [emit] tool.progress                       { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "original-result" } }
-      [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "original-result", "message": "Command executed successfully." } }, "time": "<time>" }
-      [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "original-result", "message": "Command executed successfully." }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 9, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 9, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 9, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 32, "maxContextTokens": 1000000, "contextUsage": 0.000032, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 9, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 9, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 9, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 9, "output": 23, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_exit_plan", "toolCallId": "call_exit_plan", "result": { "output": "Exited plan mode. Plan mode deactivated. All tools are now available.\\nPlan saved to: /workspace/.scream/plans/config-hold-plan.md\\n\\n## Approved Plan:\\n# Plan\\n1. Keep the turn config" } }, "time": "<time>" }
+      [emit] tool.result                         { "turnId": 0, "toolCallId": "call_exit_plan", "output": "Exited plan mode. Plan mode deactivated. All tools are now available.\\nPlan saved to: /workspace/.scream/plans/config-hold-plan.md\\n\\n## Approved Plan:\\n# Plan\\n1. Keep the turn config" }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 297, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 297, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 297, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 310, "maxContextTokens": 1000000, "contextUsage": 0.00031, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 297, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 297, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 297, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 297, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nPlan mode is no longer active. The read-only and plan-file-only restrictions from plan mode no longer apply. Continue with the approved plan using the normal tool and permission rules.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "plan_mode" }, "id": "m4" }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "changed-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 3, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "changed-model", "systemPromptReused": true, "activeTools": [ "ExitPlanMode" ], "messagesCount": 5, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta                     { "turnId": 0, "delta": "Still using the original turn config." }
       [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "Still using the original turn config." } }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-10>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 37, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 37, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 37, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 50, "maxContextTokens": 1000000, "contextUsage": 0.00005, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 46, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 46, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 46, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 46, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 413, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 413, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 413, "output": 13, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 426, "maxContextTokens": 1000000, "contextUsage": 0.000426, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 710, "output": 26, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 710, "output": 26, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 710, "output": 26, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 710, "output": 26, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                          { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       messages:
         <last>
-        assistant: text "I will run Bash."  calls call_bash:Bash { "command": "printf original-result", "timeout": 60 }
-        tool[call_bash]: text "original-result"
+        assistant: text "I will present the plan."  calls call_exit_plan:ExitPlanMode {}
+        tool[call_exit_plan]: text "Exited plan mode. Plan mode deactivated. All tools are now available.\\nPlan saved to: /workspace/.scream/plans/config-hold-plan.md\\n\\n## Approved Plan:\\n# Plan\\n1. Keep the turn config"
+        user: text "<system-reminder>\\nPlan mode is no longer active. The read-only and plan-file-only restrictions from plan mode no longer apply. Continue with the approved plan using the normal tool and permission rules.\\n</system-reminder>"
     `);
 
     ctx.mockNextResponse({ type: 'text', text: 'Now the changed config is active.' });
@@ -195,20 +216,20 @@ describe('Agent config', () => {
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Start a fresh turn" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 1, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start a fresh turn" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m4" }, "time": "<time>" }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Bash — printf original-result\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" }, "id": "m5" }, "time": "<time>" }
-      [wire] context.prefix_break        { "breakIndex": 0, "prevMessageCount": 3, "currentMessageCount": 6, "appendedSinceLast": 3, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start a fresh turn" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m6" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ ExitPlanMode\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" }, "id": "m7" }, "time": "<time>" }
+      [wire] context.prefix_break        { "breakIndex": 0, "prevMessageCount": 5, "currentMessageCount": 8, "appendedSinceLast": 3, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-11>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 1, "step": 1, "stepId": "<uuid-11>" }
-      [wire] request.header              { "provider": "scream", "model": "changed-model", "modelAlias": "changed-model", "systemPrompt": "Changed system prompt.", "activeTools": [], "messagesCount": 6, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "changed-model", "modelAlias": "changed-model", "systemPrompt": "Changed system prompt.", "activeTools": [], "messagesCount": 8, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 1, "delta": "Now the changed config is active." }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-12>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-13>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "part": { "type": "text", "text": "Now the changed config is active." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-14>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-11>", "turnId": "1", "step": 1, "usage": { "inputOther": 89, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-11>", "usage": { "inputOther": 89, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "changed-model", "usage": { "inputOther": 89, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 101, "maxContextTokens": 1000000, "contextUsage": 0.000101, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 46, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "changed-model": { "inputOther": 89, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 135, "output": 48, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 89, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 135, "output": 48, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-11>", "turnId": "1", "step": 1, "usage": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-11>", "usage": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "changed-model", "usage": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 472, "maxContextTokens": 1000000, "contextUsage": 0.000472, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 710, "output": 26, "inputCacheRead": 0, "inputCacheCreation": 0 }, "changed-model": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1170, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 1170, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 1, "reason": "completed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -218,7 +239,7 @@ describe('Agent config', () => {
         <last>
         assistant: text "Still using the original turn config."
         user: text "Start a fresh turn"
-        user: text "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Bash — printf original-result\\n\\n</system-reminder>"
+        user: text "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ ExitPlanMode\\n\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });

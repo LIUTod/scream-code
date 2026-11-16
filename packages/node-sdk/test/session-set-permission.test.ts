@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe('Session.setPermission', () => {
-  it.each(['yolo', 'manual', 'auto'] as const)(
+  it.each(['yolo', 'auto', 'ask', 'bot'] as const)(
     'sends permission.set_mode with mode %s',
     async (mode: PermissionMode) => {
       const homeDir = await makeTempDir(tempDirs, 'scream-sdk-permission-home-');
@@ -42,6 +42,32 @@ describe('Session.setPermission', () => {
       }
     },
   );
+
+  it('normalizes the removed manual mode to yolo for legacy callers', async () => {
+    const homeDir = await makeTempDir(tempDirs, 'scream-sdk-permission-home-');
+    const workDir = await makeTempDir(tempDirs, 'scream-sdk-permission-work-');
+    const harness = new ScreamHarness({ homeDir, identity: TEST_IDENTITY });
+
+    try {
+      const session = await harness.createSession({ id: 'ses_permission_legacy', workDir });
+
+      await session.setPermission('manual' as never);
+
+      await expect(
+        waitForAgentWireEvent(
+          homeDir,
+          session.id,
+          'permission.set_mode',
+          (event) => event['mode'] === 'yolo',
+        ),
+      ).resolves.toMatchObject({
+        type: 'permission.set_mode',
+        mode: 'yolo',
+      });
+    } finally {
+      await harness.close();
+    }
+  });
 
   it('rejects invalid permission modes', async () => {
     const homeDir = await makeTempDir(tempDirs, 'scream-sdk-permission-home-');

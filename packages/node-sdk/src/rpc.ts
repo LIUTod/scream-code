@@ -2,6 +2,7 @@ import {
   createRPC,
   ErrorCodes,
   ScreamCore,
+  ScreamError,
   makeErrorPayload,
   resolveScreamHome,
   type AgentContextData,
@@ -26,6 +27,7 @@ import {
 import { createScreamDefaultHeaders } from '@scream-code/config';
 
 import type { ApprovalHandler, QuestionHandler } from '#/events';
+import { normalizePermissionMode } from '#/permission-mode';
 import type {
   BackgroundTaskInfo,
   CreateSessionOptions,
@@ -239,14 +241,28 @@ export class SDKRpcClient {
 
   async createSession(input: CreateSessionOptions): Promise<SessionSummary> {
     const rpc = await this.getRpc();
-    const { planMode, ...coreInput } = input;
+    const { planMode, permission, ...coreInput } = input;
     void planMode;
-    return rpc.createSession(coreInput);
+    // Legacy callers may still pass the removed `manual` mode; normalize it so
+    // no invalid posture ever reaches the engine.
+    const mode = normalizePermissionMode(permission);
+    if (permission !== undefined && mode === undefined) {
+      throw new ScreamError(
+        ErrorCodes.SESSION_PERMISSION_MODE_INVALID,
+        'Session permission mode must be yolo, auto, ask, or bot',
+      );
+    }
+    return rpc.createSession({ ...coreInput, ...(mode === undefined ? {} : { permission: mode }) });
   }
 
   async resumeSession(input: ResumeSessionInput): Promise<ResumedSessionSummary> {
     const rpc = await this.getRpc();
-    return rpc.resumeSession({ sessionId: input.id });
+    return rpc.resumeSession({
+      sessionId: input.id,
+      ...(input.permissionDenyRules === undefined
+        ? {}
+        : { permissionDenyRules: input.permissionDenyRules }),
+    });
   }
 
   async forkSession(input: ForkSessionInput): Promise<SessionSummary> {
