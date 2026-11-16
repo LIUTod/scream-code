@@ -91,6 +91,19 @@ export interface AgentRecordEvents {
     model: string;
     usage: TokenUsage;
     usageScope?: UsageRecordScope | undefined;
+    /**
+     * Set on a subagent fold: which child's usage this record re-records into
+     * its fold target, and that child's CUMULATIVE usage for `model` once the
+     * fold is done. Replay merges the cumulative into the session's fold ledger
+     * with an element-wise max, so (a) a child resumed in a later process folds
+     * only what it accrued since — the ledger used to start empty after a
+     * restart, folding the child's whole history into the parent a second time —
+     * and (b) a wire replayed over a ledger that already holds the fold (a
+     * middle agent evicted and re-hydrated in the same process) cannot double
+     * it: a cumulative is idempotent where a delta is not. Optional and
+     * additive: older wires simply lack it.
+     */
+    fold?: { childId: string; cumulative: TokenUsage } | undefined;
   };
 
   /** Per-request snapshot so a request can be reconstructed from the log. */

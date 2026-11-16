@@ -34,6 +34,8 @@ export type {
   TodoItem,
   TodoStatus,
   LoopControl,
+  McpAuthenticateResult,
+  SessionTokenBudget,
   McpServerInfo,
   McpStartupMetrics,
   ModelAlias,

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { t } from '@scream-code/config';
 import { promisify } from 'node:util';
 import { valid } from 'semver';
 
@@ -32,7 +33,7 @@ export async function fetchLatestVersionFromNpm(
   });
   const raw = stdout.trim();
   if (valid(raw) === null) {
-    throw new Error(`npm view 返回的版本号不是合法 semver: ${JSON.stringify(raw)}`);
+    throw new Error(t('cli.update.bad_semver', { raw: JSON.stringify(raw) }));
   }
   return raw;
 }

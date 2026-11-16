@@ -134,6 +134,14 @@ export interface TurnEndedEvent {
    * a budget cut from a natural finish.
    */
   readonly stepBudgetExhausted?: boolean | undefined;
+  /**
+   * Set when the turn stopped before a model request because the session
+   * reached its token limit (`loop_control.max_session_tokens`, `/budget`).
+   * `reason` still reports `completed`; hosts use this to say why (TUI notice,
+   * CLI exit code 4, IM reply). Every later turn stops the same way until the
+   * limit is raised.
+   */
+  readonly tokenCapReached?: { readonly usedTokens: number; readonly limitTokens: number } | undefined;
 }
 
 export interface TurnStepStartedEvent {
@@ -351,8 +359,14 @@ export interface CompactionBlockedEvent {
 
 export interface CompactionCancelledEvent {
   readonly type: 'compaction.cancelled';
+  /** English text for headless output and logs; a UI that localizes keys off `code`. */
   readonly reason?: string | undefined;
+  /** Why the engine cancelled it. Absent for a plain user cancel. */
+  readonly code?: CompactionCancelCode | undefined;
 }
+
+/** Engine-initiated compaction cancellations a UI can localize. */
+export type CompactionCancelCode = 'timeout' | 'context_changed';
 
 export interface CompactionCompletedEvent {
   readonly type: 'compaction.completed';

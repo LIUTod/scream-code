@@ -16,6 +16,8 @@ import type {
   GetGoalResult,
   GoalSnapshotData,
   TodoItem,
+  McpAuthenticateResult,
+  SessionTokenBudget,
   McpServerInfo,
   McpStartupMetrics,
   PermissionMode,
@@ -444,6 +446,36 @@ export class Session {
     return this.rpc.getSessionApprovalGrants({ sessionId: this.id });
   }
 
+  /**
+   * Tokens this run of the session has used against its token limit
+   * (`limitTokens` is null when no limit is set).
+   */
+  async getSessionTokenBudget(): Promise<SessionTokenBudget> {
+    this.ensureOpen();
+    return this.rpc.getSessionTokenBudget({ sessionId: this.id });
+  }
+
+  /**
+   * Change the session token limit on the live session (`null` turns it off).
+   * Applies at the next step of every agent in the session, so raising it
+   * clears a tripped limit. Does not write config.toml — persisting the default
+   * for new sessions is the caller's job (`harness.setConfig`).
+   */
+  async setSessionTokenBudget(limitTokens: number | null): Promise<SessionTokenBudget> {
+    this.ensureOpen();
+    // Checked HERE, before the value is serialized for the engine: JSON has no
+    // NaN or Infinity, so both would arrive as `null` — "no limit" — and the
+    // engine's own check could never see them. A safety valve must not fail
+    // open on a miscomputed number.
+    if (limitTokens !== null && !(Number.isSafeInteger(limitTokens) && limitTokens >= 0)) {
+      throw new ScreamError(
+        ErrorCodes.REQUEST_INVALID,
+        `The session token limit must be a non-negative whole number, or null for no limit (got ${String(limitTokens)})`,
+      );
+    }
+    return this.rpc.setSessionTokenBudget({ sessionId: this.id, limitTokens });
+  }
+
   /** Revoke one approve-for-session grant; true when a grant was removed. */
   async revokeSessionApprovalGrant(pattern: string): Promise<boolean> {
     this.ensureOpen();
@@ -458,6 +490,16 @@ export class Session {
   async reconnectMcpServer(name: string): Promise<void> {
     this.ensureOpen();
     await this.rpc.reconnectMcpServer({ sessionId: this.id, name });
+  }
+
+  /**
+   * Start an OAuth flow for an HTTP MCP server. Resolves with the URL to open
+   * (or `alreadyAuthorized: true` when tokens were valid all along) — the
+   * browser step completes in the background and reconnects on success.
+   */
+  async authenticateMcpServer(name: string): Promise<McpAuthenticateResult> {
+    this.ensureOpen();
+    return this.rpc.authenticateMcpServer({ sessionId: this.id, name });
   }
 
   async addMcpServer(name: string, config: Record<string, unknown>): Promise<void> {

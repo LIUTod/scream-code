@@ -2,9 +2,11 @@ import type { AgentConfigData } from '#/agent/config';
 import type { AgentContextData } from '#/agent/context';
 import type { PermissionData, PermissionMode } from '#/agent/permission';
 import type { PlanData } from '#/agent/plan';
+import type { SessionTokenBudget } from '#/agent/usage/token-meter';
 import type { ToolInfo } from '#/agent/tool';
 import type { ScreamConfig, ScreamConfigPatch } from '#/config';
 import type { McpServerConfig } from '#/config/schema';
+import type { McpAuthenticateResult } from '#/mcp/connection-manager';
 import type { ExperimentalFlagMap } from '#/flags';
 import type { ResumeSessionResult } from '#/rpc/resumed';
 import type { SessionMeta } from '#/session';
@@ -289,6 +291,8 @@ export interface McpServerInfo {
   readonly error?: string;
   /** Optional at the wire boundary so older clients/servers coexist. */
   readonly capabilities?: readonly string[];
+  /** Optional for the same reason; `serverInfo.version` when the server sent it. */
+  readonly serverVersion?: string;
 }
 
 export interface McpStartupMetrics {
@@ -333,6 +337,19 @@ export interface RemoveCronTasksPayload {
 export interface ReconnectMcpServerPayload {
   readonly name: string;
 }
+
+export interface AuthenticateMcpServerPayload {
+  readonly name: string;
+}
+
+export type { McpAuthenticateResult };
+
+export interface SetSessionTokenBudgetPayload {
+  /** New session token limit; `null` turns the limit off. */
+  readonly limitTokens: number | null;
+}
+
+export type { SessionTokenBudget };
 
 export interface AddMcpServerPayload {
   readonly name: string;
@@ -529,12 +546,21 @@ export interface SessionAPI extends AgentAPIWithId {
   getSessionApprovalGrants: (payload: EmptyPayload) => string[];
   /** Revoke one approve-for-session grant; true when a grant was removed. */
   revokeSessionApprovalGrant: (payload: RevokeSessionApprovalGrantPayload) => boolean;
+  /** Tokens this run has used against the session token limit (`limitTokens` null = no limit). */
+  getSessionTokenBudget: (payload: EmptyPayload) => SessionTokenBudget;
+  /** Change the session token limit on the live session (applies at the next step); returns the new state. */
+  setSessionTokenBudget: (payload: SetSessionTokenBudgetPayload) => SessionTokenBudget;
   listMcpServers: (payload: EmptyPayload) => readonly McpServerInfo[];
   getMcpStartupMetrics: (payload: EmptyPayload) => McpStartupMetrics;
   reconnectMcpServer: (payload: ReconnectMcpServerPayload) => void;
   addMcpServer: (payload: AddMcpServerPayload) => void;
   stopMcpServer: (payload: StopMcpServerPayload) => void;
   removeMcpServer: (payload: RemoveMcpServerPayload) => void;
+  /**
+   * Start an OAuth flow for an HTTP MCP server from the UI and return the URL
+   * to open; the flow completes in the background and reconnects on success.
+   */
+  authenticateMcpServer: (payload: AuthenticateMcpServerPayload) => Promise<McpAuthenticateResult>;
   generateAgentsMd: (payload: { targetDir?: string | undefined }) => void;
 }
 

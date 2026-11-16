@@ -22,6 +22,7 @@ import {
   computeDelayMs,
   sleepForRetry,
 } from '../../loop/retry';
+import type { CompactionCancelCode } from '../../rpc/events';
 import { renderPrompt } from '../../utils/render-prompt';
 import {
   estimateTokens,
@@ -371,14 +372,18 @@ export class FullCompaction {
     this.markCanceled();
   }
 
-  private markCanceled(reason?: string): void {
+  private markCanceled(reason?: string, code?: CompactionCancelCode): void {
     if (!this.compacting) return;
     this.agent.records.logRecord({
       type: 'full_compaction.cancel',
     });
     this.compacting.abortController.abort();
     this.compacting = null;
-    this.agent.emitEvent({ type: 'compaction.cancelled', reason });
+    this.agent.emitEvent({
+      type: 'compaction.cancelled',
+      reason,
+      ...(code === undefined ? {} : { code }),
+    });
   }
 
   markCompleted() {
@@ -435,7 +440,7 @@ export class FullCompaction {
       if (this.consecutiveCompactionFailures >= MAX_CONSECUTIVE_FAILURES) {
         this.agent.emitEvent({
           type: 'warning',
-          message: '压缩熔断器已打开，使用 /compact 手动重试。',
+          message: 'Auto-compaction is paused after repeated failures; run /compact to retry.',
           code: 'compaction_circuit_open_overflow',
         });
       }
@@ -604,7 +609,8 @@ export class FullCompaction {
       if (this.compacting === active) {
         this.compactionTimedOut = true;
         this.markCanceled(
-          '压缩超时（120秒），已取消。请使用 /compact 手动重试。',
+          'Compaction timed out (120s) and was cancelled; run /compact to retry.',
+          'timeout',
         );
       }
     }, BLOCK_TIMEOUT_MS);
@@ -840,7 +846,10 @@ export class FullCompaction {
       const newHistory = this.agent.context.history;
       for (let i = 0; i < originalHistory.length; i++) {
         if (newHistory[i] !== originalHistory[i]) {
-          this.markCanceled('上下文已被更改（如 /revoke），压缩已取消');
+          this.markCanceled(
+            'Compaction cancelled: the context changed while it ran (e.g. /revoke)',
+            'context_changed',
+          );
           return undefined;
         }
       }
@@ -950,7 +959,7 @@ export class FullCompaction {
             this.agent.emitEvent({
               type: 'warning',
               message:
-                `压缩连续失败 ${String(this.consecutiveCompactionFailures)} 次，已自动暂停本回合的自动压缩。使用 /compact 手动重试。`,
+                `Compaction failed ${String(this.consecutiveCompactionFailures)} times in a row; auto-compaction is paused for this turn. Run /compact to retry.`,
               code: 'compaction_circuit_open',
             });
           }

@@ -115,6 +115,13 @@ export interface MCPClient {
   /** Server instructions from the initialize handshake, when it sent any. */
   getInstructions?(): string | undefined;
 
+  /**
+   * The server's self-reported identity from the initialize handshake
+   * (`serverInfo`). Surfaced so `/mcp` can show which version is actually
+   * running — `@latest` args say nothing about the resolved package.
+   */
+  getServerVersion?(): { name?: string; version?: string } | undefined;
+
   /** Advertised resources; absent when the server does not declare the capability. */
   listResources?(): Promise<MCPResourceDefinition[]>;
 

@@ -166,6 +166,15 @@ export const LoopControlSchema = z.object({
   // prevents runaway loops where the model neither completes nor blocks the
   // goal. Set to 0 to disable the default guard.
   maxGoalTurns: z.number().int().min(0).optional(),
+  // Session token limit. Once the tokens this run of the session has used —
+  // main agent, subagents, compaction and cache warmer; input (cache reads
+  // included) plus output, the same total `/usage` and `/goal` budgets show —
+  // reach it, every turn ends before its next model request until the limit is
+  // raised (`/budget` applies immediately). Tokens, not dollars: a dollar cap
+  // needs a catalog price, which custom providers do not have. Counts usage
+  // since the session was opened in this process (resume starts a new
+  // allowance). 0 or unset = no limit.
+  maxSessionTokens: z.number().int().min(0).optional(),
   // 'auto' (default): auto-compact when the context budget triggers.
   // 'off': never auto-compact (unattended/IM sessions that must not stall on a
   // compaction LLM call). At the blocking threshold the model gets a one-time

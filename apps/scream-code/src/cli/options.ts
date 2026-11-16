@@ -1,3 +1,4 @@
+import { t } from '@scream-code/config';
 export type UIMode = 'shell' | 'print';
 export type PromptOutputFormat = 'text' | 'stream-json';
 
@@ -30,46 +31,46 @@ export function validateOptions(opts: CLIOptions): ValidatedOptions {
   const prompt = opts.prompt;
   const promptMode = prompt !== undefined;
   if (promptMode && prompt.trim().length === 0) {
-    throw new OptionConflictError('提示不能为空。');
+    throw new OptionConflictError(t('cli.err.prompt_empty'));
   }
   if (opts.model !== undefined && opts.model.trim().length === 0) {
-    throw new OptionConflictError('模型不能为空。');
+    throw new OptionConflictError(t('cli.err.model_empty'));
   }
   if (!promptMode && opts.outputFormat !== undefined) {
-    throw new OptionConflictError('输出格式仅在提示模式下支持。');
+    throw new OptionConflictError(t('cli.err.output_format_prompt_only'));
   }
   if (promptMode && opts.yolo) {
-    throw new OptionConflictError('--prompt 不能与 --yolo 同时使用。');
+    throw new OptionConflictError(t('cli.err.prompt_conflict', { flag: '--yolo' }));
   }
   if (promptMode && opts.auto) {
-    throw new OptionConflictError('--prompt 不能与 --auto 同时使用。');
+    throw new OptionConflictError(t('cli.err.prompt_conflict', { flag: '--auto' }));
   }
   if (promptMode && opts.plan) {
-    throw new OptionConflictError('--prompt 不能与 --plan 同时使用。');
+    throw new OptionConflictError(t('cli.err.prompt_conflict', { flag: '--plan' }));
   }
   if (promptMode && opts.wolfpack) {
-    throw new OptionConflictError('--prompt 不能与 --wolfpack 同时使用。');
+    throw new OptionConflictError(t('cli.err.prompt_conflict', { flag: '--wolfpack' }));
   }
   if (promptMode && opts.session === '') {
-    throw new OptionConflictError('在提示模式下不能使用不带 ID 的 --session。');
+    throw new OptionConflictError(t('cli.err.session_id_required'));
   }
   if (opts.continue && opts.session !== undefined) {
-    throw new OptionConflictError('--continue 和 --session 不能同时使用。');
+    throw new OptionConflictError(t('cli.err.continue_session_conflict'));
   }
   if (opts.yolo && opts.auto) {
-    throw new OptionConflictError('--yolo 不能与 --auto 同时使用。');
+    throw new OptionConflictError(t('cli.err.yolo_auto_conflict'));
   }
   if (!promptMode && (opts.continue || opts.session !== undefined) && opts.yolo) {
-    throw new OptionConflictError('--yolo 不能与 --continue 或 --session 同时使用。');
+    throw new OptionConflictError(t('cli.err.resume_conflict', { flag: '--yolo' }));
   }
   if (!promptMode && (opts.continue || opts.session !== undefined) && opts.auto) {
-    throw new OptionConflictError('--auto 不能与 --continue 或 --session 同时使用。');
+    throw new OptionConflictError(t('cli.err.resume_conflict', { flag: '--auto' }));
   }
   if (!promptMode && (opts.continue || opts.session !== undefined) && opts.plan) {
-    throw new OptionConflictError('--plan 不能与 --continue 或 --session 同时使用。');
+    throw new OptionConflictError(t('cli.err.resume_conflict', { flag: '--plan' }));
   }
   if (!promptMode && (opts.continue || opts.session !== undefined) && opts.wolfpack) {
-    throw new OptionConflictError('--wolfpack 不能与 --continue 或 --session 同时使用。');
+    throw new OptionConflictError(t('cli.err.resume_conflict', { flag: '--wolfpack' }));
   }
   return { options: opts, uiMode: promptMode ? 'print' : 'shell' };
 }

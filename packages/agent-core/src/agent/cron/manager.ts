@@ -412,6 +412,19 @@ export class CronManager {
     task: CronTask,
     ctx: { readonly coalescedCount: number },
   ): void {
+    // While the session token limit is tripped, every turn ends before its first
+    // request. A recurring job would still open one per interval: an unanswered
+    // cron prompt in the context, the limit warning repeated every time (and, on
+    // an IM channel, relayed to the chat every time). So its fires are skipped
+    // until the limit is raised — `/budget` takes effect at the next fire. A
+    // one-shot is NOT skipped: it is deleted on delivery, and losing a reminder
+    // silently is worse than one more notice.
+    if (task.recurring !== false && this.agent.tokenMeter?.exhausted() !== undefined) {
+      this.agent.log?.debug?.('cron: skipped a recurring fire — session token limit reached', {
+        jobId: task.id,
+      });
+      return;
+    }
     const stale = this.isStale(task);
     const origin: CronJobOrigin = {
       kind: 'cron_job',

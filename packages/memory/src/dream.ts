@@ -114,7 +114,11 @@ export class DreamTracker {
     );
   }
 
-  /** Get a human-readable suggestion message when conditions are met. */
+  /**
+   * The suggestion injected as a system reminder when conditions are met. It is
+   * read by the model, which relays it to the user in the user's language, so it
+   * is English like every other reminder the engine injects.
+   */
   getSuggestionMessage(): string {
     const hoursSince =
       (Date.now() - new Date(this.state.lastDreamAt).getTime()) /
@@ -122,8 +126,10 @@ export class DreamTracker {
     const days = Math.floor(hoursSince / 24);
     const sessions = this.state.sessionsSinceLastDream;
     return (
-      `距离上次记忆整理已过去 ${days} 天、${sessions} 个会话。` +
-      `建议运行 /dream 来合并重复记忆、清理过期条目、解决矛盾信息。`
+      `It has been ${days} ${days === 1 ? 'day' : 'days'} and ${sessions} ` +
+      `${sessions === 1 ? 'session' : 'sessions'} since the last memory consolidation. ` +
+      'Consider suggesting that the user run /dream to merge duplicate memories, ' +
+      'clear stale entries and resolve contradictions.'
     );
   }
 

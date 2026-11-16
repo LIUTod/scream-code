@@ -50,8 +50,16 @@ describe('built-in slash command registry', () => {
     expect(findBuiltInSlashCommand('config')?.aliases).toContain('login');
     expect(findBuiltInSlashCommand('login')?.name).toBe('config');
     expect(findBuiltInSlashCommand('grants')?.name).toBe('grants');
+    expect(findBuiltInSlashCommand('budget')?.name).toBe('budget');
     expect(findBuiltInSlashCommand('permission')?.name).toBe('permission');
     expect(findBuiltInSlashCommand('unknown')).toBeUndefined();
+  });
+
+  it('keeps /budget available mid-turn, with or without args', () => {
+    const budget = findBuiltInSlashCommand('budget');
+    expect(budget).toBeDefined();
+    expect(resolveSlashCommandAvailability(budget!, '')).toBe('always');
+    expect(resolveSlashCommandAvailability(budget!, '50m')).toBe('always');
   });
 
   it('marks plan clear as idle-only while normal plan toggles are always available', () => {

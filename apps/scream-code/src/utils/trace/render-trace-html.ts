@@ -12,6 +12,8 @@
  * external dependencies — fully offline.
  */
 
+import { getLocale, t } from '@scream-code/config';
+
 import type { TraceCell, TraceDocument } from './trace-types';
 
 const KIND_LABELS: Record<TraceCell['kind'], string> = {
@@ -171,9 +173,45 @@ tr.turnrow td { background: #1B1B1C; font-weight: 500; }
 .placeholder { color: #81858C; padding: 32px; text-align: center; }
 `;
 
-const RENDER_JS = `
+/**
+ * Copy the report's script shows. Resolved when the report is rendered, not when
+ * this module loads, so the page follows the UI language the user is in — the
+ * `/language` switch can change it at any time. (The toolbar and lane names
+ * — Turns / Calls / Seq / Input / Model / Tools — stay English: they are the
+ * trace vocabulary, not prose.)
+ */
+function uiLabels(): Record<string, string> {
+  return {
+    kind: t('trace.html.kind'),
+    index: t('trace.html.index'),
+    time: t('trace.html.time'),
+    turn: t('trace.html.turn'),
+    input: t('trace.html.input'),
+    cacheRead: t('trace.html.cache_read'),
+    cacheWrite: t('trace.html.cache_write'),
+    output: t('trace.html.output'),
+    decode: t('trace.html.decode'),
+    model: t('trace.html.model'),
+    finish: t('trace.html.finish'),
+    thinking: t('trace.html.thinking'),
+    content: t('trace.html.content'),
+    toolResult: t('trace.html.tool_result'),
+    noDetail: t('trace.html.no_detail'),
+    noMatch: t('trace.html.no_match'),
+    // These three are templates: the report's script fills the {placeholders}
+    // per row (`fill()` below), so they are handed back verbatim on purpose.
+    count: t('trace.html.count', { shown: '{shown}', total: '{total}' }),
+    turnCount: t('trace.html.turn_count', { n: '{n}' }),
+    timeTip: t('trace.html.time_tip', { seconds: '{seconds}' }),
+  };
+}
+
+function renderJs(): string {
+  return `
 var cells = JSON.parse(document.getElementById('data').textContent);
 var labels = ${JSON.stringify(KIND_LABELS)};
+var ui = ${JSON.stringify(uiLabels()).replaceAll('</', '<\\/')};
+function fill(s, v) { for (var k in v) s = s.split('{' + k + '}').join(String(v[k])); return s; }
 var tagStyles = ${JSON.stringify(KIND_TAG_STYLE)};
 var spanColors = ${JSON.stringify(SPAN_COLORS)};
 var laneOf = ${JSON.stringify(KIND_LANE)};
@@ -222,9 +260,9 @@ function timingFacts(cell) {
   var parts = [];
   var ttft = fmtMs(cell.ttftMs), dec = fmtMs(cell.decodingMs);
   if (ttft) parts.push('TTFT ' + ttft);
-  if (dec) parts.push('解码 ' + dec);
-  if (cell.model) parts.push('模型 ' + cell.model);
-  if (cell.finishReason) parts.push('结束 ' + cell.finishReason);
+  if (dec) parts.push(ui.decode + ' ' + dec);
+  if (cell.model) parts.push(ui.model + ' ' + cell.model);
+  if (cell.finishReason) parts.push(ui.finish + ' ' + cell.finishReason);
   return parts;
 }
 function esc(v) { return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -242,18 +280,18 @@ function toolContent(cell) {
   return html;
 }
 function overviewRows(cell) {
-  var rows = [['类型', labels[cell.kind] || cell.kind], ['序号', '#' + cell.index], ['耗时', fmtSeconds(cell.timeSeconds)]];
-  if (cell.turn) rows.push(['回合', String(cell.turn)]);
-  if (cell.input !== undefined) rows.push(['输入', String(cell.input)]);
-  if (cell.cacheRead) rows.push(['缓存读', String(cell.cacheRead)]);
-  if (cell.cacheWrite) rows.push(['缓存写', String(cell.cacheWrite)]);
-  if (cell.output !== undefined) rows.push(['输出', String(cell.output)]);
+  var rows = [[ui.kind, labels[cell.kind] || cell.kind], [ui.index, '#' + cell.index], [ui.time, fmtSeconds(cell.timeSeconds)]];
+  if (cell.turn) rows.push([ui.turn, String(cell.turn)]);
+  if (cell.input !== undefined) rows.push([ui.input, String(cell.input)]);
+  if (cell.cacheRead) rows.push([ui.cacheRead, String(cell.cacheRead)]);
+  if (cell.cacheWrite) rows.push([ui.cacheWrite, String(cell.cacheWrite)]);
+  if (cell.output !== undefined) rows.push([ui.output, String(cell.output)]);
   var ttft = fmtMs(cell.ttftMs);
   if (ttft) rows.push(['TTFT', ttft]);
   var dec = fmtMs(cell.decodingMs);
-  if (dec) rows.push(['解码', dec]);
-  if (cell.model) rows.push(['模型', cell.model]);
-  if (cell.finishReason) rows.push(['结束', cell.finishReason]);
+  if (dec) rows.push([ui.decode, dec]);
+  if (cell.model) rows.push([ui.model, cell.model]);
+  if (cell.finishReason) rows.push([ui.finish, cell.finishReason]);
   return rows.map(function (r) { return '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>'; }).join('');
 }
 function section(title, value, cls) {
@@ -275,11 +313,11 @@ function showDetail(i) {
   if (timeline.querySelector('span[data-i="' + i + '"]')) timeline.querySelector('span[data-i="' + i + '"]').classList.add('active');
   drawerName.textContent = (labels[cell.kind] || cell.kind) + ' #' + cell.index;
   var html = '<dl class="ovgrid">' + overviewRows(cell) + '</dl>';
-  html += section('思考', cell.thinkingDetail);
-  html += section('内容', cell.outputDetail);
-  html += section('输入', cell.inputDetail);
-  if (cell.kind === 'tool') html += section('工具结果', cell.result || cell.outputDetail, cell.isError ? 'error' : '');
-  drawerBody.innerHTML = html || '<div class="placeholder">无详情</div>';
+  html += section(ui.thinking, cell.thinkingDetail);
+  html += section(ui.content, cell.outputDetail);
+  html += section(ui.input, cell.inputDetail);
+  if (cell.kind === 'tool') html += section(ui.toolResult, cell.result || cell.outputDetail, cell.isError ? 'error' : '');
+  drawerBody.innerHTML = html || '<div class="placeholder">' + esc(ui.noDetail) + '</div>';
   drawer.classList.remove('hidden');
 }
 function hideDetail() {
@@ -357,7 +395,7 @@ function makeSpan(cell, idx, leftPct, widthPct) {
     if (cells.length <= 2000) {
       var facts = timingFacts(cell);
       var ftext = [];
-      if (cell.timeSeconds !== null && cell.timeSeconds !== undefined) ftext.push('耗时 ' + cell.timeSeconds.toFixed(1) + 's');
+      if (cell.timeSeconds !== null && cell.timeSeconds !== undefined) ftext.push(fill(ui.timeTip, { seconds: cell.timeSeconds.toFixed(1) }));
       ftext = ftext.concat(facts);
       showTip('<div class="tip-title">#' + cell.index + ' ' + (labels[cell.kind] || cell.kind) + '</div>' +
         (ftext.length ? '<div class="tip-facts">' + ftext.join(' · ') + '</div>' : '') +
@@ -395,7 +433,7 @@ function render() {
 }
 function updateCount() {
   var el = document.getElementById('count');
-  if (el) el.textContent = shown + ' / ' + filtered.length + ' 条';
+  if (el) el.textContent = fill(ui.count, { shown: shown, total: filtered.length });
 }
 function renderChunk() {
   var end = Math.min(filtered.length, renderedCount + PAGE);
@@ -419,7 +457,7 @@ function renderChunk() {
         tco.appendChild(tsum);
         var tfacts = document.createElement('span');
         tfacts.className = 'facts';
-        tfacts.textContent = '· ' + (turnCounts[turn] || 0) + ' 条';
+        tfacts.textContent = fill(ui.turnCount, { n: turnCounts[turn] || 0 });
         tco.appendChild(tfacts);
         trow.appendChild(tev); trow.appendChild(tco);
         trow.addEventListener('click', (function (t) {
@@ -482,7 +520,7 @@ function renderChunk() {
     lastTurn = turn;
   }
   renderedCount = end;
-  if (!shown) tbody.innerHTML = '<tr><td colspan="2"><div class="placeholder">无匹配记录</div></td></tr>';
+  if (!shown) tbody.innerHTML = '<tr><td colspan="2"><div class="placeholder">' + esc(ui.noMatch) + '</div></td></tr>';
   updateCount();
 }
 if (searchInput) searchInput.addEventListener('input', render);
@@ -556,6 +594,7 @@ if (tablePane) tablePane.addEventListener('scroll', function () {
 render();
 syncLocatorFromTable();
 `;
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -570,11 +609,11 @@ export function renderTraceHtml(doc: TraceDocument): string {
   const meta = `${escapeHtml(doc.sessionId)} · ${new Date(doc.createdAt).toLocaleString()}`;
 
   return `<!DOCTYPE html>
-<html lang="zh">
+<html lang="${getLocale() === 'zh' ? 'zh' : 'en'}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(doc.title)} — 会话轨迹</title>
+<title>${escapeHtml(doc.title)} — ${escapeHtml(t('trace.html.title_suffix'))}</title>
 <style>${CSS}</style>
 </head>
 <body>
@@ -587,7 +626,7 @@ export function renderTraceHtml(doc: TraceDocument): string {
     <button class="btn" id="calls">Calls</button>
     <button class="btn" id="mode">Seq</button>
     <button class="btn" id="json">JSON</button>
-    <div class="search"><input id="q" type="search" placeholder="搜索…"></div>
+    <div class="search"><input id="q" type="search" placeholder="${escapeHtml(t('trace.html.search'))}"></div>
   </div>
     <div class="timeline">
     <span class="lane-label" style="top:2px">Input</span>
@@ -612,7 +651,7 @@ export function renderTraceHtml(doc: TraceDocument): string {
 </div>
 <div class="tip" id="tip"></div>
 <script id="data" type="application/json">${dataJson}</script>
-<script>${RENDER_JS}</script>
+<script>${renderJs()}</script>
 </body>
 </html>`;
 }

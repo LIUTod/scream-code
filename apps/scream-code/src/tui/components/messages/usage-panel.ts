@@ -9,6 +9,7 @@ import { truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import type { ModelPrice, SessionUsage, TokenUsage } from '@scream-code/scream-code-sdk';
 import { estimateCost, formatUsd } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
+import { formatTokenLimit } from '#/utils/usage/token-limit';
 import {
   formatTokenCount,
   ratioSeverity,
@@ -47,6 +48,11 @@ export interface UsageReportOptions {
   readonly managedUsage?: ManagedUsageReport;
   readonly managedUsageError?: string;
   readonly subagentUsage?: SubagentUsageMap;
+  /**
+   * The session token limit and what this run has used against it. The line is
+   * shown only while a limit is set; `/budget` is where it is changed.
+   */
+  readonly tokenBudget?: { readonly usedTokens: number; readonly limitTokens: number | null } | undefined;
   /**
    * Per-model USD price lookup (from the model catalog). When absent or when a
    * model is unpriced, the cost line is omitted for that model — never `$0.00`,
@@ -366,6 +372,19 @@ export function buildUsageReportLines(options: UsageReportOptions): string[] {
     options.subagentUsage,
     options.priceFor,
   );
+
+  const tokenBudget = options.tokenBudget;
+  if (tokenBudget !== undefined && tokenBudget.limitTokens !== null) {
+    lines.push('');
+    lines.push(
+      muted(
+        t('usage.token_limit', {
+          used: formatTokenCount(tokenBudget.usedTokens),
+          limit: formatTokenLimit(tokenBudget.limitTokens),
+        }),
+      ),
+    );
+  }
 
   if (options.maxContextTokens > 0) {
     const ratio = safeUsageRatio(options.contextUsage);

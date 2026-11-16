@@ -1,6 +1,7 @@
 import type { Agent } from '../..';
 import type { PermissionPolicy } from '../types';
 import { AskModeGuardDenyPermissionPolicy } from './ask-mode-guard-deny';
+import { AskModeReadOnlyMcpApprovePermissionPolicy } from './ask-mode-readonly-mcp-approve';
 import { AutoModeApprovePermissionPolicy } from './auto-mode-approve';
 import { AutoModeAskUserQuestionDenyPermissionPolicy } from './auto-mode-ask-user-question-deny';
 import { BotModePermissionPolicy } from './bot-mode-permission';
@@ -28,6 +29,7 @@ import {
 } from './user-configured-rules';
 import { WarningsAskPermissionPolicy } from './warnings-ask';
 import { CollaborationAutoApprovePermissionPolicy } from './collaboration-auto-approve';
+import { YoloHardFloorAskPermissionPolicy } from './yolo-hard-floor-ask';
 import { YoloModeApprovePermissionPolicy } from './yolo-mode-approve';
 import { WolfPackModeApprovePermissionPolicy } from './wolfpack-mode-approve';
 
@@ -45,10 +47,16 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     new AutoModeAskUserQuestionDenyPermissionPolicy(agent),
     // plan mode: Write/Edit outside the plan file, or TaskStop → deny.
     new PlanModeGuardDenyPermissionPolicy(agent),
-    // ask mode: mutating tools (Bash/Write/Edit/Cron/TaskStop/MCP) → deny.
+    // ask mode: mutating tools (Bash/Write/Edit/Cron/TaskStop) and MCP tools
+    // that are not declared read-only → deny (read-only ones fall through to
+    // AskModeReadOnlyMcpApprovePermissionPolicy below the deny rules).
     new AskModeGuardDenyPermissionPolicy(agent),
     // User-configured deny rule matches → deny.
     new UserConfiguredDenyPermissionPolicy(agent),
+    // Ask mode: MCP tools the server declared read-only run without a prompt.
+    // Sits below the deny policies on purpose — a user deny rule outranks an
+    // author-declared hint.
+    new AskModeReadOnlyMcpApprovePermissionPolicy(agent),
     // bot mode (unattended): reversible allowlist auto-approves; everything
     // else is denied and parked. Sits after user deny rules so an explicit
     // user deny always wins.
@@ -61,7 +69,11 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     // first-match-wins) — auto is a blanket-approve contract, so an ask below
     // it would contradict the mode the user selected.
     new AutoModeApprovePermissionPolicy(agent),
-    // yolo mode → approve every tool operation. Order invariant: every
+    // yolo hard floor → ask: private-read egress, git control writes (hooks,
+    // config), shell startup files. Order invariant: this line MUST stay
+    // directly above `yolo-mode-approve` — below it, yolo approves first.
+    new YoloHardFloorAskPermissionPolicy(agent),
+    // yolo mode → approve every other tool operation. Order invariant: every
     // tool-operation ask lives below this line (the chain is first-match-wins)
     // — yolo is the pass-through sibling of auto that keeps the agent's
     // questions and plan reviews. ExitPlanMode is exempt inside the policy, so

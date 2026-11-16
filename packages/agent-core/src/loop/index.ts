@@ -34,6 +34,7 @@ export type {
   FinalizeToolResultHook,
   ToolUpdate,
   TurnResult,
+  TokenCapState,
 } from './types';
 
 export { ToolAccesses } from './tool-access';

@@ -3,6 +3,7 @@ import {
   addCost,
   estimateCost,
   formatUsd,
+  priceForUsageKey,
   type ModelPrice,
 } from '../src/cost';
 import { emptyUsage } from '../src/usage';
@@ -55,5 +56,38 @@ describe('formatUsd', () => {
     expect(formatUsd(0.5)).toBe('$0.5000');
     expect(formatUsd(0)).toBe('$0.0000');
     expect(formatUsd(undefined)).toBe('—');
+  });
+});
+
+describe('priceForUsageKey', () => {
+  const LARGE: ModelPrice = { input: 3, output: 15 };
+  const OTHER: ModelPrice = { input: 1, output: 2 };
+  const catalog = new Map<string, ModelPrice>([
+    ['acme-large', LARGE],
+    ['acme/acme-large', LARGE],
+    ['ds-fast', OTHER],
+  ]);
+  const lookup = (id: string) => catalog.get(id);
+
+  it('prices a hand-named alias by the catalog model it names', () => {
+    expect(priceForUsageKey('my-fast', { provider: 'gateway', model: 'acme-large' }, lookup)).toBe(LARGE);
+  });
+
+  it('prefers the provider-qualified spelling when the provider is a catalog id', () => {
+    expect(priceForUsageKey('x', { provider: 'acme', model: 'acme-large' }, lookup)).toBe(LARGE);
+  });
+
+  it('resolves through the alias before the key itself', () => {
+    // The key happens to name a different catalog model than the alias does.
+    expect(priceForUsageKey('ds-fast', { provider: 'gateway', model: 'acme-large' }, lookup)).toBe(LARGE);
+  });
+
+  it('falls back to the key (catalog-built `provider/model` aliases, unknown alias)', () => {
+    expect(priceForUsageKey('acme/acme-large', undefined, lookup)).toBe(LARGE);
+    expect(priceForUsageKey('ds-fast', { model: 'not-in-catalog' }, lookup)).toBe(OTHER);
+  });
+
+  it('is undefined when nothing prices', () => {
+    expect(priceForUsageKey('custom', { model: 'unknown' }, lookup)).toBeUndefined();
   });
 });

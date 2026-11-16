@@ -13,6 +13,8 @@
 
 import { closeSync, openSync, readSync } from 'node:fs';
 
+import { t } from '@scream-code/config';
+
 import type { TraceCell } from './trace-types';
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -150,12 +152,14 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
     const text = currentBlocks.filter((b) => b.type === 'text').map((b) => b.text).join('');
     const summary =
       text.trim().replaceAll(/\s+/g, ' ').slice(0, 80) ||
-      (thinking.trim() ? '思考…' : '');
+      (thinking.trim() ? t('trace.cell.thinking') : '');
     const toolsText = toolsInStep.join(', ');
-    const label = toolsText ? `${summary}${summary ? ' — ' : ''}工具: ${toolsText}` : summary;
+    const label = toolsText
+      ? `${summary}${summary ? ' — ' : ''}${t('trace.cell.tools', { tools: toolsText })}`
+      : summary;
     const messageCell = pushCell(
       'message',
-      label || '(空回复)',
+      label || t('trace.cell.empty_reply'),
       {
         sourceSeq: undefined,
         inputDetail: undefined,
@@ -329,7 +333,7 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
         const text = contentPartsText(input).trim();
         pushCell(
           'user',
-          text.replaceAll(/\s+/g, ' ').slice(0, 80) || '(空输入)',
+          text.replaceAll(/\s+/g, ' ').slice(0, 80) || t('trace.cell.empty_input'),
           { opensTurn: true, inputDetail: text || undefined, sourceSeq: seq },
           time,
         );
@@ -341,7 +345,7 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
         const text = contentPartsText(input).trim();
         pushCell(
           'context',
-          `转向: ${text.replaceAll(/\s+/g, ' ').slice(0, 80)}`,
+          t('trace.cell.steer', { text: text.replaceAll(/\s+/g, ' ').slice(0, 80) }),
           { inputDetail: text || undefined, sourceSeq: seq },
           time,
         );
@@ -354,10 +358,10 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
         const reason = asString(record['reason']);
         const label =
           decision === 'timeout'
-            ? '审批超时'
+            ? t('trace.cell.approval_timeout')
             : decision === 'cancelled'
-              ? '审批取消'
-              : '审批拒绝';
+              ? t('trace.cell.approval_cancelled')
+              : t('trace.cell.approval_rejected');
         pushCell(
           'context',
           `${label}: ${toolName}${policyName !== undefined ? ` (${policyName})` : ''}`,
@@ -369,13 +373,13 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
       case 'request.header': {
         const provider = asString(record['provider']) ?? '';
         const model = asString(record['model']) ?? '';
-        const tools = asRecordArray(record['activeTools']).map((t) => asString(t['name']) ?? '');
+        const tools = asRecordArray(record['activeTools']).map((tool) => asString(tool['name']) ?? '');
         pushCell(
           'system',
-          `请求 ${provider ? `${provider}/` : ''}${model}`,
+          t('trace.cell.request', { model: `${provider ? `${provider}/` : ''}${model}` }),
           {
             requestOnly: true,
-            inputDetail: tools.length > 0 ? `工具: ${tools.join(', ')}` : undefined,
+            inputDetail: tools.length > 0 ? t('trace.cell.tools', { tools: tools.join(', ') }) : undefined,
             sourceSeq: seq,
           },
           time,
@@ -388,15 +392,15 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
         const names = asStringArray(record['names']).length > 0
           ? asStringArray(record['names'])
           : asRecordArray(record['names']).map((n) => asString(n['name']) ?? '');
-        pendingSystem.push(`工具集: ${names.join(', ')}`);
+        pendingSystem.push(t('trace.cell.toolset', { tools: names.join(', ') }));
         lastSystemTime = time;
         break;
       }
       case 'config.update': {
         const cfg = asRecord(record);
         const bits: string[] = [];
-        if (asString(cfg?.['modelAlias'])) bits.push(`模型别名: ${cfg!['modelAlias']}`);
-        if (asString(cfg?.['systemPrompt'])) bits.push('系统提示词已更新');
+        if (asString(cfg?.['modelAlias'])) bits.push(t('trace.cell.model_alias', { alias: String(cfg!['modelAlias']) }));
+        if (asString(cfg?.['systemPrompt'])) bits.push(t('trace.cell.prompt_updated'));
         if (bits.length === 0) break;
         pendingSystem.push(bits.join(' · '));
         lastSystemTime = time;
@@ -429,12 +433,12 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
         const source = asString(record['source']);
         pushCell(
           'compacted',
-          `压缩上下文${reason ? `（${reason}）` : ''}`,
+          t('trace.cell.compaction', { reason: reason ? t('trace.cell.reason', { reason }) : '' }),
           {
             sourceSeq: seq,
             startedAt: currentTurnStart,
             inputDetail: instruction || undefined,
-            result: source ? `来源: ${source}` : undefined,
+            result: source ? t('trace.cell.source', { source }) : undefined,
           },
           time,
         );
@@ -445,7 +449,7 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
         const reason = asString(record['reason']);
         pushCell(
           'compacted',
-          `微压缩${reason ? `（${reason}）` : ''}`,
+          t('trace.cell.micro_compaction', { reason: reason ? t('trace.cell.reason', { reason }) : '' }),
           { sourceSeq: seq, startedAt: currentTurnStart },
           time,
         );
@@ -485,7 +489,7 @@ const MAX_CELLS = 4000;
 
 function truncateDetail(value: string | undefined, max = MAX_DETAIL): string | undefined {
   if (!value || value.length <= max) return value;
-  return `${value.slice(0, max)}\n…[已截断 ${value.length - max} 字符]`;
+  return `${value.slice(0, max)}\n${t('trace.cell.truncated', { count: value.length - max })}`;
 }
 
 function capTraceSize(cells: TraceCell[]): TraceCell[] {
@@ -502,13 +506,13 @@ function capTraceSize(cells: TraceCell[]): TraceCell[] {
   }
   const range =
     firstTurn !== undefined && lastTurn !== undefined
-      ? `（回合 ${firstTurn}-${lastTurn}）`
+      ? t('trace.cell.folded_range', { first: firstTurn, last: lastTurn })
       : '';
   return [
     {
       index: 1,
       kind: 'system',
-      text: `更早的轨迹已折叠${range}：${early.length} 条记录`,
+      text: t('trace.cell.folded', { range, count: early.length }),
       timeSeconds: null,
       startedAt: early.find((c) => c.startedAt !== undefined && c.startedAt !== null)?.startedAt ?? null,
     },

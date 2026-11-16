@@ -12,6 +12,7 @@ import type { Agent } from '../../../../src/agent';
 import type { PromptOrigin } from '../../../../src/agent/context/types';
 import type { ClockSources } from '../../../../src/tools/cron/clock';
 import { EventSubscriptionBus } from '../../../../src/agent/events';
+import type { SessionTokenMeter } from '../../../../src/agent/usage/token-meter';
 import type { AgentEvent } from '#/rpc';
 
 /**
@@ -37,6 +38,8 @@ export interface AgentStubOptions {
   readonly steerReturns?: number | null;
   /** Optional homedir so CronManager persistence can derive its path. */
   readonly homedir?: string;
+  /** Session token meter; a tripped one makes recurring fires skip. */
+  readonly tokenMeter?: SessionTokenMeter;
 }
 
 export interface AgentStub {
@@ -67,7 +70,12 @@ export function createAgentStub(opts: AgentStubOptions = {}): AgentStub {
   // The manager records each fire's outcome by watching `turn.ended`, so the
   // stub carries a real bus; tests drive it with `emit()`.
   const eventBus = new EventSubscriptionBus();
-  const agent = { turn, homedir: opts.homedir, eventBus } as unknown as Agent;
+  const agent = {
+    turn,
+    homedir: opts.homedir,
+    eventBus,
+    tokenMeter: opts.tokenMeter,
+  } as unknown as Agent;
   return {
     agent,
     steerCalls,

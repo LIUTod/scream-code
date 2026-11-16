@@ -41,3 +41,29 @@ export function formatUsd(cost: number | undefined): string {
   if (cost === undefined) return '—';
   return `$${cost.toFixed(4)}`;
 }
+
+/**
+ * Price of a usage-record key.
+ *
+ * Usage is recorded under the model **alias** (`[models."<alias>"]`), while the
+ * catalog is indexed by `provider/model` and the bare model id. A catalog-built
+ * alias is spelled `provider/model`, so the key alone used to hit; a hand-named
+ * alias (`my-fast` → `vendor-chat`) never did, and its spend showed as
+ * unpriced even though the model it names is in the catalog. Resolve through
+ * the alias first, then fall back to the key itself.
+ *
+ * `lookup` takes an id in either catalog spelling.
+ */
+export function priceForUsageKey(
+  key: string,
+  alias: { readonly provider?: string | undefined; readonly model: string } | undefined,
+  lookup: (id: string) => ModelPrice | undefined,
+): ModelPrice | undefined {
+  if (alias !== undefined) {
+    const viaAlias =
+      (alias.provider !== undefined ? lookup(`${alias.provider}/${alias.model}`) : undefined) ??
+      lookup(alias.model);
+    if (viaAlias !== undefined) return viaAlias;
+  }
+  return lookup(key);
+}

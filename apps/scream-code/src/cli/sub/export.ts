@@ -6,6 +6,7 @@
  */
 
 import { createInterface } from 'node:readline/promises';
+import { t } from '@scream-code/config';
 
 import {
   ScreamHarness,
@@ -64,14 +65,14 @@ export async function handleExport(
     resolvedId = requestedId;
   } else {
     if (previousSummary === undefined) {
-      deps.stderr.write('未找到可导出的历史会话。\n');
+      deps.stderr.write(`${t('cli.export.none')}\n`);
       deps.exit(1);
     }
     resolvedId = previousSummary.id;
     if (!opts.yes) {
       const confirmed = await deps.confirmPreviousSession(toPreviousSessionSummary(previousSummary));
       if (!confirmed) {
-        deps.stdout.write('导出已取消。\n');
+        deps.stdout.write(`${t('cli.export.cancelled')}\n`);
         return;
       }
     }
@@ -98,14 +99,14 @@ export async function handleExport(
 export function registerExportCommand(parent: Command, deps?: Partial<ExportDeps>): void {
   parent
     .command('export')
-    .description('导出会话为 ZIP 压缩包。')
-    .option('-o, --output <path>', '输出 ZIP 路径。')
-    .option('-y, --yes', '跳过历史会话确认。')
+    .description(t('cli.export.description'))
+    .option('-o, --output <path>', t('cli.export.opt_output'))
+    .option('-y, --yes', t('cli.export.opt_yes'))
     .option(
       '--no-include-global-log',
-      '不打包当前全局诊断日志（~/.scream-code/logs/scream-code.log，不含轮转的 .1 文件）。默认会包含全局日志。',
+      t('cli.export.opt_no_log'),
     )
-    .argument('[sessionId]', '要导出的会话 ID。默认使用最近的会话。')
+    .argument('[sessionId]', t('cli.export.arg_session'))
     .action(
       async (
         sessionId: string | undefined,
@@ -175,7 +176,7 @@ async function confirmPreviousSession(summary: PreviousSessionSummary): Promise<
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
     const title = summary.title === undefined ? summary.sessionId : `${summary.title} (${summary.sessionId})`;
-    const answer = await rl.question(`导出历史会话 "${title}"？[Y/n] `);
+    const answer = await rl.question(t('cli.export.confirm', { title }));
     const trimmed = answer.trim().toLowerCase();
     return trimmed === '' || trimmed === 'y' || trimmed === 'yes';
   } finally {

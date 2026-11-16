@@ -33,8 +33,9 @@
 | `jian` | `packages/jian/` | Execution environment abstractions (filesystem, process, sandbox) |
 | `node-sdk` | `packages/node-sdk/` | Node.js SDK (`ScreamHarness`, `Session`) consumed by the app |
 | `memory` | `packages/memory/` | Cross-session memory store and scoring |
-| `config`      | `packages/config/`      | Platform configuration, identity, model aliases |
-| `migration-legacy` | `packages/migration-legacy/` | Legacy data migration — **deprecated, do not expand** |
+| `knowledge` | `packages/knowledge/` | Local knowledge base: ingest, entity/event extraction, vector + graph search |
+| `config`      | `packages/config/`      | Platform configuration, identity, model aliases, i18n dictionaries (`t()`) |
+| `evals` | `packages/evals/` | Evaluation harness and edit benchmark |
 | `apps/scream-code` | `apps/scream-code/` | CLI and terminal UI application (`scream` command) |
 
 ### Terminology
@@ -104,6 +105,7 @@ Rules:
   ```
   Do not inline multi-line prompts as template literals.
 - UI copy, option labels, help text, and dialog titles should stay next to the component or command that uses them. Do not centralize them into a global "copy constants" module.
+- **Language**: anything a *user* reads goes through `t('key', { params })` with an entry in both `packages/config/src/i18n/locale/en.ts` and `zh.ts` (the placeholders must match) — never a Chinese or English literal in a component, command, or CLI option. Text the *model* reads (injected reminders, tool results, instructions sent through `session.prompt`) is English, like the system prompt. Two tests enforce this: `apps/scream-code/test/i18n-call-sites.test.ts` (every literal `t()` key exists and every `{placeholder}` is supplied — a typo is otherwise silent and the user reads the raw key) and `apps/scream-code/test/i18n-hardcoded-text.test.ts` (no CJK outside comments in `apps/scream-code/src`, except the files listed there with a reason, e.g. `line/`, which replies to Chinese chat platforms). Rebuild `packages/config` after editing the dictionaries (see the dist rebuild rule).
 - `system.md` opens with the **capability-first rule** (right after the primary-goal paragraph), unconditionally: take stock of what already exists — the product surface this prompt describes, tools, skills, subagents, memory, knowledge, session facilities — and start from whatever covers the task; add or change only the part nothing covers. It sits **outside** the `{% if IS_MAIN %}` block on purpose, so specialists inherit it too, and it points at the existing sections (`Product Documentation`, `Product Command Index`, `Suggesting Capabilities`, `Skills`, `Self Assets`) instead of restating them. `test/profile/default-agent-profiles.test.ts` locks both the wording and the main/specialist reach.
 
 ### Logging
@@ -117,7 +119,6 @@ Rules:
 
 - `dist/`, `.turbo/`, and build artifacts are generated. Never hand-edit them.
 - `packages/agent-core/src/tools/builtin/**/*.md` are hand-authored prompt files; edit them directly.
-- `packages/migration-legacy/` is deprecated; do not add new migration logic.
 
 ---
 
@@ -352,8 +353,8 @@ ScreamCode has a built-in MCP client. Agents can call external tools (browser au
 
 - **Config**: `~/.scream-code/mcp.json` (user-global) and `<cwd>/.scream-code/mcp.json` (project-local). Project entries override user entries with the same key (whole-entry replacement, `capabilities` included — a project entry shadowing a user entry must redeclare capabilities; known servers are rescued by fingerprinting).
 - **Capabilities (config-layer semantics)**: entries may declare `capabilities: string[]` — an open-vocabulary, lowercase label of *what the server can do* (e.g. `["browser"]`), not what it is called. Resolution priority: explicit declaration > built-in fingerprints (`mcp/capabilities.ts`: default name or launch-package substring in args) > none; an explicit `[]` opts out of fingerprinting. Legacy configs keep working via fingerprints. The runtime `addServer` path bypasses schema validation, so capability resolution is defensive (dirty values degrade to fingerprints, never throw).
-- **Connection manager**: `packages/agent-core/src/mcp/connection-manager.ts` — `addServer` (runtime add + connect), `stopServer` (disconnect, keep entry), `removeServer` (disconnect + delete entry), `reconnect` (reconnect existing entry). `McpServerEntry.capabilities` is resolved at the single `toPublicEntry` chokepoint and flows through `list()`/`get()`/status events; `McpServerInfo` / `McpServerStatusPayload` carry it as **optional** on the wire for old-client compat.
-- **Capability-driven guide injection**: `agent/injection/mcp-capability-guides.ts` — `MCP_CAPABILITY_GUIDES` maps capability → usage guide (`browser` → Chrome DevTools guide; wire variant id `mcp_browser_skill` kept for stability). One injector instance per guide, so the base class's single-slot `injectedAt` lifecycle math holds per capability. Adding a server guide = a fingerprint pattern in `mcp/capabilities.ts` + a registry entry; never hard-code server names in consumers.
+- **Connection manager**: `packages/agent-core/src/mcp/connection-manager.ts` — `addServer` (runtime add + connect), `stopServer` (disconnect, keep entry), `removeServer` (disconnect + delete entry), `reconnect` (reconnect existing entry). `McpServerEntry.capabilities` is resolved at the single `toPublicEntry` chokepoint and flows through `list()`/`get()`/status events; `McpServerInfo` / `McpServerStatusPayload` carry it as **optional** on the wire for old-client compat. The same chokepoint publishes `serverVersion` — `serverInfo.version` from the initialize handshake (`MCPClient.getServerVersion`), cleared whenever the connection ends. `/mcp` shows it because `@latest` in args says nothing about the version npx actually resolved.
+- **Capability-driven guide injection**: `agent/injection/mcp-capability-guides.ts` — `MCP_CAPABILITY_GUIDES` maps capability → usage guide (`browser` → Chrome DevTools guide; wire variant id `mcp_browser_skill` kept for stability). One injector instance per guide, so the base class's single-slot `injectedAt` lifecycle math holds per capability. Adding a server guide = a fingerprint pattern in `mcp/capabilities.ts` + a registry entry; never hard-code server names in consumers. The browser text is written against chrome-devtools-mcp **1.13** and pinned by test (`test/agent/injection/mcp-capability.test.ts`): it must quote the real qualified prefix (`mcp__chrome-devtools__…`, hyphen preserved by `sanitizeMcpNamePart`) and name the tools a browser task depends on (`set_logpoints`, `mock_network`, `screencast_*`, `includePreserved*`, `sourcePath`).
 - **Roots**: the client declares the MCP `roots` capability and answers `roots/list` with `[cwd, tmpdir()]` (`client-shared.ts` implements `toRootsResult` / `installRootsHandler`; both transports declare the capability only when a provider is passed, and `session/index.ts` injects one). Roots-aware servers (e.g. chrome-devtools-mcp) confine file writes to these directories; without the capability they fall back to the OS temp dir, which rejects workspace screenshot paths.
 - **RPC chain**: `core-api.ts` → `core-impl.ts` → `session/rpc.ts` → node-sdk → TUI.
 - **TUI panel**: `apps/scream-code/src/tui/commands/mcp.ts` — `/mcp` slash command with custom `McpPickerComponent`; installed rows show capability labels (`mcp.capability_*` i18n keys; unknown ids fall back to the raw capability string).
@@ -363,11 +364,69 @@ ScreamCode has a built-in MCP client. Agents can call external tools (browser au
 
 ```
 /mcp → MCP management panel
-  ├─ Installed servers (status + tool count)
-  ├─ Enter → install+start (recommended) / toggle enable/disable (installed)
+  ├─ Installed servers (status + tool count + server-reported version)
+  ├─ Enter → install+start (recommended) / update launch args (installed-but-stale) / toggle enable/disable (installed)
+  ├─ a → OAuth login for an HTTP server (returns a URL, opens the browser, reconnects in the background)
+  ├─ o → launch options for the installed Chrome DevTools entry (see below)
   ├─ d → uninstall (removes from mcp.json + disconnects)
   └─ Built-in recommendations: Chrome DevTools (browser automation), ScreamLife (decision memory)
 ```
+
+### Authentication (`a`)
+
+- `needs-auth` means the HTTP server answered 401 and no static
+  `bearerTokenEnvVar` / `headers` were configured. The row then carries
+  `[a auth]`, and Enter only points at the key (a reconnect without tokens
+  cannot succeed).
+- `McpConnectionManager.authenticate(name)` is the single implementation; the
+  model-side synthetic `mcp__<server>__authenticate` tool and `/mcp` share it.
+  It returns as soon as there is a URL — the browser step is a human's, so the
+  flow completes in the background: reconnect on success, `reportAuthFailure`
+  (status back to `needs-auth` + reason, emitted as a status event) on failure.
+- stdio servers cannot use this path: they authenticate through their own
+  command or env (`MCP_AUTH_UNSUPPORTED` says exactly that). Bearer-token HTTP
+  servers report the missing env var from the client, so no separate UI hint is
+  invented for them.
+
+### Launch options (`o`) and upstream skills
+
+- **Options are launch args, not a second store.** `commands/chrome-devtools-options.ts`
+  owns the product flags (`CHROME_DEVTOOLS_BASE_FLAGS`) and the user-tradeable ones
+  (`headless` / `isolated` / `viewport` / `channel` / `autoConnect`). `mcp.json`
+  stays the single source of truth, so a hand-edited flag behaves like a menu
+  choice and drift detection keeps seeing real args. The reset path re-applies the
+  parsed options over the current product flags — "reset" means current defaults,
+  not factory settings.
+- **Toggles stay local; only 「Save and restart」 writes.** Every saved change
+  relaunches Chrome, so the menu batches them and applies through the same
+  `applyRecommendedArgs` path install/reset use (one write + `addMcpServer`, which
+  reconnects). Esc discards.
+- **`auto-connect` makes launch-time options inert** (the server does not launch
+  Chrome), so the menu refuses to toggle `headless`/`isolated` while it is on
+  instead of saving a switch that describes nothing.
+- **Upstream skills** (`commands/mcp-skills.ts`): the npm package ships seven
+  official Agent-Skills (`skills/<name>/SKILL.md` + `references/`). The menu
+  copies them into `~/.scream-code/skills/` and records
+  `.chrome-devtools-skills.json` (source + version + owned dir names). Ownership
+  rule: a directory the manifest does not list is never overwritten or deleted —
+  a same-named local skill is reported as a conflict and skipped, and removal only
+  deletes manifest-listed dirs. Source is located in the npx cache
+  (`<npm cache>/_npx/*/node_modules/chrome-devtools-mcp`, highest version), so the
+  server must have been launched at least once. Skills load at session start:
+  the menu says a restart (`/new`) is needed.
+
+### Recommended-args drift (`/mcp` upgrade path)
+
+Recommendation args evolve (a new privacy default, a new tool category). An
+install keeps the args it was created with, so `buildRows()` compares the
+user-level `mcp.json` entry against the current recommendation
+(`missingRecommendedArgs`, flag tokens only — the package specifier is ignored so
+a pinned `@1.13.0` is not nagged) and the recommendation row turns into
+"Enter to update". Confirming rewrites that entry from `toServerConfig()` and
+calls `addMcpServer`, which replaces the config and reconnects, so the flags are
+live in the running session. Project-declared and plugin-owned entries are
+refused (`uninstall_project_owned` / `update_plugin_blocked`): rewriting them
+would be undone on the next start.
 
 ### Adding recommendations
 
@@ -376,7 +435,7 @@ Edit the `RECOMMENDED` array in `apps/scream-code/src/tui/commands/mcp.ts`.
 ### Timeouts
 
 - Each recommendation carries an optional per-entry `startupTimeoutMs` written to mcp.json; entries without it fall back to the global default (the old blanket 300s was a Playwright-era leftover).
-- Chrome DevTools recommendation: `startupTimeoutMs: 180_000` (cold `npx` download only — Chrome itself launches lazily on first tool call). Its args also pass `--no-performance-crux` (keeps trace URLs out of Google's CrUX API, matching `--no-usage-statistics`), `--redact-network-headers` (network headers are redacted before they reach the model — same privacy stance) and `--screenshot-format/quality/max-width` compression to shrink screenshot context; env sets `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1`. See `getRecommended()`.
+- Chrome DevTools recommendation: `startupTimeoutMs: 180_000` (cold `npx` download only — Chrome itself launches lazily on first tool call). Its args, in the order the rationale matters: `--no-usage-statistics` + `--no-performance-crux` (no telemetry, and trace URLs stay out of Google's CrUX API), `--redact-network-headers` (headers redacted before they reach the model), `--no-file-navigations` (a `file:` navigation plus `take_snapshot` would be an unrestricted local read that bypasses the workspace boundary), `--screenshot-format=jpeg --screenshot-quality=85 --screenshot-max-width=1600` (screenshot context size), and the opt-in categories `--category-network-mocks` + `--memory-debugging` (mock_network/remove_network_mock; the heap-analysis tools — a snapshot without them is an unreadable blob). Tool schemas stay off-context via the on-demand portal, so the wider surface costs nothing per request. Env sets `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1`. See `getRecommended()`.
 - Global default: `DEFAULT_STARTUP_TIMEOUT_MS = 60_000`.
 
 ---
@@ -474,7 +533,7 @@ The completion grader returns `{pass, reason, issues}`; each issue carries `kind
 Unattended permission mode: reversible actions auto-approve; everything else is denied and parked for human review (fail-closed — when in doubt, stop).
 
 - **Entry**: `/bot` toggles; `/bot on|off` explicit.
-- **Policy**: `packages/agent-core/src/agent/permission/policies/bot-mode-permission.ts` — `BotModePermissionPolicy`, installed after user-configured deny rules (an explicit user deny always wins). Reversible allowlist → approve: reads/lookups, in-workspace `Write`/`Edit` (sensitive-file regex guard, `~` rejected, separator-boundary path check), read-only Bash (metacharacter exclusions block chaining/substitution/redirection/newlines; mutable git subcommands and `find`/`sort` are absent), plus goal and collaboration tools. Everything else → deny.
+- **Policy**: `packages/agent-core/src/agent/permission/policies/bot-mode-permission.ts` — `BotModePermissionPolicy`, installed after user-configured deny rules (an explicit user deny always wins). Reversible allowlist → approve: reads/lookups (memory reads only — `MemoryWrite`/`MemoryEdit`/`MemoryConsolidateApply` are denied because a memo persists into later sessions), in-workspace `Write`/`Edit` (sensitive-file regex guard, `~` rejected, separator-boundary path check, and no deferred-execution paths: `.git`, `.husky`/`.githooks`, CI dirs and files such as `.github`/`.gitlab-ci.yml`, `.vscode`/`.idea`/`.devcontainer`, `.envrc`), read-only Bash (metacharacter exclusions block chaining/substitution/redirection/newlines; mutable git subcommands and `find`/`sort` are absent), plus goal and collaboration tools. Everything else → deny.
 - **Deny reasons**: policy deny reasons are propagated into the tool error (`permission/index.ts`), so the model can tell "parked for human review" from a permanent failure and does not retry blindly.
 - **Validation**: `PermissionMode` covers `bot` across agent-core (`permission/types.ts`, `config/schema.ts`, `config/toml.ts`, `errors/codes.ts`), node-sdk (`types.ts`, `session.ts` runtime guard), and the TUI selector.
 
@@ -493,9 +552,10 @@ Stateless retry with an optional `--verify` shell gate. Each iteration re-sends 
 ### Turn budget & stop-loss (agent-core)
 
 - **Step budget**: `loop_control.max_steps_per_turn` (default `TURN_DEFAULTS.maxStepsPerTurn = 160`, per turn, fresh on each new user message; `0` disables). Exhaustion soft-lands: one `finalStep` wrap-up step (reminder injected in `agent/turn/index.ts` beforeStep) then `end_turn`; the result and `turn.ended` carry `stepBudgetExhausted: true` (CLI exit code 4, TUI notice). The old thrown error `loop.max_steps_exceeded` no longer exists.
+- **Session token limit**: `loop_control.max_session_tokens` (unset/0 = off; tokens, not dollars — custom providers have no catalog price, so a dollar cap would count them as free). `SessionTokenMeter` (`agent/usage/token-meter.ts`) is one instance per `Session`, passed to every agent via `AgentOptions.tokenMeter`; `UsageRecorder.record` feeds it for `source: 'fresh'` only (subagent folds pass `'fold'`, wire restore `'replay'` — both already metered), counting `grandTotal` = input incl. cache reads + output, the same total `/usage` and `/goal` budgets show. The limit is mutable: `Session.setSessionTokenBudget` (RPC `setSessionTokenBudget`, SDK `Session.setSessionTokenBudget`) moves it on the live session, so raising it clears a tripped cap at once; `getSessionTokenBudget` reads `{ usedTokens, limitTokens | null }`. `/budget` (`tui/commands/budget.ts`: picker, `/budget 50m`, `/budget off`; parsing in `utils/usage/token-limit.ts`, accepts k/m/b/万/亿) applies it live and persists the default via `setConfig` (`off` is stored as 0 — a patch cannot delete a key). `runTurn` consults `RunTurnInput.tokenCap` before every step, the step-budget wrap-up included: a reached cap ends the turn with no model request and `TurnResult.tokenCapReached` → `turn.ended.tokenCapReached` (TUI warning that points at `/budget`, stream-json exit 4, `-p` non-zero, LINE reply via `line/notices.ts`); `driveGoal` pauses the goal; `CronManager.handleFire` skips recurring fires (one-shots still deliver); the cache warmer's `getEnabled` turns false. The count is what this run used (resume starts a new allowance); `/usage` shows it against the limit while one is set.
 - **Failure breaker**: `agent/turn/index.ts` counts consecutive failed model tool calls via `classifyToolResult` (`aborted` = neutral — a user/parent abort must not be misattributed as a model failure; `blocked` counts). 6 → change-approach reminder; 10 → forced wrap-up (`stopTurn` + `shouldContinueAfterStop` early-exit).
 - **Approval timeout stop-loss**: `permission/index.ts` — the timeout error tells the model the user is away; a second approval request for the same tool in the same turn is denied immediately instead of stalling another 5 minutes.
-- **Tool annotations**: `ltod` `ToolAnnotations` (+ `Tool.annotations`), MCP-native annotations pass through (`connection-manager.mapMcpAnnotations`). Policy `destructive-hint-ask` sits above `default-tool-approve`: a `destructiveHint` forces an approval where a prompt is still reachable (ask mode) and never grants one (hints are author-declared, unverified).
+- **Tool annotations**: `ltod` `ToolAnnotations` (+ `Tool.annotations`), MCP-native annotations pass through (`connection-manager.mapMcpAnnotations`) and the MCP wrapper in `agent/tool/index.ts` forwards them onto the registered `ExecutableTool`. Policy `destructive-hint-ask` sits above `default-tool-approve`: a `destructiveHint` forces an approval where a prompt is still reachable (ask mode) and never grants one (hints are author-declared, unverified). Ask mode (`ask-mode-guard-deny`) is the one place a hint *widens*: an MCP tool its server declared `readOnlyHint` and not `destructiveHint` is approved — a deliberate, user-approved exception, bounded because a read-only hint can only extend a mode whose contract is already read-only, `destructiveHint` still wins, and every other MCP tool keeps the deny.
 - **Structured tool errors**: `ExecutableToolErrorResult.code: 'aborted' | 'failed' | 'blocked'` + `abortReason`; `turn.step.retrying/interrupted` carry `errorCode`. TUI reads the code first and falls back to the legacy regex only for records without one.
 - **On-demand MCP tools**: server config `exposure: 'on-demand'` (default) keeps MCP tool schemas out of the request; the model lists/enables them with `DiscoverMcpTools` (pattern-filtered; enabling an excluded name reports `skipped`). `exposure: 'always'` opts a server back into eager declaration.
 

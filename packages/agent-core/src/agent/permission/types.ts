@@ -17,8 +17,11 @@ export type PermissionRuleScope = 'turn-override' | 'session-runtime' | 'project
  *   - `yolo`   — only deny rules can block; everything else allows.
  *     The default posture when no mode is selected.
  *   - `auto`   — caller may bypass rule checks entirely
- *   - `ask`    — read-only Q&A: mutating tools (incl. Bash and MCP) are
- *     denied; only read/search/dialogue tools may run
+ *   - `ask`    — read-only Q&A: mutating tools (incl. Bash) are denied; only
+ *     read/search/dialogue tools may run. MCP tools are denied too, unless
+ *     the server declared them read-only (`readOnlyHint`, never alongside
+ *     `destructiveHint`) — declared hints otherwise may only tighten a
+ *     decision, so this one exception is bounded by the mode's own contract
  *   - `bot`    — unattended: reversible allowlist auto-approves; everything
  *     else is denied and parked for the user
  */

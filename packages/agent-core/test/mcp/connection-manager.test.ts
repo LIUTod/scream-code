@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { testJian } from '../fixtures/test-jian';
 import type { ProviderConfig } from '@scream-code/ltod';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { randomUUID } from 'node:crypto';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
@@ -107,8 +107,22 @@ describe('McpConnectionManager', () => {
     }
   }, 20000);
 
-  it('passes the roots provider through to stdio clients', async () => {
-    const root = join(tmpdir(), 'scream-cm-root');
+  it('reports the server-reported version from the handshake and clears it on stop', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      await cm.connectAll({ alpha: stdioConfig() });
+      // The fixture announces { name: 'mock-stdio', version: '0.0.1' }.
+      expect(cm.get('alpha')?.serverVersion).toBe('0.0.1');
+      await cm.stopServer('alpha');
+      // A stopped server has no handshake to speak from — the row must not
+      // keep claiming a version.
+      expect(cm.get('alpha')?.serverVersion).toBeUndefined();
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
+  it('passes the roots provider through to stdio clients', async () => {    const root = join(tmpdir(), 'scream-cm-root');
     const cm = new McpConnectionManager({ rootsProvider: () => [root] });
     try {
       await cm.connectAll({ alpha: stdioConfig() });
@@ -424,7 +438,7 @@ describe('McpConnectionManager', () => {
       });
       const entry = cm.get('gated');
       expect(entry?.status).toBe('needs-auth');
-      expect(entry?.error).toContain('需要 OAuth 认证');
+      expect(entry?.error).toContain('needs OAuth authorization');
       expect(entry?.toolCount).toBe(0);
     } finally {
       await cm.shutdown();
@@ -497,7 +511,7 @@ describe('McpConnectionManager', () => {
       const entry = cm.get('notion');
       expect(entry).toMatchObject({
         status: 'needs-auth',
-        error: expect.stringContaining('需要 OAuth 认证'),
+        error: expect.stringContaining('needs OAuth authorization'),
       });
       expect(entry?.error).not.toContain('redirectUrl must be set');
     } finally {
@@ -948,3 +962,235 @@ function testProviderManager(): ProviderManager {
     },
   });
 }
+
+// ─── UI 认证入口（/mcp 的 a 键走这里） ────────────────────────────────
+//
+// 模型侧原本已有合成工具 `…__authenticate`，但面板没有入口，needs-auth 行
+// 就成了死胡同。这条路径必须：立刻返回 URL（浏览器步骤是人的事，不能把 RPC
+// 挂住十五分钟）、流程成功后重连、失败把原因写回条目。
+
+describe('McpConnectionManager.authenticate', () => {
+  /** 只实现 authenticate 会用到的方法；其余按接口形状空实现。 */
+  function fakeOAuth(overrides: {
+    beginAuthorization?: (name: string, url: string | URL) => Promise<unknown>;
+  } = {}): McpOAuthService {
+    return {
+      hasTokens: () => false,
+      getProvider: () => undefined,
+      beginAuthorization:
+        overrides.beginAuthorization ??
+        (async () => ({
+          authorizationUrl: new URL('https://as.example/authorize?state=abc'),
+          complete: () => Promise.resolve(undefined),
+          cancel: () => Promise.resolve(undefined),
+        })),
+    } as unknown as McpOAuthService;
+  }
+
+  it('未知服务器 → MCP_SERVER_NOT_FOUND', async () => {
+    const cm = new McpConnectionManager({ oauthService: fakeOAuth() });
+    await expect(cm.authenticate('nope')).rejects.toThrow(/Unknown MCP server/);
+    await cm.shutdown();
+  });
+
+  it('stdio 服务器 → MCP_AUTH_UNSUPPORTED，且不发起流程', async () => {
+    const beginAuthorization = vi.fn();
+    const cm = new McpConnectionManager({ oauthService: fakeOAuth({ beginAuthorization }) });
+    try {
+      await cm.connectAll({ alpha: stdioConfig() });
+      await expect(cm.authenticate('alpha')).rejects.toMatchObject({
+        code: 'mcp.auth_unsupported',
+      });
+      expect(beginAuthorization).not.toHaveBeenCalled();
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
+  it('HTTP 服务器：返回授权 URL，流程完成后尝试重连', async () => {
+    const statuses: string[] = [];
+    let beginUrl: string | URL | undefined;
+    const cm = new McpConnectionManager({
+      oauthService: fakeOAuth({
+        beginAuthorization: async (_name, url) => {
+          beginUrl = url;
+          return {
+            authorizationUrl: new URL('https://as.example/authorize?state=abc'),
+            complete: () => Promise.resolve(undefined),
+            cancel: () => Promise.resolve(undefined),
+          };
+        },
+      }),
+    });
+    cm.onStatusChange((entry) => statuses.push(`${entry.name}:${entry.status}`));
+    try {
+      // 127.0.0.1:1 立刻拒绝：条目存在即可，认证流程不依赖连接成功。
+      await cm.addServer('remote', { transport: 'http', url: 'http://127.0.0.1:1/mcp' });
+      const reconnectSpy = vi.spyOn(cm, 'reconnect');
+      const result = await cm.authenticate('remote');
+
+      expect(beginUrl).toBe('http://127.0.0.1:1/mcp');
+      expect(result.alreadyAuthorized).toBe(false);
+      expect(result.authorizationUrl).toContain('https://as.example/authorize');
+      // 回调完成后必须自己重连——这是「浏览器长流程」不阻塞调用方的代价。
+      await vi.waitFor(() => {
+        expect(reconnectSpy).toHaveBeenCalledWith('remote');
+      });
+      expect(statuses.length).toBeGreaterThan(0);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
+  it('reportAuthFailure：保持 needs-auth 并带上失败原因', async () => {
+    const cm = new McpConnectionManager({ oauthService: fakeOAuth() });
+    try {
+      await cm.addServer('remote', { transport: 'http', url: 'http://127.0.0.1:1/mcp' });
+      cm.reportAuthFailure('remote', new Error('callback timed out'));
+      expect(cm.get('remote')?.status).toBe('needs-auth');
+      expect(cm.get('remote')?.error).toBe('callback timed out');
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+});
+
+describe('McpConnectionManager.authenticate：并发与迟到回调', () => {
+  function pendingOAuth(rejectRef: { reject?: (error: unknown) => void }) {
+    return {
+      hasTokens: () => false,
+      getProvider: () => undefined,
+      beginAuthorization: async () => ({
+        authorizationUrl: new URL('https://as.example/authorize?state=abc'),
+        complete: () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectRef.reject = reject;
+          }),
+        cancel: () => Promise.resolve(undefined),
+      }),
+    } as unknown as McpOAuthService;
+  }
+
+  it('浏览器步骤失败 → 条目回 needs-auth 并带上原因（不是静默）', async () => {
+    const rejectRef: { reject?: (error: unknown) => void } = {};
+    const cm = new McpConnectionManager({ oauthService: pendingOAuth(rejectRef) });
+    try {
+      await cm.addServer('remote', { transport: 'http', url: 'http://127.0.0.1:1/mcp' });
+      const result = await cm.authenticate('remote');
+      expect(result.authorizationUrl).toContain('https://as.example');
+
+      rejectRef.reject?.(new Error('callback timed out'));
+      await vi.waitFor(() => {
+        expect(cm.get('remote')?.status).toBe('needs-auth');
+      });
+      expect(cm.get('remote')?.error).toBe('callback timed out');
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
+  it('同一服务器再次认证复用进行中的流程（两条流程会互相冲掉）', async () => {
+    const rejectRef: { reject?: (error: unknown) => void } = {};
+    const service = pendingOAuth(rejectRef);
+    const begin = vi.spyOn(service, 'beginAuthorization');
+    const cm = new McpConnectionManager({ oauthService: service });
+    try {
+      await cm.addServer('remote', { transport: 'http', url: 'http://127.0.0.1:1/mcp' });
+      const [first, second] = await Promise.all([
+        cm.authenticate('remote'),
+        cm.authenticate('remote'),
+      ]);
+
+      expect(begin).toHaveBeenCalledTimes(1);
+      expect(second.authorizationUrl).toBe(first.authorizationUrl);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
+  it('被取消的旧流程迟到失败，不会删掉新流程的槽位', async () => {
+    // 每次 begin 生成独立的 reject 句柄，便于让「旧流程」在新流程登记后才失败。
+    const rejects: Array<(error: unknown) => void> = [];
+    const service = {
+      hasTokens: () => false,
+      getProvider: () => undefined,
+      beginAuthorization: async () => {
+        const index = rejects.length;
+        return {
+          authorizationUrl: new URL(`https://as.example/authorize?state=${String(index)}`),
+          complete: () =>
+            new Promise<void>((_resolve, reject) => {
+              rejects[index] = reject;
+            }),
+          cancel: () => Promise.resolve(undefined),
+        };
+      },
+    } as unknown as McpOAuthService;
+    const begin = vi.spyOn(service, 'beginAuthorization');
+    const cm = new McpConnectionManager({ oauthService: service });
+    try {
+      await cm.addServer('remote', { transport: 'http', url: 'http://127.0.0.1:1/mcp' });
+      await cm.authenticate('remote'); // 流程 A
+      await cm.stopServer('remote'); // 取消 A，A 的失败稍后才到
+      const second = await cm.authenticate('remote'); // 流程 B 登记槽位
+
+      rejects[0]?.(new Error('cancelled')); // A 迟到失败
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // B 仍在进行：第三次调用必须复用 B，而不是并发起第三条流程。
+      const third = await cm.authenticate('remote');
+      expect(begin).toHaveBeenCalledTimes(2);
+      expect(third.authorizationUrl).toBe(second.authorizationUrl);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
+  it('停用的条目拒绝认证，不会顺手把它启动', async () => {
+    const cm = new McpConnectionManager({ oauthService: pendingOAuth({}) });
+    try {
+      await cm.addServer('remote', {
+        transport: 'http',
+        url: 'http://127.0.0.1:1/mcp',
+        enabled: false,
+      } as never);
+      await expect(cm.authenticate('remote')).rejects.toMatchObject({
+        code: 'mcp.server_disabled',
+      });
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
+  it('已连接条目上的迟到失败不会把它打回 needs-auth', async () => {
+    const cm = new McpConnectionManager({ oauthService: pendingOAuth({}) });
+    try {
+      await cm.connectAll({ alpha: stdioConfig() });
+      expect(cm.get('alpha')?.status).toBe('connected');
+
+      cm.reportAuthFailure('alpha', new Error('late browser failure'));
+
+      expect(cm.get('alpha')?.status).toBe('connected');
+      expect(cm.get('alpha')?.error).toBeUndefined();
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
+  it('过期代际的失败被丢弃（服务器已重连过）', async () => {
+    const cm = new McpConnectionManager({ oauthService: pendingOAuth({}) });
+    try {
+      await cm.addServer('remote', { transport: 'http', url: 'http://127.0.0.1:1/mcp' });
+      const staleAttempt = (cm as unknown as { entries: Map<string, { attemptId: number }> }).entries
+        .get('remote')?.attemptId ?? 0;
+
+      // 模拟「重连在浏览器步骤进行中发生」：代际前进后，旧流程的失败必须被丢弃。
+      await cm.reconnect('remote').catch(() => undefined);
+      cm.reportAuthFailure('remote', new Error('stale'), staleAttempt);
+
+      expect(cm.get('remote')?.error).not.toBe('stale');
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+});

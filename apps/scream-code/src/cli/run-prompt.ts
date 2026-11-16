@@ -11,9 +11,11 @@ import {
   type Session,
   type SessionStatus,
 } from '@scream-code/scream-code-sdk';
-import { setLocale } from '@scream-code/config';
+import { setLocale, t } from '@scream-code/config';
 
 import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
+import { formatTokenLimit } from '#/utils/usage/token-limit';
+import { formatTokenCount } from '#/utils/usage/usage-format';
 import type { CLIOptions, PromptOutputFormat } from './options';
 import { createScreamCodeHostIdentity } from './version';
 
@@ -145,18 +147,16 @@ async function resolvePromptSession(
     const sessions = await harness.listSessions({ sessionId: opts.session, workDir });
     const target = sessions[0];
     if (target === undefined) {
-      throw new Error(`未找到会话 "${opts.session}"。`);
+      throw new Error(t('cli.prompt.session_not_found', { id: opts.session }));
     }
     if (!sameWorkDir(target.workDir, workDir)) {
       stderr.write(
         `${chalk.yellow(
-          `会话 "${opts.session}" 是在其他目录下创建的。\n` +
+          `${t('cli.prompt.session_other_dir', { id: opts.session })}\n` +
             `  cd "${target.workDir}" && scream -r ${opts.session}`,
         )}\n\n`,
       );
-      throw new Error(
-        `会话 "${opts.session}" 是在其他目录下创建的。`,
-      );
+      throw new Error(t('cli.prompt.session_other_dir', { id: opts.session }));
     }
     const session = await harness.resumeSession({ id: opts.session });
     const status = await session.getStatus();
@@ -197,7 +197,7 @@ async function resolvePromptSession(
         restorePermission,
       };
     }
-    stderr.write(`"${workDir}" 下没有可继续的会话；正在启动新会话。\n`);
+    stderr.write(`${t('cli.prompt.no_session_to_continue', { dir: workDir })}\n`);
   }
 
   const model = requireConfiguredModel(opts.model, defaultModel);
@@ -234,7 +234,7 @@ function requireConfiguredModel(...models: readonly (string | undefined)[]): str
   const model = configuredModel(...models);
   if (model === undefined) {
     throw new Error(
-      '未配置模型。运行 `scream` 并使用 /login 登录后重试；或在 config.toml 中设置 default_model。',
+      t('cli.prompt.no_model'),
     );
   }
   return model;
@@ -371,6 +371,19 @@ function runPromptTurn(
         }
         return;
       case 'turn.ended':
+        if (event.reason === 'completed' && event.tokenCapReached !== undefined) {
+          // The session token limit stopped the turn before a model request: the
+          // prompt did not get done, so do not report success.
+          finish(
+            new Error(
+              t('cli.prompt.token_cap', {
+                used: formatTokenCount(event.tokenCapReached.usedTokens),
+                limit: formatTokenLimit(event.tokenCapReached.limitTokens),
+              }),
+            ),
+          );
+          return;
+        }
         if (event.reason === 'completed') {
           finish();
           return;
@@ -498,7 +511,7 @@ function writeResumeHint(
   stderr: PromptOutput,
 ): void {
   const command = `scream -r ${sessionId}`;
-  const content = `恢复此会话：${command}`;
+  const content = t('cli.resume_hint', { command });
   if (outputFormat === 'stream-json') {
     const message: PromptJsonResumeMetaMessage = {
       role: 'meta',
@@ -682,12 +695,12 @@ function formatHookResultPlain(event: HookResultEvent): string {
 }
 
 function formatHookResultTitle(event: HookResultEvent): string {
-  return `${event.hookEvent} hook${event.blocked === true ? ' 已阻止' : ''}`;
+  return `${event.hookEvent} hook${event.blocked === true ? t('cli.prompt.hook_blocked') : ''}`;
 }
 
 function formatHookResultBody(event: HookResultEvent): string {
   const content = event.content.trim();
-  return content.length === 0 ? '(空)' : content;
+  return content.length === 0 ? t('cli.prompt.empty') : content;
 }
 
 function stringifyJsonValue(value: unknown): string {
@@ -708,7 +721,7 @@ function hasTurnId(event: Event): event is Event & { readonly turnId: number } {
 
 function formatTurnEndedFailure(event: Extract<Event, { type: 'turn.ended' }>): string {
   if (event.error !== undefined) return `${event.error.code}: ${event.error.message}`;
-  return `提示回合结束，原因：${event.reason}`;
+  return t('cli.prompt.turn_ended', { reason: event.reason });
 }
 /**
  * Compare two working directories tolerating symlink aliases (/tmp vs

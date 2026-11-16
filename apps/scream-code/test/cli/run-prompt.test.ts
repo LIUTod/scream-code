@@ -658,6 +658,35 @@ describe('runPrompt', () => {
     expect(mocks.harnessClose).toHaveBeenCalled();
   });
 
+  it('rejects when the session token limit stopped the turn', async () => {
+    mocks.session.prompt.mockImplementationOnce(async () => {
+      for (const handler of mocks.eventHandlers) {
+        handler(
+          mocks.mainEvent({ type: 'turn.started', turnId: 2, origin: { kind: 'user' } }),
+        );
+        handler(
+          mocks.mainEvent({
+            type: 'turn.ended',
+            turnId: 2,
+            reason: 'completed',
+            tokenCapReached: { usedTokens: 5_250_000, limitTokens: 5_000_000 },
+          }),
+        );
+      }
+    });
+
+    // `reason` is `completed`, but the prompt did not get done: a script
+    // must not see success.
+    await expect(
+      runPrompt(opts(), '1.2.3-test', {
+        stdout: { write: vi.fn(() => true) },
+        stderr: { write: vi.fn(() => true) },
+      }),
+    ).rejects.toThrow('max_session_tokens');
+
+    expect(mocks.harnessClose).toHaveBeenCalled();
+  });
+
   it('rejects when the turn fails and still closes resources', async () => {
     mocks.session.prompt.mockImplementationOnce(async () => {
       for (const handler of mocks.eventHandlers) {

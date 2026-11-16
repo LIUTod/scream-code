@@ -3,6 +3,8 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { t } from '@scream-code/config';
+
 import {
   SCREAM_CODE_PLUGIN_MARKETPLACE_URL,
   SCREAM_CODE_PLUGIN_MARKETPLACE_URL_ENV,
@@ -57,17 +59,17 @@ export function parsePluginMarketplace(raw: string, location: MarketplaceLocatio
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    throw new Error(`插件市场不是有效的 JSON: ${formatParseError(error)}`, {
+    throw new Error(t('marketplace.err.invalid_json', { error: formatParseError(error) }), {
       cause: error,
     });
   }
 
   if (!isRecord(parsed)) {
-    throw new TypeError('插件市场必须是一个对象.');
+    throw new TypeError(t('marketplace.err.not_object'));
   }
   const rawPlugins = parsed['plugins'];
   if (!Array.isArray(rawPlugins)) {
-    throw new TypeError('插件市场必须包含 "plugins" 数组.');
+    throw new TypeError(t('marketplace.err.plugins_array'));
   }
 
   return {
@@ -80,7 +82,7 @@ export function parsePluginMarketplace(raw: string, location: MarketplaceLocatio
 function resolveMarketplaceLocation(source: string, workDir: string): MarketplaceLocation {
   const trimmed = source.trim();
   if (trimmed.length === 0) {
-    throw new Error(`${SCREAM_CODE_PLUGIN_MARKETPLACE_URL_ENV} 不能为空.`);
+    throw new Error(t('marketplace.err.url_empty', { env: SCREAM_CODE_PLUGIN_MARKETPLACE_URL_ENV }));
   }
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     return { raw: trimmed, kind: 'remote', resolved: trimmed };
@@ -101,7 +103,7 @@ async function readMarketplaceText(
   }
   const response = await fetchImpl(location.resolved);
   if (!response.ok) {
-    throw new Error(`插件市场返回 HTTP ${response.status}`);
+    throw new Error(t('marketplace.err.http', { status: response.status }));
   }
   return response.text();
 }
@@ -112,14 +114,14 @@ function parseMarketplaceEntry(
   location: MarketplaceLocation,
 ): PluginMarketplaceEntry {
   if (!isRecord(value)) {
-    throw new TypeError(`插件市场条目 ${index + 1} 必须是一个对象.`);
+    throw new TypeError(t('marketplace.err.entry_object', { index: index + 1 }));
   }
   const id = requiredString(value, 'id', index);
   const source = stringField(value, 'source') ??
     stringField(value, 'url') ??
     stringField(value, 'downloadUrl');
   if (source === undefined) {
-    throw new Error(`插件市场条目 ${id} 必须定义 "source".`);
+    throw new Error(t('marketplace.err.entry_source', { id }));
   }
   return {
     id,
@@ -140,16 +142,14 @@ function parseMarketplaceTier(
   const raw = value['tier'];
   if (raw === undefined) return undefined;
   if (typeof raw !== 'string') {
-    throw new TypeError(`插件市场条目 ${id} "tier" 必须是字符串.`);
+    throw new TypeError(t('marketplace.err.tier_string', { id }));
   }
   const tier = raw.trim();
   if (tier.length === 0) return undefined;
   if ((PLUGIN_MARKETPLACE_TIERS as readonly string[]).includes(tier)) {
     return tier as PluginMarketplaceTier;
   }
-  throw new Error(
-    `插件市场条目 ${id} "tier" 必须是以下之一: ${PLUGIN_MARKETPLACE_TIERS.join(', ')}.`,
-  );
+  throw new Error(t('marketplace.err.tier_values', { id, values: PLUGIN_MARKETPLACE_TIERS.join(', ') }));
 }
 
 function resolveEntrySource(source: string, location: MarketplaceLocation): string {
@@ -179,7 +179,7 @@ function resolveLocalPath(input: string, workDir: string): string {
 function requiredString(value: Record<string, unknown>, field: string, index: number): string {
   const result = stringField(value, field);
   if (result === undefined) {
-    throw new Error(`插件市场条目 ${index + 1} 必须定义 "${field}".`);
+    throw new Error(t('marketplace.err.entry_field', { index: index + 1, field }));
   }
   return result;
 }

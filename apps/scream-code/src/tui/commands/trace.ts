@@ -3,6 +3,8 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { t } from '@scream-code/config';
+
 import type { SlashCommandHost } from './dispatch';
 import { buildTraceCells } from '#/utils/trace/trace-builder';
 import { renderTraceHtml } from '#/utils/trace/render-trace-html';
@@ -22,12 +24,12 @@ async function runTrace(host: SlashCommandHost): Promise<void> {
     const session = host.session;
     const sessionDir = session?.summary?.sessionDir;
     if (!sessionDir) {
-      host.showError('当前会话不可用，无法导出轨迹');
+      host.showError(t('trace.err.no_session'));
       return;
     }
     const wirePath = join(sessionDir, 'agents', 'main', 'wire.jsonl');
     if (!existsSync(wirePath)) {
-      host.showError(`未找到轨迹文件: ${wirePath}`);
+      host.showError(t('trace.err.no_wire', { path: wirePath }));
       return;
     }
 
@@ -47,9 +49,11 @@ async function runTrace(host: SlashCommandHost): Promise<void> {
     writeFileSync(filePath, html, 'utf8');
 
     const opened = await openInBrowser(filePath);
-    host.showStatus(opened ? '轨迹已打开' : '轨迹已生成，请手动打开');
+    host.showStatus(opened ? t('trace.opened') : t('trace.generated'));
   } catch (error) {
-    host.showError(`轨迹导出失败: ${error instanceof Error ? error.message : String(error)}`);
+    host.showError(
+      t('trace.err.export_failed', { error: error instanceof Error ? error.message : String(error) }),
+    );
   }
 }
 

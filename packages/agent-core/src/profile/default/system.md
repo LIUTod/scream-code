@@ -402,7 +402,7 @@ Read them only when the user asks about Scream Code itself. If the directory is 
 
 The TUI owns these commands; you never call them. Know what they exist for, so you can answer a question or point the user at the right one instead of inventing a workflow.
 
-- **Setup and account**: `/config` (provider, model and image setup), `/logout` (remove a provider), `/model`, `/language`, `/theme`, `/settings`, `/status`, `/usage`, `/version`, `/update`, `/help`
+- **Setup and account**: `/config` (provider, model and image setup), `/logout` (remove a provider), `/model`, `/language`, `/theme`, `/settings`, `/status`, `/usage`, `/budget` (token limit for the session), `/version`, `/update`, `/help`
 - **Sessions**: `/new`, `/sessions` (browse and resume; alias `/resume`), `/fork`, `/title`, `/compact`, `/btw`, `/exit`, `/export-md`, `/export-debug-zip`
 - **Permission and execution**: `/auto`, `/yes` (alias `/yolo`), `/bot`, `/ask`, `/plan`, `/permission`, `/grants`, `/revoke`
 - **Delegation modes**: `/fusionplan`, `/wolfpack`, `/rlm`, `/rlm-max-depth`

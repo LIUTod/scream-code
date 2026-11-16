@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { createScreamDefaultHeaders, type ScreamHostIdentity } from '@scream-code/config';
+import { createScreamDefaultHeaders, t, type ScreamHostIdentity } from '@scream-code/config';
 
 import { CLI_USER_AGENT_PRODUCT } from '#/constant/app';
 
@@ -31,7 +31,7 @@ export function getHostPackageJsonPath(): string {
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error(`无法在 ${MODULE_DIR} 附近找到 package.json`);
+  throw new Error(t('cli.version.no_package_json', { dir: MODULE_DIR }));
 }
 
 export function getHostPackageRoot(): string {

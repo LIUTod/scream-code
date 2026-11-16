@@ -159,6 +159,17 @@ export class HttpMcpClient implements MCPClient {
     return typeof instructions === 'string' && instructions.length > 0 ? instructions : undefined;
   }
 
+  getServerVersion(): { name?: string; version?: string } | undefined {
+    // Same handshake field as the stdio transport: kept here so `/mcp` shows a
+    // version for HTTP servers too instead of implying "unknown".
+    const info = this.client.getServerVersion?.();
+    if (info === undefined) return undefined;
+    return {
+      ...(typeof info.name === 'string' ? { name: info.name } : {}),
+      ...(typeof info.version === 'string' ? { version: info.version } : {}),
+    };
+  }
+
   async listResources(): Promise<MCPResourceDefinition[]> {
     if (this.client.getServerCapabilities()?.resources === undefined) return [];
     const result = await this.client.listResources();

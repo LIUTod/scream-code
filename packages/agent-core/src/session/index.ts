@@ -48,6 +48,7 @@ import { SessionDisposables } from './dispose-registry';
 import { SubagentMessageBus } from './subagent-messages';
 import type { ToolServices } from '../tools/support/services';
 import type { LspProcessSupervisor } from '../lsp/process-supervisor';
+import { SessionTokenMeter, type SessionTokenBudget } from '../agent/usage/token-meter';
 
 export interface SessionOptions {
   readonly jian: Jian;
@@ -239,6 +240,11 @@ export class Session {
   readonly disposables = new SessionDisposables();
   /** Session-level parent→child message bus shared by every subagent host. */
   readonly subagentMessages = new SubagentMessageBus();
+  /**
+   * Token meter behind `loop_control.max_session_tokens` / `/budget`, shared by
+   * every agent this session instantiates (see SessionTokenMeter).
+   */
+  readonly tokenMeter: SessionTokenMeter;
   private agentIdCounter = 0;
   /**
    * Every BackgroundManager this session created for one of its agents, held
@@ -281,6 +287,9 @@ export class Session {
       this.logHandle?.logger ??
       (options.id === undefined ? log : log.createChild({ sessionId: options.id }));
     this.rpc = options.rpc;
+    this.tokenMeter = new SessionTokenMeter({
+      limitTokens: options.config?.loopControl?.maxSessionTokens,
+    });
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.jian.getcwd(),
       sessionId: options.id,
@@ -791,6 +800,40 @@ export class Session {
   }
 
   /**
+   * Tokens this run of the session has used against its token limit
+   * (`loop_control.max_session_tokens`, `/budget`). `limitTokens` is null when
+   * no limit is set.
+   */
+  getSessionTokenBudget(): SessionTokenBudget {
+    return {
+      usedTokens: this.tokenMeter.usedTokens,
+      limitTokens: this.tokenMeter.limitTokens ?? null,
+    };
+  }
+
+  /**
+   * Change the session token limit on the live session (`null` or 0 turns it
+   * off). It applies at the very next step of every agent in the session, so
+   * raising it clears a tripped cap without a restart. Persisting it as the
+   * default for new sessions (config.toml) is the host's job — this only moves
+   * the meter.
+   *
+   * Anything that is not a count is refused. This is a safety valve, so failing
+   * open would be the wrong direction: a NaN from a miscomputing caller, a
+   * negative or a fraction must not be quietly read as "no limit".
+   */
+  setSessionTokenBudget(limitTokens: number | null): SessionTokenBudget {
+    if (limitTokens !== null && !(Number.isSafeInteger(limitTokens) && limitTokens >= 0)) {
+      throw new ScreamError(
+        ErrorCodes.REQUEST_INVALID,
+        `The session token limit must be a non-negative whole number, or null for no limit (got ${String(limitTokens)})`,
+      );
+    }
+    this.tokenMeter.setLimit(limitTokens ?? undefined);
+    return this.getSessionTokenBudget();
+  }
+
+  /**
    * Revoke one approve-for-session grant held by the main agent. Returns true
    * when a grant was removed; false when the pattern was not granted (or the
    * main agent does not exist yet).
@@ -971,6 +1014,7 @@ export class Session {
       homedir,
       screamHomeDir: this.options.screamHomeDir,
       lspSupervisor: this.options.lspSupervisor,
+      tokenMeter: this.tokenMeter,
       skills: this.skills,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
       modelProvider: this.options.providerManager,

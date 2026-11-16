@@ -76,6 +76,7 @@ import {
   type GenerateOptionsWithRequestLog,
 } from './turn/ltod-llm';
 import { UsageRecorder } from './usage';
+import type { SessionTokenMeter } from './usage/token-meter';
 import { resolveCompletionBudget } from '../utils/completion-budget';
 import type { Jian } from '@scream-code/jian';
 import type { ToolServices } from '../tools/support/services';
@@ -131,6 +132,9 @@ export interface AgentOptions {
   readonly resolveRuntimeSystemPrompt?: ((basePrompt: string) => string) | undefined;
   /** Process supervisor tracking this agent's LSP children (session-scoped). */
   readonly lspSupervisor?: LspProcessSupervisor | undefined;
+  /** Session-wide token meter behind `loop_control.max_session_tokens`
+   *  (shared by every agent of the session; see SessionTokenMeter). */
+  readonly tokenMeter?: SessionTokenMeter | undefined;
 }
 
 /**
@@ -188,6 +192,8 @@ export class Agent {
   readonly hooks?: HookEngine;
   /** Process supervisor tracking this agent's LSP children (session-scoped). */
   readonly lspSupervisor: LspProcessSupervisor | undefined;
+  /** Session-wide token meter (undefined outside a session). */
+  readonly tokenMeter: SessionTokenMeter | undefined;
   readonly log: Logger;
   /** In-process event bus for extensions running inside the agent process. */
   readonly eventBus: EventSubscriptionBus;
@@ -273,6 +279,7 @@ export class Agent {
     this.mcp = options.mcp;
     this.hooks = options.hookEngine;
     this.lspSupervisor = options.lspSupervisor;
+    this.tokenMeter = options.tokenMeter;
     this.eventBus = new EventSubscriptionBus();
     const embedCacheDir = options.screamHomeDir !== undefined
       ? join(options.screamHomeDir, 'cache', 'fastembed')
@@ -376,13 +383,19 @@ export class Agent {
       this.type === 'sub'
         ? undefined
         : new CacheWarmer({
-            getEnabled: () => this.screamConfig?.loopControl?.cacheWarmer?.enabled === true,
+            // A tripped session token cap stops the warmer too: a replay is a
+            // paid request like any other.
+            getEnabled: () =>
+              this.screamConfig?.loopControl?.cacheWarmer?.enabled === true &&
+              this.tokenMeter?.exhausted() === undefined,
             getMinSavingsUsd:
               () =>
                 this.screamConfig?.loopControl?.cacheWarmer?.minSavingsUsd ??
                 DEFAULT_MIN_SAVINGS_USD,
+            // The replayed capture is the routed request's outbound (already
+            // obfuscated) form, so no second obfuscation pass.
             generate: (provider, systemPrompt, tools, history, callbacks, options) =>
-              this.generate(provider, systemPrompt, tools, history, callbacks, options),
+              this.authedGenerate(provider, systemPrompt, tools, history, callbacks, options),
             getFingerprint: () => this.currentRequestFingerprint(),
             isIdle: () => !this.turn.hasActiveTurn,
             recordUsage: (model, usage) => {
@@ -676,7 +689,54 @@ export class Agent {
     this.rlmMaxDepth = maxDepth === null ? Infinity : normalizeRlmMaxDepth(maxDepth);
   }
 
+  /**
+   * Generate for every caller that hands over history in local form —
+   * compaction (default and housekeeping), side questions, exit memory
+   * extraction, `generateText`, skill planning. Messages are obfuscated here,
+   * at the single seam they all share, so no auxiliary path can send a
+   * configured or default secret pattern to a provider in the clear. (Before
+   * this, only the main loop's `LtodLLM.chat` obfuscated, and compaction sent
+   * raw history — to a different provider when housekeeping was configured.)
+   *
+   * Obfuscation is deterministic and the main loop sends the same obfuscated
+   * projection, so the compaction request still shares the main request's
+   * cache prefix. Callers whose messages are already in outbound form (the
+   * routed main-loop request and the cache warmer's replay of it) use
+   * `authedGenerate` instead of paying for a second pass.
+   */
   get generate(): typeof generate {
+    const authed = this.authedGenerate;
+    // `async` on purpose: this used to be an async function, and callers (the
+    // retry wrapper, `.catch()` chains) rely on a failure surfacing as a rejected
+    // promise — obfuscation runs before the first await, so without it a throw
+    // there would escape synchronously.
+    return async (provider, systemPrompt, tools, history, callbacks, options) => {
+      const obfuscator = this.obfuscator;
+      const outbound =
+        obfuscator !== undefined && obfuscator.hasSecrets()
+          ? obfuscateMessages(obfuscator, history)
+          : history;
+      return authed(provider, systemPrompt, tools, outbound, callbacks, options);
+    };
+  }
+
+  /** Obfuscate a locally assembled string (e.g. a system prompt that embeds history). */
+  obfuscateOutboundText(text: string): string {
+    const obfuscator = this.obfuscator;
+    return obfuscator !== undefined && obfuscator.hasSecrets() ? obfuscator.obfuscate(text) : text;
+  }
+
+  /** Restore placeholders in model output shown or returned to a local consumer. */
+  deobfuscateInboundText(text: string): string {
+    const obfuscator = this.obfuscator;
+    return obfuscator !== undefined && obfuscator.hasSecrets() ? obfuscator.deobfuscate(text) : text;
+  }
+
+  /**
+   * Auth-resolving generate with no obfuscation pass. Only for messages that
+   * are already in outbound (obfuscated) form — see `generate`.
+   */
+  private get authedGenerate(): typeof generate {
     return async (provider, systemPrompt, tools, history, callbacks, options) => {
       if (options?.auth !== undefined) {
         this.logLlmRequest(provider, systemPrompt, tools, history, options);
@@ -706,6 +766,12 @@ export class Agent {
    * step-retry layer, and SDK-level retries are disabled — without this they
    * would hard-fail on any transient 429/5xx. Mirrors the main loop's policy:
    * only retryable errors, exponential backoff, bounded attempts.
+   *
+   * Every caller sends on the session model, so the response's usage is
+   * recorded under the session alias (session scope — never the current
+   * turn's HitR). Without it `/usage` silently omitted every auxiliary call,
+   * and the session token cap could not see knowledge-base ingestion — which
+   * may issue many of them.
    */
   async generateWithRetry(
     provider: ChatProvider,
@@ -717,7 +783,9 @@ export class Agent {
     const delays = retryBackoffDelays(maxAttempts);
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.generate(provider, systemPrompt, [...tools], [...messages]);
+        const result = await this.generate(provider, systemPrompt, [...tools], [...messages]);
+        this.recordAuxiliaryUsage(result.usage);
+        return result;
       } catch (error) {
         if (attempt >= maxAttempts || !isRetryableGenerateError(error)) throw error;
         const delayMs = computeDelayMs(error, delays, attempt);
@@ -725,6 +793,21 @@ export class Agent {
           setTimeout(resolve, delayMs);
         });
       }
+    }
+  }
+
+  /**
+   * Usage of an auxiliary (non-loop) request. Best-effort like the cache
+   * warmer's: exit memory extraction runs while the session is closing, when
+   * the wire sink may already be gone — accounting must never fail the call.
+   */
+  private recordAuxiliaryUsage(usage: TokenUsage | null | undefined): void {
+    const alias = this.config.modelAlias;
+    if (usage === null || usage === undefined || alias === undefined) return;
+    try {
+      this.usage.record(alias, usage, 'session');
+    } catch (error) {
+      this.log.warn('auxiliary usage record failed', error);
     }
   }
 
@@ -770,7 +853,8 @@ export class Agent {
     callbacks,
     options,
   ) => {
-    const result = await this.generate(provider, systemPrompt, tools, history, callbacks, options);
+    // LtodLLM.chat already obfuscated `history`; skip the second pass.
+    const result = await this.authedGenerate(provider, systemPrompt, tools, history, callbacks, options);
     this.noteRoutedCacheWarmRequest(provider, systemPrompt, tools, history, result);
     return result;
   };
@@ -1338,8 +1422,10 @@ export class Agent {
 
     const conversationContext = contextParts.join('\n\n');
 
+    // The excerpt rides in the system prompt, which `generate` does not
+    // obfuscate (only messages), so mask it here.
     const system = conversationContext
-      ? `${SIDE_QUESTION_SYSTEM}\n\n<conversation_context>\n${conversationContext}\n</conversation_context>`
+      ? `${SIDE_QUESTION_SYSTEM}\n\n<conversation_context>\n${this.obfuscateOutboundText(conversationContext)}\n</conversation_context>`
       : SIDE_QUESTION_SYSTEM;
 
     if (!this.config.hasModel) {
@@ -1358,7 +1444,7 @@ export class Agent {
       .map((p) => p.text)
       .join('');
 
-    return text || '(no response)';
+    return text ? this.deobfuscateInboundText(text) : '(no response)';
   }
 
   /**
@@ -1376,10 +1462,14 @@ export class Agent {
       [],
       [{ role: 'user', content: [{ type: 'text', text: userPrompt }], toolCalls: [] }],
     );
-    return response.message.content
-      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-      .map((p) => p.text)
-      .join('');
+    // The user prompt went out obfuscated (via `generate`); callers consume
+    // the answer locally, so restore any placeholders the model echoed.
+    return this.deobfuscateInboundText(
+      response.message.content
+        .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+        .map((p) => p.text)
+        .join(''),
+    );
   }
 
   emitEvent(event: AgentEvent): void {

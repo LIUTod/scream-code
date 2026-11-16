@@ -79,16 +79,16 @@ export class SessionMemory {
     const errors = recent.filter((e) => e.type === 'error');
     if (toolExecs.length === 0 && errors.length === 0) return '';
 
-    const lines: string[] = ['## 当前会话状态', ''];
+    const lines: string[] = ['## Current session state', ''];
     if (errors.length > 0) {
-      lines.push('### 最近错误', '');
+      lines.push('### Recent errors', '');
       for (const e of errors) lines.push(`- ${e.message}`);
       lines.push('');
     }
     if (toolExecs.length > 0) {
-      lines.push('### 最近操作', '');
+      lines.push('### Recent actions', '');
       for (const e of toolExecs.slice(-10)) {
-        const status = e.isError ? '❌ 失败' : '✅';
+        const status = e.isError ? '❌ failed' : '✅';
         const file = e.argsSummary ? ` — ${e.argsSummary}` : '';
         lines.push(`- ${status} ${e.toolName}${file}`);
       }

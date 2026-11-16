@@ -191,6 +191,17 @@ export class StdioMcpClient implements MCPClient {
     return typeof instructions === 'string' && instructions.length > 0 ? instructions : undefined;
   }
 
+  getServerVersion(): { name?: string; version?: string } | undefined {
+    // `serverInfo` arrives with the initialize result the SDK already parsed;
+    // before a successful connect it is undefined instead of throwing.
+    const info = this.client.getServerVersion?.();
+    if (info === undefined) return undefined;
+    return {
+      ...(typeof info.name === 'string' ? { name: info.name } : {}),
+      ...(typeof info.version === 'string' ? { version: info.version } : {}),
+    };
+  }
+
   async listResources(): Promise<MCPResourceDefinition[]> {
     if (this.client.getServerCapabilities()?.resources === undefined) return [];
     const result = await this.client.listResources();

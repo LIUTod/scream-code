@@ -6,7 +6,8 @@
  * the old migration-legacy package into the session's `state.json` `custom` block.
  */
 
-const IMPORTED_BADGE = '[已导入]';
+import { t } from '@scream-code/config';
+
 const IMPORTED_FLAG_KEY = 'imported_from_scream_cli';
 
 export interface SessionLabelInput {
@@ -22,6 +23,6 @@ export function isImportedSession(
 }
 
 export function formatSessionLabel(input: SessionLabelInput): string {
-  const prefix = isImportedSession(input.metadata) ? `${IMPORTED_BADGE} ` : '';
+  const prefix = isImportedSession(input.metadata) ? `${t('session.imported_badge')} ` : '';
   return `${prefix}${input.title}`;
 }

@@ -77,6 +77,18 @@ export interface TurnResult {
    * only machine-readable signal that the stop was not natural.
    */
   stepBudgetExhausted?: boolean | undefined;
+  /**
+   * Set when the turn stopped before a model request because the session token
+   * cap was reached (see `RunTurnInput.tokenCap`). No wrap-up request is made —
+   * another request is exactly what the cap forbids.
+   */
+  tokenCapReached?: TokenCapState | undefined;
+}
+
+/** A reached session token cap and what was used against it. */
+export interface TokenCapState {
+  readonly usedTokens: number;
+  readonly limitTokens: number;
 }
 
 export type ExecutableToolOutput = string | ContentPart[];

@@ -1,4 +1,5 @@
 import { Command, Option } from 'commander';
+import { t } from '@scream-code/config';
 
 import { CLI_COMMAND_NAME } from '#/constant/app';
 
@@ -32,21 +33,21 @@ export function createProgram(
   onLine: LineCommandHandler = () => {},
 ): Command {
   const program = new Command(CLI_COMMAND_NAME)
-    .description('下一代智能体的起点')
+    .description(t('cli.help.description'))
     .version(version, '-V, --version')
     .allowUnknownOption(false)
     .configureHelp({ helpWidth: 100 })
-    .helpOption('-h, --help', '显示帮助。')
+    .helpOption('-h, --help', t('cli.help.help'))
     .addHelpText(
       'after',
-      '\n文档：        https://scream-cli.github.io/scream-code/\n'
+      `\n${t('cli.help.docs')}        https://scream-cli.github.io/scream-code/\n`
     );
 
   program
     .addOption(
       new Option(
         '-S, --session [id]',
-        '恢复会话。带 ID：恢复该会话。不带 ID：交互式选择。',
+        t('cli.opt.session'),
       ).argParser((val: string | boolean) => (val === true ? '' : (val as string))),
     )
     .addOption(
@@ -54,39 +55,39 @@ export function createProgram(
         .hideHelp()
         .argParser((val: string | boolean) => (val === true ? '' : (val as string))),
     )
-    .option('-C, --continue', '继续当前工作目录的上一个会话。', false)
-    .option('-y, --yolo', '自动批准所有操作。', false)
-    .option('--auto', '以自动权限模式启动。', false)
+    .option('-C, --continue', t('cli.opt.continue'), false)
+    .option('-y, --yolo', t('cli.opt.yolo'), false)
+    .option('--auto', t('cli.opt.auto'), false)
     .addOption(
       new Option(
         '-m, --model <model>',
-        '本次调用使用的 LLM 模型别名。默认使用 config.toml 中的 default_model。',
+        t('cli.opt.model'),
       ),
     )
     .addOption(
       new Option(
         '-p, --prompt <prompt>',
-        '非交互式运行一条提示并打印响应。',
+        t('cli.opt.prompt'),
       ),
     )
     .addOption(
       new Option(
         '--output-format <format>',
-        '提示模式的输出格式。默认为 text。',
+        t('cli.opt.output_format'),
       ).choices(['text', 'stream-json']),
     )
     .addOption(
       new Option(
         '--skills-dir <dir>',
-        '从该目录加载技能，而不是自动发现的用户和项目目录。可多次指定。',
+        t('cli.opt.skills_dir'),
       )
         .argParser((value: string, previous: string[] | undefined) => [...(previous ?? []), value])
         .default([]),
     )
     .addOption(new Option('--yes').hideHelp().default(false))
     .addOption(new Option('--auto-approve').hideHelp().default(false))
-    .option('--plan', '以计划模式启动。', false)
-    .option('--wolfpack', '启动时默认开启 WolfPack 批量并发模式。', false);
+    .option('--plan', t('cli.opt.plan'), false)
+    .option('--wolfpack', t('cli.opt.wolfpack'), false);
 
   registerExportCommand(program);
 
@@ -149,31 +150,31 @@ export function createProgram(
   // `scream line` - native IM channel daemon (configured via /line in the TUI).
   const lineCmd = program
     .command('line')
-    .description('IM 原生通道守护进程（飞书/Lark、微信；在 TUI 里用 /line 配置）')
+    .description(t('cli.line.description'))
     .action(() => {
       onLine('run');
     });
   lineCmd
     .command('run')
-    .description('前台运行守护进程（调试用）')
+    .description(t('cli.line.cmd_run'))
     .action(() => {
       onLine('run');
     });
   lineCmd
     .command('start')
-    .description('后台启动守护进程')
+    .description(t('cli.line.cmd_start'))
     .action(() => {
       onLine('start');
     });
   lineCmd
     .command('stop')
-    .description('停止守护进程')
+    .description(t('cli.line.cmd_stop'))
     .action(() => {
       onLine('stop');
     });
   lineCmd
     .command('status')
-    .description('查看守护进程状态')
+    .description(t('cli.line.cmd_status'))
     .action(() => {
       onLine('status');
     });

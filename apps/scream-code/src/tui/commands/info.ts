@@ -1,5 +1,6 @@
 import {
   loadCatalogCache,
+  priceForUsageKey,
   resolveScreamHome,
   type McpServerInfo,
   type ModelPrice,
@@ -62,6 +63,8 @@ export function clearInfoPanelState(state: TUIState): void {
 export async function showUsage(host: SlashCommandHost): Promise<void> {
   const sessionUsage = await loadSessionUsageReport(host);
   const managedUsage = await loadManagedUsageReport(host);
+  // The token limit line is garnish: a failed read just leaves it out.
+  const tokenBudget = await host.session?.getSessionTokenBudget().catch(() => undefined);
   // Best-effort pricing from the cached catalog; an empty/unavailable catalog
   // simply yields `undefined` prices, and the panel omits cost lines then.
   const catalog = loadCatalogCache(resolveScreamHome());
@@ -76,15 +79,21 @@ export async function showUsage(host: SlashCommandHost): Promise<void> {
             ...(entry.cost.cache_read === undefined ? {} : { cacheRead: entry.cost.cache_read }),
             ...(entry.cost.cache_write === undefined ? {} : { cacheWrite: entry.cost.cache_write }),
           };
-          // Usage records key by the model id the alias names, which may carry
-          // a provider prefix (`anthropic/claude-x`); index both spellings.
+          // Index both catalog spellings (`vendor/model-x` and the bare
+          // id); `priceForUsageKey` below resolves usage keys (model aliases)
+          // onto them.
           prices.set(modelId, price);
           prices.set(`${providerId}/${modelId}`, price);
         }
       }
     }
   }
-  const priceFor = (modelId: string): ModelPrice | undefined => prices.get(modelId);
+  // Usage records key by model ALIAS, not model id: resolve through the alias
+  // so a hand-named alias (`my-fast` → `vendor-chat`) is priced by the
+  // catalog model it names instead of showing as unpriced.
+  const aliases = host.state.appState.availableModels;
+  const priceFor = (usageKey: string): ModelPrice | undefined =>
+    priceForUsageKey(usageKey, aliases[usageKey], (id) => prices.get(id));
   const lines = buildUsageReportLines({
     colors: host.state.theme.colors,
     sessionUsage: sessionUsage.usage,
@@ -97,6 +106,7 @@ export async function showUsage(host: SlashCommandHost): Promise<void> {
     subagentUsage: host.state.appState.subagentUsage,
     terminalWidth: host.state.terminal.columns,
     priceFor,
+    tokenBudget,
   });
   dismissInfoPanel(host.state);
   const panel = new UsagePanelComponent(lines, host.state.theme.colors.primary);

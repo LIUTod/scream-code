@@ -82,17 +82,17 @@ describe('FusionPlanTool', () => {
     expect(spawn).toHaveBeenNthCalledWith(
       1,
       'plan',
-      expect.objectContaining({ description: 'Plan angle: 最佳正确性' }),
+      expect.objectContaining({ description: 'Plan angle: Correctness' }),
     );
     expect(spawn).toHaveBeenNthCalledWith(
       2,
       'plan',
-      expect.objectContaining({ description: 'Plan angle: 最小侵入性' }),
+      expect.objectContaining({ description: 'Plan angle: Minimal change' }),
     );
     expect(spawn).toHaveBeenNthCalledWith(
       3,
       'plan',
-      expect.objectContaining({ description: 'Plan angle: 最优架构性' }),
+      expect.objectContaining({ description: 'Plan angle: Architecture' }),
     );
     expect(spawn).toHaveBeenNthCalledWith(
       4,

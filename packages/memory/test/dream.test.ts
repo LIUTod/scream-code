@@ -96,7 +96,32 @@ describe('DreamTracker', () => {
     await tracker.init();
 
     expect(tracker.shouldSuggest()).toBe(true);
-    expect(tracker.getSuggestionMessage()).toContain('距离上次记忆整理已过去');
+    expect(tracker.getSuggestionMessage()).toContain('since the last memory consolidation');
+  });
+
+  it.each([
+    [25, 5, 'It has been 1 day and 5 sessions since the last memory consolidation.'],
+    [10 * 24 + 1, 1, 'It has been 10 days and 1 session since the last memory consolidation.'],
+  ])('states how long it has been, with correct plurals (%d h, %d sessions)', async (hours, sessions, expected) => {
+    const lockPath = join(tmpDir, 'dream-lock.json');
+    await writeFile(
+      lockPath,
+      JSON.stringify({
+        version: 1,
+        state: {
+          lastDreamAt: new Date(Date.now() - hours * 60 * 60 * 1000).toISOString(),
+          sessionsSinceLastDream: sessions,
+        },
+      }),
+      'utf8',
+    );
+    const tracker = new DreamTracker(tmpDir);
+    await tracker.init();
+
+    const message = tracker.getSuggestionMessage();
+    expect(message).toContain(expected);
+    expect(message).toContain('/dream');
+    expect(message).not.toMatch(/[\u4E00-\u9FFF]/);
   });
 
   it('migrates legacy lock files to the new global location', async () => {

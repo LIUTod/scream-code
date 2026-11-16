@@ -2,7 +2,7 @@ export { ScreamHarness } from '#/scream-harness';
 export { Session } from '#/session';
 export { ScreamAuthFacade } from '#/auth';
 export type { ThinkingEffort } from '@scream-code/ltod';
-export { addCost, estimateCost, formatUsd } from '@scream-code/ltod';
+export { addCost, estimateCost, formatUsd, priceForUsageKey } from '@scream-code/ltod';
 export type { ModelPrice } from '@scream-code/ltod';
 export { isOrphanedToolCallError } from '@scream-code/ltod';
 

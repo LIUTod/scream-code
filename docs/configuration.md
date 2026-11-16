@@ -120,6 +120,48 @@ held behind a single discovery tool so their schemas stay off every request.
 `tool_portal = "off"` restores the pre-portal behavior — every enabled tool is
 declared up front.
 
+#### Session token limit
+
+```toml
+[loop_control]
+max_session_tokens = 100000000   # 0 or unset = no limit
+```
+
+A circuit breaker for unattended work (`/goal`, `/loop`, cron, wide subagent
+fan-out). You normally do not edit it by hand: **`/budget`** sets it
+interactively — `/budget` opens a list, `/budget 50m` sets it directly (`500k`,
+`20m`, `1.5b`, `500万`, `1亿` all work), `/budget off` removes it. The change
+applies to the running session at once (raising the limit un-pauses a stopped
+session — no restart) and is saved here as the default for new sessions.
+
+The unit is **tokens**, not money: a dollar limit needs a price from the model
+catalog, and custom providers and self-hosted models have none, so it would
+count them as free and never trip. A token count exists for every model.
+
+Tokens are counted the way `/usage` shows them — input (cache reads included)
+plus output, the same total `/goal` budgets use. Every agent step re-sends the
+context, so a busy session moves tens of millions of tokens; the `/budget`
+presets (10M – 1B) are sized for that. The count covers the whole session: the
+main agent, every subagent (including ones still running), compaction and the
+cache warmer. Once it reaches the limit, every turn ends before its next model
+request — no wrap-up request either — and the cache warmer stops. The TUI shows
+a warning that points at `/budget`, `-p` / stream-json exit non-zero
+(stream-json uses exit code 4, like the step budget), an active goal is paused,
+and LINE replies with the reason.
+
+- The limit counts what this run of the session has used. Reopening (resume) or
+  starting a new session starts a fresh allowance; `/usage` keeps showing the
+  lifetime total, and shows this run's use against the limit while one is set.
+- Side questions (`/btw`), exit memory extraction, knowledge-base text calls
+  and goal grading count too (under the session alias), but they are not
+  blocked by the limit — only turns are.
+- Setting a limit below what this run already used pauses requests at once;
+  `/budget` says so when you do.
+- While the limit is tripped, recurring cron / `/loop` jobs skip their fires
+  (a skipped fire would only open an empty turn, repeat the warning, and — on
+  an IM channel — repeat it in the chat); they run again at the next fire after
+  the limit is raised. A one-shot reminder is still delivered.
+
 ## Image generation
 
 `~/.scream-code/image-config.json`, written by `/config image`:

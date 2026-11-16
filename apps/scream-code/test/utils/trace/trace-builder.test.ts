@@ -1,3 +1,4 @@
+import { getLocale, setLocale } from '@scream-code/config';
 import { describe, expect, it } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -176,5 +177,73 @@ describe('buildTraceCells', () => {
     expect(message?.thinkingDetail).toContain('先想');
     expect(message?.outputDetail).toContain('回复正文');
     expect(message?.thinkingDetail).not.toContain('回复正文');
+  });
+});
+
+describe('buildTraceCells in the UI language', () => {
+  function build(locale: 'en' | 'zh', lines: Array<Record<string, unknown>>) {
+    const previous = getLocale();
+    setLocale(locale);
+    try {
+      return buildTraceCells({ wirePath: withWire(lines) });
+    } finally {
+      setLocale(previous);
+    }
+  }
+
+  const WIRE: Array<Record<string, unknown>> = [
+    { type: 'turn.prompt', input: [{ type: 'text', text: '' }], time: T0 },
+    { type: 'turn.steer', input: [{ type: 'text', text: 'use tabs' }], time: T0 + 50 },
+    { type: 'request.header', provider: 'p', model: 'm', activeTools: [{ name: 'bash' }], time: T0 + 100 },
+    { type: 'permission.record_decision', turnId: 0, toolCallId: 'c1', toolName: 'Bash', policyName: 'deny-rule', decision: 'deny', time: T0 + 200 },
+    { type: 'permission.record_decision', turnId: 0, toolCallId: 'c2', toolName: 'Write', decision: 'timeout', time: T0 + 300 },
+    { type: 'permission.record_decision', turnId: 0, toolCallId: 'c3', toolName: 'Edit', decision: 'cancelled', time: T0 + 400 },
+    { type: 'full_compaction.begin', reason: 'overflow', source: 'auto', time: T0 + 500 },
+    { type: 'micro_compaction.apply', reason: 'age', time: T0 + 600 },
+    { type: 'config.update', modelAlias: 'fast', systemPrompt: 'x', time: T0 + 700 },
+    { type: 'tools.set_active_tools', names: ['bash', 'read'], time: T0 + 800 },
+    { type: 'turn.prompt', input: [{ type: 'text', text: 'done' }], time: T0 + 900 },
+  ];
+
+  it('describes the wire in English', () => {
+    const texts = build('en', WIRE).flatMap((c) => [c.text, c.inputDetail ?? '', c.result ?? '']);
+    for (const expected of [
+      '(empty input)',
+      'Steer: use tabs',
+      'Request p/m',
+      'Tools: bash',
+      'Approval rejected: Bash (deny-rule)',
+      'Approval timed out: Write',
+      'Approval cancelled: Edit',
+      'Compact context (overflow)',
+      'Source: auto',
+      'Micro-compaction (age)',
+    ]) {
+      expect(texts, expected).toContain(expected);
+    }
+    expect(texts.join('\n')).toMatch(/Model alias: fast/);
+    expect(texts.join('\n')).toMatch(/System prompt updated/);
+    expect(texts.join('\n')).toMatch(/Tool set: bash, read/);
+    expect(texts.join('\n')).not.toMatch(/[\u4E00-\u9FFF]/);
+  });
+
+  it('keeps the Chinese descriptions as they were', () => {
+    const texts = build('zh', WIRE).flatMap((c) => [c.text, c.inputDetail ?? '', c.result ?? '']);
+    for (const expected of ['(空输入)', '转向: use tabs', '请求 p/m', '工具: bash', '审批拒绝: Bash (deny-rule)', '审批超时: Write', '审批取消: Edit', '压缩上下文（overflow）', '来源: auto', '微压缩（age）']) {
+      expect(texts, expected).toContain(expected);
+    }
+  });
+
+  it('labels a thinking-only step and an empty reply', () => {
+    const wire = [
+      { type: 'turn.prompt', input: [{ type: 'text', text: 'hi' }], time: T0 },
+      loop('step.begin', { uuid: 's1', turnId: '0', step: 1 }, T0 + 100),
+      loop('block.start', { blockType: 'thinking' }, T0 + 110),
+      loop('content.part', { part: { type: 'thinking', text: 'hmm' } }, T0 + 120),
+      loop('block.end', {}, T0 + 130),
+      loop('step.end', { uuid: 's1', turnId: '0', step: 1, usage: {}, finishReason: 'end_turn' }, T0 + 200),
+    ];
+    expect(build('en', wire).find((c) => c.kind === 'message')?.text).toBe('Thinking…');
+    expect(build('zh', wire).find((c) => c.kind === 'message')?.text).toBe('思考…');
   });
 });

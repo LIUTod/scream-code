@@ -17,6 +17,7 @@ import {
   type LoopEvent,
   type LoopRecordedEvent,
   type LoopTurnStopReason,
+  type TokenCapState,
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
 import { renderHookResult } from '../../session/hooks/user-prompt';
@@ -121,6 +122,12 @@ export class TurnFlow {
    * `turn.ended` is built so hosts can distinguish a budget cut.
    */
   private stepBudgetExhaustedThisTurn = false;
+  /**
+   * Set when this turn's loop stopped on the session token cap (see
+   * `loop_control.max_session_tokens`, `/budget`). Reset per turn; carried on
+   * `turn.ended` like the step-budget flag.
+   */
+  private tokenCapReachedThisTurn: TokenCapState | undefined;
   private summaryGuardInjected = false;
   private turnStartWorkingSetPathCount = 0;
   private turnStartVerificationCount = 0;
@@ -445,6 +452,18 @@ export class TurnFlow {
         await this.agent.goal.pauseActiveGoal({ reason });
         return end;
       }
+      // The session token cap ends every later turn before its first request,
+      // so continuing would only spin empty goal turns up to the turn limit.
+      const tokenCap = end.event.tokenCapReached;
+      if (tokenCap !== undefined) {
+        await this.agent.goal.pauseActiveGoal({
+          // Raising the limit does not resume the goal by itself — say both steps.
+          reason:
+            `Session token limit reached (${tokenCap.usedTokens.toLocaleString('en-US')} of ` +
+            `${tokenCap.limitTokens.toLocaleString('en-US')}); raise it with /budget, then run /goal resume`,
+        });
+        return end;
+      }
 
       const goal = this.agent.goal.getGoal().goal;
       if (goal === null || goal.status !== 'active') {
@@ -510,6 +529,7 @@ export class TurnFlow {
     this.toolFailureWrapUpPending = false;
     this.failureStopEngaged = false;
     this.stepBudgetExhaustedThisTurn = false;
+    this.tokenCapReachedThisTurn = undefined;
     this.currentTurnId = turnId;
     this.agent.workingSet.decay(turnId);
     this.summaryGuardInjected = false;
@@ -548,6 +568,9 @@ export class TurnFlow {
           turnId,
           reason: stopReason === 'aborted' ? 'cancelled' : 'completed',
           ...(this.stepBudgetExhaustedThisTurn ? { stepBudgetExhausted: true } : {}),
+          ...(this.tokenCapReachedThisTurn !== undefined
+            ? { tokenCapReached: this.tokenCapReachedThisTurn }
+            : {}),
         };
       }
     } catch (error) {
@@ -730,6 +753,9 @@ export class TurnFlow {
           // loop then wraps up with one final reporting step instead of failing.
           maxSteps: loopControl?.maxStepsPerTurn ?? TURN_DEFAULTS.maxStepsPerTurn,
           maxRetryAttempts: loopControl?.maxRetriesPerStep,
+          // Session-wide token cap, shared by every agent of the session: a
+          // reached cap ends this turn before its next model request.
+          tokenCap: () => this.agent.tokenMeter?.exhausted(),
           // Interactive user steers interrupt an in-flight tool batch, and so
           // does any steer carrying an explicit `interrupt: true` (the parent
           // host's interject, whose origin is `system_trigger`). Background/
@@ -1266,6 +1292,13 @@ export class TurnFlow {
         });
 
         if (result.stepBudgetExhausted === true) this.stepBudgetExhaustedThisTurn = true;
+        if (result.tokenCapReached !== undefined) {
+          this.tokenCapReachedThisTurn = result.tokenCapReached;
+          this.agent.log.warn('session token cap reached; turn ended before the next model request', {
+            usedTokens: result.tokenCapReached.usedTokens,
+            limitTokens: result.tokenCapReached.limitTokens,
+          });
+        }
         return result.stopReason;
       } catch (error) {
         if (isContextOverflowError(error)) {

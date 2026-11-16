@@ -441,9 +441,12 @@ export async function handleCompactCommand(host: SlashCommandHost, args: string)
   if (guard !== null) {
     const pct = (guard.ratio * 100).toFixed(1);
     host.showNotice(
-      'Storm Breaker（风暴守护者）',
-      `当前上下文仅 ${formatTokenCount(guard.currentTokens)} / ${formatTokenCount(guard.maxContextTokens)}（${pct}%），压缩无收益。` +
-        '建议继续对话，待上下文增长至 5% 以上再执行 /compact。',
+      t('handler.storm_breaker_title'),
+      t('compact.guard_notice', {
+        current: formatTokenCount(guard.currentTokens),
+        max: formatTokenCount(guard.maxContextTokens),
+        pct,
+      }),
     );
     return;
   }
@@ -546,7 +549,7 @@ function showEditorPicker(host: SlashCommandHost): void {
 async function applyEditorChoice(host: SlashCommandHost, value: string): Promise<void> {
   const previous = host.state.appState.editorCommand ?? '';
   if (value === previous && value.length > 0) {
-    host.showStatus(`Editor unchanged: ${value.length > 0 ? value : 'auto-detect'}`);
+    host.showStatus(t('editor.unchanged', { value }));
     return;
   }
 
@@ -565,18 +568,14 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
     });
   } catch (error) {
     host.showStatus(
-      `Failed to save editor: ${formatErrorMessage(error)}`,
+      t('editor.save_failed', { error: formatErrorMessage(error) }),
       host.state.theme.colors.error,
     );
     return;
   }
 
   host.setAppState({ editorCommand });
-  host.showStatus(
-    value.length > 0
-      ? `Editor set to "${value}".`
-      : '编辑器设置为自动检测 ($VISUAL / $EDITOR)。',
-  );
+  host.showStatus(value.length > 0 ? t('editor.set_value', { value }) : t('editor.set_auto'));
 }
 
 export async function showModelPicker(
@@ -585,10 +584,7 @@ export async function showModelPicker(
 ): Promise<void> {
   const entries = Object.entries(host.state.appState.availableModels);
   if (entries.length === 0) {
-    host.showNotice(
-      '未配置模型',
-      '运行 /config 自定义模型配置。',
-    );
+    host.showNotice(t('model.picker_empty_title'), t('model.picker_empty_detail'));
     return;
   }
   // Surface the image-generation setup next to the multimodal capabilities:
@@ -742,9 +738,12 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
   const overflow = alias !== prevModel ? contextOverflowForModel(host.state.appState, alias) : null;
   if (overflow !== null) {
     host.showNotice(
-      'Storm Breaker（风暴守护者）',
-      `无法切换到模型「${alias}」：当前会话上下文 ${formatTokenCount(overflow.currentTokens)} 已超出该模型上限 ${formatTokenCount(overflow.maxContextTokens)}。` +
-        '建议先执行 /compact 压缩上下文，或选择上下文窗口更大的模型。',
+      t('handler.storm_breaker_title'),
+      t('model.switch_guard_notice', {
+        alias,
+        current: formatTokenCount(overflow.currentTokens),
+        max: formatTokenCount(overflow.maxContextTokens),
+      }),
     );
     return;
   }

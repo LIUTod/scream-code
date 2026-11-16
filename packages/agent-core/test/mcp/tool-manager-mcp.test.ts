@@ -1,9 +1,10 @@
-import type { ContentPart, Tool } from '@scream-code/ltod';
+import type { ContentPart, Tool, ToolAnnotations } from '@scream-code/ltod';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
 import { ToolManager } from '../../src/agent/tool';
 import type { McpConnectionManager } from '../../src/mcp';
+import { mapMcpAnnotations } from '../../src/mcp/connection-manager';
 import type { MCPClient } from '../../src/mcp/types';
 import { testAgent } from '../agent/harness/agent';
 import { executeTool } from '../tools/fixtures/execute-tool';
@@ -57,18 +58,20 @@ function fakeClient(): MCPClient {
   };
 }
 
-// Mirrors `connection-manager.connectAndDiscoverTools` — projects an MCP
-// client's `listTools()` output into the ltod `Tool` shape that
-// `ToolManager.registerMcpServer` expects. Tests can hand the same client into
-// `registerMcpServer` so the wrapped `execute` flow hits a real `callTool`.
+// Projects an MCP client's `listTools()` output into the ltod `Tool` shape that
+// `ToolManager.registerMcpServer` expects. Annotations go through the **same**
+// `mapMcpAnnotations` the connection manager uses — a hand-rolled copy would let
+// a regression in either side pass this test.
 async function discoverTools(client: MCPClient): Promise<Tool[]> {
   const defs = await client.listTools();
   return defs.map((d) => ({
     name: d.name,
     description: d.description,
     parameters: d.inputSchema as Record<string, unknown>,
+    ...(d.annotations === undefined ? {} : { annotations: mapMcpAnnotations(d.annotations) }),
   }));
 }
+
 
 describe('ToolManager MCP integration', () => {
   it('registers MCP tools under qualified names with source=mcp', async () => {
@@ -736,5 +739,43 @@ describe('ToolManager MCP integration', () => {
     if (execution.isError !== true) {
       expect(execution.description).toBe('Echoes back');
     }
+  });
+
+  it('forwards declared tool annotations onto the registered tool', async () => {
+    const tm = new ToolManager(fakeAgent());
+    tm.setActiveTools(['mcp__*']);
+    // The server declares `echo` read-only (plus an unrecognised `title`);
+    // `noop` declares nothing. The wrapper must carry the narrowed hint
+    // through — ask mode reads it to decide whether the server is reachable.
+    const client: MCPClient = {
+      async listTools() {
+        return [
+          {
+            name: 'echo',
+            description: 'Echoes back',
+            inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+            annotations: { readOnlyHint: true, destructiveHint: false, title: 'Echo' },
+          },
+          {
+            name: 'noop',
+            description: 'Does nothing',
+            inputSchema: { type: 'object', properties: {} },
+          },
+        ];
+      },
+      async callTool() {
+        return { content: [{ type: 'text', text: 'ok' }], isError: false };
+      },
+    };
+    tm.registerMcpServer('s', client, await discoverTools(client));
+
+    const echo = tm.loopTools.find((t) => t.name === 'mcp__s__echo');
+    expect(echo?.annotations).toEqual({ readOnlyHint: true, destructiveHint: false });
+
+    // No declarations means no key at all: the permission layer reads
+    // `annotations === undefined` as "nothing was declared".
+    const noop = tm.loopTools.find((t) => t.name === 'mcp__s__noop');
+    expect(noop).toBeDefined();
+    expect(Object.hasOwn(noop!, 'annotations')).toBe(false);
   });
 });

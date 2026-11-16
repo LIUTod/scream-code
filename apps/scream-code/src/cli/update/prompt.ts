@@ -1,4 +1,5 @@
 import { clearLine, cursorTo, emitKeypressEvents, moveCursor } from 'node:readline';
+import { t } from '@scream-code/config';
 
 import chalk from 'chalk';
 
@@ -31,13 +32,11 @@ export interface InstallPromptOptions {
   readonly output?: NodeJS.WriteStream;
 }
 
-const INSTALL_HINT = '立即安装更新';
-const SKIP_HINT = '继续使用当前版本';
 
 export function createInstallPromptChoices(target: UpdateTarget): readonly InstallPromptChoice[] {
   return [
-    { value: 'install', label: `${INSTALL_HINT} (${target.version})` },
-    { value: 'skip', label: SKIP_HINT },
+    { value: 'install', label: `${t('cli.update.install_hint')} (${target.version})` },
+    { value: 'skip', label: t('cli.update.skip_hint') },
   ];
 }
 
@@ -65,20 +64,20 @@ function renderInstallPrompt(
   const label = chalk.hex(UPDATE_PROMPT_TEXT_DIM).bold;
   const currentVersion = chalk.hex(UPDATE_PROMPT_WARNING).bold(options.currentVersion);
   const targetVersion = chalk.hex(UPDATE_PROMPT_SUCCESS).bold(options.target.version);
-  const sourceLabel = chalk.hex(UPDATE_PROMPT_PRIMARY).bold('npm 安装');
+  const sourceLabel = chalk.hex(UPDATE_PROMPT_PRIMARY).bold(t('cli.update.source_npm'));
   const command = chalk.hex(UPDATE_PROMPT_PRIMARY)(options.installCommand);
-  const changelogText = chalk.hex(UPDATE_PROMPT_PRIMARY).underline(`查看更新日志：${CHANGELOG_URL}`);
+  const changelogText = chalk.hex(UPDATE_PROMPT_PRIMARY).underline(t('cli.update.changelog', { url: CHANGELOG_URL }));
   const lines = [
-    chalk.hex(UPDATE_PROMPT_PRIMARY).bold('Scream Code 更新可用'),
-    chalk.hex(UPDATE_PROMPT_MUTED)(`${PRODUCT_NAME} 有新版本可用。`),
+    chalk.hex(UPDATE_PROMPT_PRIMARY).bold(t('cli.update.title')),
+    chalk.hex(UPDATE_PROMPT_MUTED)(t('cli.update.available', { product: PRODUCT_NAME })),
     `]8;;${CHANGELOG_URL}\\${changelogText}]8;;\\`,
     '',
-    `${label('当前')}  ${currentVersion}`,
-    `${label('目标 ')}  ${targetVersion}`,
-    `${label('来源 ')}  ${sourceLabel}`,
-    `${label('命令')}  ${command}`,
+    `${label(t('cli.update.label_current'))}  ${currentVersion}`,
+    `${label(t('cli.update.label_target'))}  ${targetVersion}`,
+    `${label(t('cli.update.label_source'))}  ${sourceLabel}`,
+    `${label(t('cli.update.label_command'))}  ${command}`,
     '',
-    chalk.hex(UPDATE_PROMPT_MUTED)('↑↓ 选择 · Enter 确认 · Esc 继续'),
+    chalk.hex(UPDATE_PROMPT_MUTED)(t('cli.update.keys')),
     '',
   ];
 

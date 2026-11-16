@@ -28,6 +28,7 @@ export interface RunTurnOptions {
   readonly contextOptions?: RecordingContextOptions | undefined;
   readonly sinkErrorMode?: SinkErrorMode | undefined;
   readonly hasPendingSteer?: (() => boolean) | undefined;
+  readonly tokenCap?: RunTurnInput['tokenCap'];
 }
 
 export interface RunTurnResult {
@@ -68,6 +69,7 @@ function buildRunTurnInput(opts: RunTurnOptions): {
     log: opts.log,
     maxSteps: opts.maxSteps,
     hasPendingSteer: opts.hasPendingSteer,
+    tokenCap: opts.tokenCap,
   };
   return { input, llm, context, sink };
 }

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { t } from '@scream-code/config';
 
 import { killProcessTree } from '@scream-code/jian';
 import { npmLaunchPlan } from '#/utils/exec/npm';
@@ -33,16 +34,15 @@ function renderManualUpdateMessage(currentVersion: string, target: UpdateTarget)
     prefix !== undefined
       ? `npm install -g --prefix ${prefix} scream-code@latest`
       : 'npm install -g scream-code@latest';
-  return (
-    `Scream Code 有新版本可用 ` +
-    `(${currentVersion} -> ${target.version})。\n` +
-    `自动更新失败，请手动执行：\n` +
-    `  ${installCommand}\n`
-  );
+  return t('cli.update.manual', {
+    current: currentVersion,
+    target: target.version,
+    command: installCommand,
+  });
 }
 
 function renderInstallSuccessMessage(target: UpdateTarget): string {
-  return `已更新至 ${target.version}。请重新启动 scream 以使用新版本。\n`;
+  return t('cli.update.success', { version: target.version });
 }
 
 async function promptInstall(
@@ -96,7 +96,7 @@ async function installUpdate(): Promise<void> {
       // The timeout is reported only after the teardown: a timeout that fired
       // while the install it describes is still running would be a lie.
       void reapTimedOutInstall(child, npm.platform).then(() => {
-        reject(new Error('npm install 超时'));
+        reject(new Error(t('cli.update.timeout')));
       });
     }, INSTALL_TIMEOUT_MS);
     child.once('error', (err) => {
@@ -109,7 +109,7 @@ async function installUpdate(): Promise<void> {
         resolve();
         return;
       }
-      reject(new Error(`npm install 失败（exit ${code ?? signal}）`));
+      reject(new Error(t('cli.update.install_failed', { code: String(code ?? signal) })));
     });
   });
 }
@@ -161,7 +161,7 @@ export async function runUpdatePreflight(
       return 'exit';
     } catch (error) {
       stderr.write(
-        `警告：更新失败：${formatErrorMessage(error)}\n`,
+        t('cli.update.failed_warning', { message: formatErrorMessage(error) }),
       );
       return 'continue';
     }

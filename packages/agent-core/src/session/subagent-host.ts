@@ -502,6 +502,27 @@ export class SessionSubagentHost {
   }
 
   /**
+   * Replay half of the usage fold ledger: a `usage.record` written by the fold
+   * below carries the child's cumulative usage for that model, and replay
+   * merges it into the session ledger with an element-wise max. A cumulative
+   * is idempotent — replaying the same record twice, or in any order, or over
+   * a ledger that already holds it (a middle agent evicted and re-hydrated in
+   * this process) leaves the ledger as the live fold left it — where adding the
+   * delta back would double it and make the child's next fold under-count.
+   * Called from wire restore, so it must stay pure in-memory. The ledger is
+   * session-scoped, so whichever agent's wire holds the fold record (the
+   * nearest resident ancestor at fold time), the child's entry ends up in the
+   * one map its next fold reads.
+   */
+  restoreFoldedUsage(childId: string, model: string, cumulative: TokenUsage): void {
+    const ledger = foldedChildUsageFor(this.session);
+    const folded = { ...ledger.get(childId) };
+    const previous = folded[model];
+    folded[model] = previous === undefined ? { ...cumulative } : maxUsage(previous, cumulative);
+    ledger.set(childId, folded);
+  }
+
+  /**
    * Profile name of one of this host's children, or undefined when the id is
    * not a child of this owner. Reads the live instance when it is resident and
    * falls back to the name recorded at spawn/resume: a finished child is
@@ -1137,7 +1158,12 @@ export class SessionSubagentHost {
       const foldTarget = this.usageFoldTarget(parent);
       for (const [model, delta] of Object.entries(deltas)) {
         try {
-          foldTarget.usage.record(model, delta, 'session');
+          foldTarget.usage.record(model, delta, 'session', {
+            source: 'fold',
+            // The child's cumulative total for this model, which is what the ledger
+            // holds once this fold is done (`ledger.set(childId, childByModel)` below).
+            fold: { childId, cumulative: childByModel[model] ?? delta },
+          });
         } catch (error) {
           // Usage accounting is ancillary: a failure here must never fail
           // the completed subagent (the parent turn already has its result).
@@ -1435,6 +1461,16 @@ function subtractUsage(current: TokenUsage, previous: TokenUsage): TokenUsage {
     output: Math.max(0, current.output - previous.output),
     inputCacheRead: Math.max(0, current.inputCacheRead - previous.inputCacheRead),
     inputCacheCreation: Math.max(0, current.inputCacheCreation - previous.inputCacheCreation),
+  };
+}
+
+/** Element-wise maximum: merging a recorded cumulative never lowers what is already known. */
+function maxUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    inputOther: Math.max(a.inputOther, b.inputOther),
+    output: Math.max(a.output, b.output),
+    inputCacheRead: Math.max(a.inputCacheRead, b.inputCacheRead),
+    inputCacheCreation: Math.max(a.inputCacheCreation, b.inputCacheCreation),
   };
 }
 

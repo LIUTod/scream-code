@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 
 import { ScreamHarness, log, resolveScreamHome } from '@scream-code/scream-code-sdk';
 import type { SessionSummary } from '@scream-code/scream-code-sdk';
-import { setLocale } from '@scream-code/config';
+import { setLocale, t } from '@scream-code/config';
 
 import { CLI_UI_MODE } from '#/constant/app';
 import type { TuiConfig } from '#/tui/config';
@@ -94,9 +94,9 @@ export async function runShell(
     const sessionId = tui.getCurrentSessionId();
     const hasContent = tui.hasSessionContent();
     const gutter = ' '.repeat(CHROME_GUTTER);
-    process.stdout.write(`${gutter}再见！\n`);
+    process.stdout.write(`${gutter}${t('cli.goodbye')}\n`);
     if (sessionId !== '' && hasContent) {
-      process.stderr.write(`\n${gutter}恢复此会话：scream -r ${sessionId}\n`);
+      process.stderr.write(`\n${gutter}${t('cli.resume_hint', { command: `scream -r ${sessionId}` })}\n`);
     }
     process.exit(exitCode);
   };

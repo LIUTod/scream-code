@@ -94,7 +94,7 @@ describe('MemoryWriteTool', () => {
     });
 
     expect(result.isError).toBeFalsy();
-    expect(result.output).toContain('已保存记忆');
+    expect(result.output).toContain('Memory saved');
     expect(result.output).toContain('Fix JWT token rotation');
     expect(appended).toBeDefined();
     expect(appended!.userNeed).toBe('Fix JWT token rotation');

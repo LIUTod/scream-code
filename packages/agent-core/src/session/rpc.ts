@@ -20,6 +20,10 @@ import type {
   ReconnectMcpServerPayload,
   AddMcpServerPayload,
   StopMcpServerPayload,
+  AuthenticateMcpServerPayload,
+  McpAuthenticateResult,
+  SessionTokenBudget,
+  SetSessionTokenBudgetPayload,
   RemoveMcpServerPayload,
   RemoveSkillPayload,
   RenameSessionPayload,
@@ -107,6 +111,14 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.session.revokeSessionApprovalGrant(payload.pattern);
   }
 
+  getSessionTokenBudget(_payload: EmptyPayload): SessionTokenBudget {
+    return this.session.getSessionTokenBudget();
+  }
+
+  setSessionTokenBudget(payload: SetSessionTokenBudgetPayload): SessionTokenBudget {
+    return this.session.setSessionTokenBudget(payload.limitTokens);
+  }
+
 
   listMcpServers(_payload: EmptyPayload): readonly McpServerInfo[] {
     return this.session.mcp.list();
@@ -131,6 +143,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async removeMcpServer(payload: RemoveMcpServerPayload): Promise<void> {
     await this.session.mcp.removeServer(payload.name);
+  }
+
+  authenticateMcpServer(payload: AuthenticateMcpServerPayload): Promise<McpAuthenticateResult> {
+    return this.session.mcp.authenticate(payload.name);
   }
 
   generateAgentsMd(payload: { targetDir?: string | undefined }): Promise<void> {

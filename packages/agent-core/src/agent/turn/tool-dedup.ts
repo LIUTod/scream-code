@@ -176,8 +176,8 @@ export class ToolCallDeduplicator {
       if (priorCount >= this.stormThreshold - 1) {
         return {
           output:
-            `Storm Breaker（风暴守护者）：检测到无效循环调用风险——${toolName} 对同一目标已连续调用 ${String(priorCount + 1)} 次。` +
-            `建议先制定计划方案，或更换其他方法后再继续。`,
+            `Storm Breaker: ${toolName} has been called on the same target ${String(priorCount + 1)} times in a row — ` +
+            'this looks like an unproductive loop. Make a plan or try a different approach before continuing.',
         };
       }
     }

@@ -98,6 +98,10 @@ import type {
   ReconnectMcpServerPayload,
   AddMcpServerPayload,
   StopMcpServerPayload,
+  AuthenticateMcpServerPayload,
+  McpAuthenticateResult,
+  SessionTokenBudget,
+  SetSessionTokenBudgetPayload,
   RemoveMcpServerPayload,
   RegisterToolPayload,
   ReloadPluginsResult,
@@ -1052,11 +1056,32 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).listMcpServers(payload);
   }
 
+  authenticateMcpServer({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<AuthenticateMcpServerPayload>): Promise<McpAuthenticateResult> {
+    return this.sessionApi(sessionId).authenticateMcpServer(payload);
+  }
+
   getSessionApprovalGrants({
     sessionId,
     ...payload
   }: SessionScopedPayload<EmptyPayload>): string[] {
     return this.sessionApi(sessionId).getSessionApprovalGrants(payload);
+  }
+
+  getSessionTokenBudget({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<EmptyPayload>): SessionTokenBudget {
+    return this.sessionApi(sessionId).getSessionTokenBudget(payload);
+  }
+
+  setSessionTokenBudget({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<SetSessionTokenBudgetPayload>): SessionTokenBudget {
+    return this.sessionApi(sessionId).setSessionTokenBudget(payload);
   }
 
   revokeSessionApprovalGrant({

@@ -70,6 +70,8 @@ export const ErrorCodes = {
   MCP_SERVER_DISABLED: 'mcp.server_disabled',
   MCP_STARTUP_FAILED: 'mcp.startup_failed',
   MCP_TOOL_NAME_COLLISION: 'mcp.tool_name_collision',
+  /** `/mcp` asked for an OAuth flow the entry cannot support (stdio, or no service). */
+  MCP_AUTH_UNSUPPORTED: 'mcp.auth_unsupported',
 
   CRON_UNAVAILABLE: 'cron.unavailable',
   CRON_INVALID: 'cron.invalid',
@@ -430,6 +432,13 @@ export const SCREAM_ERROR_INFO = {
     retryable: false,
     public: true,
     action: 'Rename one of the colliding MCP tools or servers so their qualified names are unique.',
+  },
+
+  'mcp.auth_unsupported': {
+    title: 'MCP server cannot use OAuth',
+    retryable: false,
+    public: true,
+    action: 'stdio servers authenticate through their own command or env; for HTTP servers set bearerTokenEnvVar or headers in mcp.json.',
   },
 
   'cron.unavailable': {

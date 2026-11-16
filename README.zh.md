@@ -116,6 +116,7 @@ scream -y         # 自动批准模式
 | `/export-debug-zip` | 导出当前会话为调试 ZIP 存档 |
 | `/status` | 显示当前会话和运行时状态 |
 | `/usage` | 显示 token 用量和上下文窗口 |
+| `/budget` | 设置本会话的 token 上限 |
 | **记忆与知识** | |
 | `/memory`（`/memo`、`/mem`）`[查询]` | 浏览、搜索、注入记忆备忘录 |
 | `/knowledge`（`/know`）`[查询]` | 管理本地知识库（摄入/搜索/删除/统计） |

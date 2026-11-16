@@ -9,7 +9,7 @@ import { resolveServerCapabilities } from './capabilities';
 import { HttpMcpClient } from './client-http';
 import type { McpRootsProvider, UnexpectedCloseReason } from './client-shared';
 import { StdioMcpClient } from './client-stdio';
-import type { McpOAuthService } from './oauth';
+import { AlreadyAuthorizedError, type McpOAuthService } from './oauth';
 import { assertMcpInputSchema, type MCPClient } from './types';
 
 export type { McpRootsProvider } from './client-shared';
@@ -17,18 +17,32 @@ export type { McpRootsProvider } from './client-shared';
 export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
 
 /**
+ * How long a UI-started browser authorization may take. Matches the model-side
+ * synthetic tool (15 min): long enough for a password manager + SSO detour,
+ * short enough that an abandoned flow releases its loopback listener.
+ */
+const UI_AUTH_TIMEOUT_MS = 15 * 60 * 1000;
+
+/**
  * Narrow an MCP `annotations` block to the four boolean hints we consume.
  * The block also carries display-only fields (`title`) and the values are
  * author-declared by the server, so anything non-boolean is dropped rather
  * than coerced.
  */
-function mapMcpAnnotations(raw: Record<string, unknown>): ToolAnnotations {
+export function mapMcpAnnotations(raw: Record<string, unknown>): ToolAnnotations | undefined {
   const result: { -readonly [K in keyof ToolAnnotations]: boolean | undefined } = {};
+  let kept = 0;
   for (const key of ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'] as const) {
     const value = raw[key];
-    if (typeof value === 'boolean') result[key] = value;
+    if (typeof value === 'boolean') {
+      result[key] = value;
+      kept += 1;
+    }
   }
-  return result;
+  // A block that only carried `title` / non-boolean hints narrows to nothing;
+  // returning an empty object would let `annotations: {}` masquerade as
+  // "the server declared something" for any future `in`/hasOwn check.
+  return kept === 0 ? undefined : result;
 }
 
 export interface McpServerEntry {
@@ -37,6 +51,13 @@ export interface McpServerEntry {
   readonly status: McpServerStatus;
   readonly toolCount: number;
   readonly error?: string;
+  /**
+   * `serverInfo.version` the server reported in the initialize handshake.
+   * Absent when the server reports none or the connection never completed;
+   * `/mcp` shows it so `@latest` args can be told apart from the version that
+   * actually resolved.
+   */
+  readonly serverVersion?: string;
   /**
    * Effective capabilities (explicit declaration > built-in fingerprints).
    * Resolved once per public view in {@link toPublicEntry} — the single
@@ -52,6 +73,17 @@ export interface McpServerEntry {
   readonly exposure: 'always' | 'on-demand';
 }
 
+/**
+ * Outcome of a UI-driven OAuth start ({@link McpConnectionManager.authenticate}).
+ *
+ * Exactly one field is meaningful: `authorizationUrl` when a browser flow
+ * started, `alreadyAuthorized` when valid tokens were already on disk.
+ */
+export interface McpAuthenticateResult {
+  readonly authorizationUrl?: string;
+  readonly alreadyAuthorized: boolean;
+}
+
 interface InternalEntry {
   readonly name: string;
   readonly config: McpServerConfig;
@@ -61,6 +93,15 @@ interface InternalEntry {
   enabledNames?: ReadonlySet<string>;
   error?: string;
   client?: RuntimeMcpClient;
+  /** `serverInfo.version` from the initialize handshake, when reported. */
+  serverVersion?: string;
+}
+
+/** A browser authorization that has been started but not finished. */
+interface PendingAuth {
+  /** Resolves with the URL to open, or `''` when discovery failed. */
+  ready: Promise<string>;
+  cancel?: () => Promise<void>;
 }
 
 export type McpStatusListener = (entry: McpServerEntry) => void;
@@ -119,6 +160,8 @@ export interface McpConnectionManagerOptions {
  */
 export class McpConnectionManager {
   private readonly entries = new Map<string, InternalEntry>();
+  /** One in-flight browser authorization per server (see `authenticate`). */
+  private readonly pendingAuth = new Map<string, PendingAuth>();
   private readonly listeners = new Set<McpStatusListener>();
   private initialLoad: Promise<void> = Promise.resolve();
   private initialLoadAttemptId = 0;
@@ -258,6 +301,7 @@ export class McpConnectionManager {
     entry.status = 'pending';
     entry.tools = undefined;
     entry.enabledNames = undefined;
+    entry.serverVersion = undefined;
     entry.error = undefined;
     this.emit(entry);
     await this.connectOne(entry, attemptId);
@@ -287,10 +331,14 @@ export class McpConnectionManager {
   async stopServer(name: string): Promise<void> {
     const entry = this.entries.get(name);
     if (entry === undefined) return;
+    // A pending browser flow would otherwise keep its loopback listener open and
+    // write tokens for a server the user just stopped.
+    await this.cancelPendingAuth(name);
     await this.closeClient(entry);
     entry.status = 'disabled';
     entry.tools = undefined;
     entry.enabledNames = undefined;
+    entry.serverVersion = undefined;
     entry.error = undefined;
     this.emit(entry);
   }
@@ -299,6 +347,7 @@ export class McpConnectionManager {
   async removeServer(name: string): Promise<void> {
     const entry = this.entries.get(name);
     if (entry === undefined) return;
+    await this.cancelPendingAuth(name);
     await this.closeClient(entry);
     this.entries.delete(name);
     // Emit a synthetic 'disabled' status so listeners (ToolManager) clean up
@@ -312,10 +361,131 @@ export class McpConnectionManager {
   }
 
   async shutdown(): Promise<void> {
+    await Promise.allSettled([...this.pendingAuth.keys()].map((name) => this.cancelPendingAuth(name)));
     const entries = Array.from(this.entries.values());
     this.entries.clear();
     const tasks = entries.map((entry) => this.closeClient(entry));
     await Promise.allSettled(tasks);
+  }
+
+  /**
+   * Start an OAuth flow for one HTTP server on behalf of the **UI**.
+   *
+   * The model already had a path (the synthetic `…__authenticate` tool), but
+   * `/mcp` did not, so a `needs-auth` row was a dead end unless the user
+   * happened to ask the agent about it.
+   *
+   * Returns as soon as there is a URL to open: the callback waits for a human
+   * (up to the flow timeout), and holding the caller open for minutes would
+   * block the TUI's request queue. Completion is reported the normal way —
+   * a reconnect on success, {@link reportAuthFailure} when the browser step
+   * fails — so `/mcp` and the transcript both refresh from the status event.
+   */
+  async authenticate(name: string): Promise<McpAuthenticateResult> {
+    const entry = this.entries.get(name);
+    if (entry === undefined) {
+      throw new ScreamError(ErrorCodes.MCP_SERVER_NOT_FOUND, `Unknown MCP server: ${name}`);
+    }
+    if (entry.config.enabled === false) {
+      throw new ScreamError(
+        ErrorCodes.MCP_SERVER_DISABLED,
+        `"${name}" is disabled in mcp.json — enable it before authenticating`,
+      );
+    }
+    const oauthService = this.oauthService;
+    if (oauthService === undefined) {
+      throw new ScreamError(ErrorCodes.MCP_AUTH_UNSUPPORTED, 'OAuth is not configured for this session');
+    }
+    // One flow per server. `beginAuthorization` resets the provider's pending
+    // flow and starts a fresh loopback listener, so a second concurrent call
+    // would orphan the first URL the user may already have open — and the first
+    // flow's late failure would then clobber the second one's state.
+    //
+    // The slot is registered *before* awaiting discovery: two calls in the same
+    // tick must not both start a flow.
+    const existing = this.pendingAuth.get(name);
+    if (existing !== undefined) {
+      const url = await existing.ready;
+      if (url.length > 0) return { authorizationUrl: url, alreadyAuthorized: false };
+      // Discovery failed while we waited and the slot is already gone; the retry
+      // either starts a fresh flow or surfaces the real error.
+      return this.authenticate(name);
+    }
+    const { config } = entry;
+    if (config.transport !== 'http') {
+      throw new ScreamError(
+        ErrorCodes.MCP_AUTH_UNSUPPORTED,
+        `"${name}" is a stdio server: it authenticates through its own command or env, not OAuth`,
+      );
+    }
+
+    let resolveReady: (url: string) => void = () => undefined;
+    const slot: PendingAuth = {
+      ready: new Promise<string>((resolve) => {
+        resolveReady = resolve;
+      }),
+    };
+    this.pendingAuth.set(name, slot);
+
+    let flow: Awaited<ReturnType<McpOAuthService['beginAuthorization']>>;
+    try {
+      flow = await oauthService.beginAuthorization(name, config.url);
+    } catch (error) {
+      if (this.pendingAuth.get(name) === slot) this.pendingAuth.delete(name);
+      resolveReady('');
+      if (error instanceof AlreadyAuthorizedError) {
+        // Tokens are valid; the 401 was something else (or stale). A reconnect
+        // is the whole action, and the caller shows "reconnected".
+        await this.reconnect(name);
+        return { alreadyAuthorized: true };
+      }
+      throw error;
+    }
+
+    const authorizationUrl = flow.authorizationUrl.toString();
+    // The generation this flow belongs to: a reconnect or an explicit stop bumps
+    // `attemptId`, which makes a late async failure from this flow stale.
+    const attemptId = entry.attemptId;
+    slot.cancel = () => flow.cancel();
+    resolveReady(authorizationUrl);
+
+    // Release only our own slot: a stop/remove cancels this flow and a fresh
+    // `authenticate` may have registered a new slot before this flow's
+    // settlement arrives — deleting by name would orphan that newer flow.
+    const releaseSlot = (): void => {
+      if (this.pendingAuth.get(name) === slot) this.pendingAuth.delete(name);
+    };
+    void flow.complete({ timeoutMs: UI_AUTH_TIMEOUT_MS }).then(
+      () => {
+        releaseSlot();
+        void this.reconnect(name).catch((error: unknown) => {
+          this.reportAuthFailure(name, error, attemptId);
+        });
+      },
+      (error: unknown) => {
+        releaseSlot();
+        this.reportAuthFailure(name, error, attemptId);
+      },
+    );
+    return { authorizationUrl, alreadyAuthorized: false };
+  }
+
+  /**
+   * Record a background auth failure (callback timeout, user denial) so the
+   * entry keeps saying "needs auth" *with a reason* instead of silently
+   * returning to its previous error.
+   */
+  reportAuthFailure(name: string, error: unknown, attemptId?: number): void {
+    const entry = this.entries.get(name);
+    if (entry === undefined) return;
+    // A flow that lost its generation is stale: the server reconnected (or was
+    // stopped / disabled) while the browser step was still pending, and an
+    // "authorization failed" event would overwrite the newer truth.
+    if (attemptId !== undefined && !this.isCurrent(entry, attemptId)) return;
+    if (entry.status === 'connected' || entry.status === 'disabled') return;
+    entry.status = 'needs-auth';
+    entry.error = error instanceof Error ? error.message : String(error);
+    this.emit(entry);
   }
 
   private async connectOne(entry: InternalEntry, attemptId: number): Promise<void> {
@@ -340,6 +510,7 @@ export class McpConnectionManager {
       }
       entry.tools = tools;
       entry.enabledNames = computeEnabledNames(entry.config, tools);
+      entry.serverVersion = startupClient.getServerVersion?.()?.version;
       entry.status = 'connected';
       this.watchForUnexpectedClose(entry, startupClient, attemptId);
     } catch (error) {
@@ -351,13 +522,14 @@ export class McpConnectionManager {
       }
       if (this.shouldMarkNeedsAuth(entry, error)) {
         entry.status = 'needs-auth';
-        entry.error = `${entry.name} 需要 OAuth 认证，请运行 /mcp 管理`;
+        entry.error = `${entry.name} needs OAuth authorization — open /mcp and press a to sign in`;
       } else {
         entry.status = 'failed';
         entry.error = formatStartupError(error, client);
       }
       entry.tools = undefined;
       entry.enabledNames = undefined;
+      entry.serverVersion = undefined;
       // Drop the client reference so a later reconnect builds a fresh one.
       await this.closeClient(entry);
     }
@@ -379,6 +551,7 @@ export class McpConnectionManager {
       entry.error = formatUnexpectedCloseError(entry.name, reason);
       entry.tools = undefined;
       entry.enabledNames = undefined;
+      entry.serverVersion = undefined;
       entry.client = undefined;
       // Best-effort close; the transport is already gone, but this lets the
       // SDK release timers and pending request handlers.
@@ -439,15 +612,20 @@ export class McpConnectionManager {
   private async connectAndDiscoverTools(client: RuntimeMcpClient): Promise<Tool[]> {
     await client.connect();
     const mcpTools = await client.listTools();
-    return mcpTools.map((mcpTool) => ({
-      name: mcpTool.name,
-      description: mcpTool.description,
-      parameters: assertMcpInputSchema(mcpTool.name, mcpTool.inputSchema),
-      // Pass the server's native annotations through as author-declared
-      // hints: the permission layer consumes `destructiveHint`
-      // conservatively (forces an approval, never grants one).
-      ...(mcpTool.annotations === undefined ? {} : { annotations: mapMcpAnnotations(mcpTool.annotations) }),
-    }));
+    return mcpTools.map((mcpTool) => {
+      const annotationHints =
+        mcpTool.annotations === undefined ? undefined : mapMcpAnnotations(mcpTool.annotations);
+      return {
+        name: mcpTool.name,
+        description: mcpTool.description,
+        parameters: assertMcpInputSchema(mcpTool.name, mcpTool.inputSchema),
+        // Pass the server's native annotations through as author-declared
+        // hints: ask mode approves read-only declarations, `destructiveHint`
+        // forces an approval everywhere else. Attached only when a boolean
+        // hint survived narrowing.
+        ...(annotationHints === undefined ? {} : { annotations: annotationHints }),
+      };
+    });
   }
 
   private async closeClient(entry: InternalEntry): Promise<void> {
@@ -479,6 +657,18 @@ export class McpConnectionManager {
       if (client instanceof StdioMcpClient) {
         client.killSync();
       }
+    }
+  }
+
+  /** Tear down a pending browser flow (listener + provider state) if any. */
+  private async cancelPendingAuth(name: string): Promise<void> {
+    const pending = this.pendingAuth.get(name);
+    if (pending === undefined) return;
+    this.pendingAuth.delete(name);
+    try {
+      await pending.cancel?.();
+    } catch {
+      // Cancelling is best-effort: the flow may already have finished.
     }
   }
 
@@ -516,6 +706,7 @@ function toPublicEntry(entry: InternalEntry): McpServerEntry {
         ? entry.enabledNames.size
         : 0,
     error: entry.error,
+    ...(entry.serverVersion === undefined ? {} : { serverVersion: entry.serverVersion }),
     capabilities: resolveServerCapabilities(entry.name, entry.config),
     exposure: entry.config.exposure ?? 'on-demand',
   };

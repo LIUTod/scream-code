@@ -80,6 +80,26 @@ describe('LineTurnCollector (remote reply policy: final content only)', () => {
     expect(collector.ended).toBeUndefined();
   });
 
+  it('records the session token limit that stopped the turn', () => {
+    const { collector } = makeCollector();
+    collector.handleEvent(baseEvent({ type: 'turn.started' }) as never);
+    collector.handleEvent(
+      baseEvent({
+        type: 'turn.ended',
+        reason: 'completed',
+        tokenCapReached: { usedTokens: 6_000_000, limitTokens: 5_000_000 },
+      }) as never,
+    );
+    expect(collector.tokenCapReached).toEqual({ usedTokens: 6_000_000, limitTokens: 5_000_000 });
+  });
+
+  it('leaves tokenCapReached unset for a normal turn', () => {
+    const { collector } = makeCollector();
+    collector.handleEvent(baseEvent({ type: 'turn.started' }) as never);
+    collector.handleEvent(baseEvent({ type: 'turn.ended', reason: 'completed' }) as never);
+    expect(collector.tokenCapReached).toBeUndefined();
+  });
+
   it('records step budget exhaustion', () => {
     const { collector } = makeCollector();
     collector.handleEvent(baseEvent({ type: 'turn.started' }) as never);

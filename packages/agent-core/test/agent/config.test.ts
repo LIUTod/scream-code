@@ -217,7 +217,7 @@ describe('Agent config', () => {
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Start a fresh turn" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 1, "origin": { "kind": "user" } }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start a fresh turn" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m6" }, "time": "<time>" }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ ExitPlanMode\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" }, "id": "m7" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## Current session state\\n\\n### Recent actions\\n\\n- ✅ ExitPlanMode\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" }, "id": "m7" }, "time": "<time>" }
       [wire] context.prefix_break        { "breakIndex": 0, "prevMessageCount": 5, "currentMessageCount": 8, "appendedSinceLast": 3, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-11>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 1, "step": 1, "stepId": "<uuid-11>" }
@@ -226,10 +226,10 @@ describe('Agent config', () => {
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-12>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-13>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "part": { "type": "text", "text": "Now the changed config is active." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-14>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-11>", "turnId": "1", "step": 1, "usage": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-11>", "usage": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "changed-model", "usage": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 472, "maxContextTokens": 1000000, "contextUsage": 0.000472, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 710, "output": 26, "inputCacheRead": 0, "inputCacheCreation": 0 }, "changed-model": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1170, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 460, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 1170, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-11>", "turnId": "1", "step": 1, "usage": { "inputOther": 459, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-11>", "usage": { "inputOther": 459, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "changed-model", "usage": { "inputOther": 459, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "changed-model", "thinkingLevel": "off", "contextTokens": 471, "maxContextTokens": 1000000, "contextUsage": 0.000471, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 710, "output": 26, "inputCacheRead": 0, "inputCacheCreation": 0 }, "changed-model": { "inputOther": 459, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1169, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 459, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 1169, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 1, "reason": "completed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -239,7 +239,7 @@ describe('Agent config', () => {
         <last>
         assistant: text "Still using the original turn config."
         user: text "Start a fresh turn"
-        user: text "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ ExitPlanMode\\n\\n</system-reminder>"
+        user: text "<system-reminder>\\n## Current session state\\n\\n### Recent actions\\n\\n- ✅ ExitPlanMode\\n\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });

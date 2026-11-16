@@ -288,6 +288,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'budget',
+    aliases: [],
+    description: 'registry.budget_desc',
+    priority: 194,
+    availability: 'always',
+  },
+  {
     name: 'revoke',
     aliases: [],
     description: 'registry.revoke_desc',

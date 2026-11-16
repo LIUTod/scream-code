@@ -119,6 +119,7 @@ Type `/` in the input to browse. All 55 commands:
 | `/export-debug-zip` | Export session as debug ZIP |
 | `/status` | Show session and runtime status |
 | `/usage` | Show token usage and context window |
+| `/budget` | Set a token limit for this session |
 | **Memory & knowledge** | |
 | `/memory` (`/memo`, `/mem`) `[query]` | Browse, search, inject memory memos |
 | `/knowledge` (`/know`) `[query]` | Manage local knowledge base |

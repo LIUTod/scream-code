@@ -37,6 +37,7 @@ import { buildCronFailureNotice, buildCronReminderChip } from '../tui/utils/cron
 import type { ProactiveDelivery } from './proactive';
 import { CronRelay } from './cron-relay';
 import { LineTurnCollector } from './turn-collector';
+import { tokenCapReply } from './notices';
 
 const MAX_QUEUE_PER_SESSION = 3;
 const ORPHAN_RESET_NOTICE = '会话已自动重置，请重新发送你的消息。';
@@ -514,6 +515,9 @@ export class LineSessionDriver {
     }
     if (collector.failure) {
       return { ok: false, text: friendlyProviderError(collector.failure.code, collector.failure.message) };
+    }
+    if (collector.tokenCapReached !== undefined) {
+      return { ok: false, text: tokenCapReply(collector.text, collector.tokenCapReached) };
     }
     if (collector.ended === 'completed' && !collector.stepBudgetExhausted) {
       const finalText = collector.text.trim();

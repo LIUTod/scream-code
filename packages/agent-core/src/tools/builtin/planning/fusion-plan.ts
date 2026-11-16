@@ -28,15 +28,15 @@ const DEFAULT_SYNTHESIS_MAX_OUTPUT_BYTES = 12_000;
 const WORKER_ANGLES = [
   {
     angle: 'Focus on correctness and edge cases. Identify risks, invariants, and safety checks.',
-    label: '最佳正确性',
+    label: 'Correctness',
   },
   {
     angle: 'Focus on minimal invasiveness. Prefer small, incremental changes that are easy to review.',
-    label: '最小侵入性',
+    label: 'Minimal change',
   },
   {
     angle: 'Focus on architecture and future maintainability. Consider testability, clarity, and naming.',
-    label: '最优架构性',
+    label: 'Architecture',
   },
 ] as const;
 

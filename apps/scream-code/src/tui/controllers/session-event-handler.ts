@@ -1,5 +1,7 @@
 import { truncateToWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
+import { formatTokenLimit } from '#/utils/usage/token-limit';
+import { formatTokenCount } from '#/utils/usage/usage-format';
 
 import { sanitizeShellOutput } from '../utils/sanitize';
 import { buildCronReminderChip } from '../utils/cron-chip';
@@ -776,6 +778,17 @@ export class SessionEventHandler {
       // the stop was a budget cut rather than a natural finish.
       this.host.showStatus(t('handler.max_steps_reached'), this.host.state.theme.colors.warning);
     }
+    if (event.tokenCapReached !== undefined) {
+      // The session token limit stopped the turn before a model request; like
+      // the step budget, `reason` still reads `completed`. `/budget` raises it.
+      this.host.showStatus(
+        t('handler.token_cap_reached', {
+          used: formatTokenCount(event.tokenCapReached.usedTokens),
+          limit: formatTokenLimit(event.tokenCapReached.limitTokens),
+        }),
+        this.host.state.theme.colors.warning,
+      );
+    }
     this.host.setAppState({ reconnectAttempt: 0 });
     const todos = this.host.state.todoPanel.getTodos();
     if (todos.length > 0 && todos.every((todo) => todo.status === 'done')) {
@@ -1289,7 +1302,15 @@ export class SessionEventHandler {
   }
 
   private handleSessionWarning(event: WarningEvent): void {
-    this.host.showStatus(t('handler.warning_prefix', { message: event.message }), this.host.state.theme.colors.warning);
+    // The engine words its warnings in English (headless output, logs); the
+    // ones a TUI user acts on are keyed by `code` so they follow the UI language.
+    const message =
+      event.code === 'compaction_circuit_open'
+        ? t('handler.compaction_circuit_open')
+        : event.code === 'compaction_circuit_open_overflow'
+          ? t('handler.compaction_circuit_open_overflow')
+          : event.message;
+    this.host.showStatus(t('handler.warning_prefix', { message }), this.host.state.theme.colors.warning);
   }
 
   /**
@@ -1463,8 +1484,14 @@ export class SessionEventHandler {
     event: CompactionCancelledEvent,
     sendQueued: (item: QueuedMessage) => void,
   ): void {
-    if (event.reason) {
-      this.host.showStatus(event.reason, this.host.state.theme.colors.warning);
+    const reason =
+      event.code === 'timeout'
+        ? t('handler.compaction_timeout')
+        : event.code === 'context_changed'
+          ? t('handler.compaction_context_changed')
+          : event.reason;
+    if (reason) {
+      this.host.showStatus(reason, this.host.state.theme.colors.warning);
     }
     this.host.streamingUI.cancelCompaction();
     this.lastCompactionTrigger = undefined;
@@ -1524,18 +1551,16 @@ export class SessionEventHandler {
     // detached (provider removed); stay silent instead of surfacing a
     // confusing "ask failed" hint for a feature the user did not initiate.
     if (this.host.state.appState.model.trim().length === 0) return;
-    const purposeText = purpose ? `（${purpose}）` : '';
-    const request =
-      `检测到可复用过程「${name}」${purposeText}。` +
-      '请用 AskUserQuestion 工具询问用户是否将其保存为可复用技能（选项：生成 / 忽略）。' +
-      '用户选择「生成」后，用 MakeSkillPlanTool 生成该技能，再用 MakeSkillApply 落盘；' +
-      '落盘后把 plan.verification.instructions 原样告诉用户，并说明这是装完后要跑的触发检查。' +
-      '选择「忽略」则直接说明已跳过。';
+    // This text becomes a user message in the transcript AND the model's
+    // instruction (including the option labels it offers), so it follows the
+    // UI language — a hard-coded Chinese request made English sessions ask in Chinese.
+    const purposeText = purpose ? t('skill_candidate.purpose', { purpose }) : '';
+    const request = t('skill_candidate.request', { name, purpose: purposeText });
     void session.prompt(request).catch(() => {
       // Fire-and-forget confirmation: a prompt failure (e.g. session closed)
       // is surfaced as a status hint so the user knows the candidate existed.
       this.host.showStatus(
-        `检测到可复用过程「${name}」，但询问失败。可稍后手动处理。`,
+        t('skill_candidate.ask_failed', { name }),
         this.host.state.theme.colors.warning,
       );
     });

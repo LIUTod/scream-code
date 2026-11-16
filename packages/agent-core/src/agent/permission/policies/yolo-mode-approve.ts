@@ -2,8 +2,10 @@ import type { Agent } from '../..';
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
 
 /**
- * yolo mode → approve every tool operation: no approval prompt fires while
- * yolo is active (egress, dangerous commands, sensitive paths included).
+ * yolo mode → approve every tool operation that reaches it: dangerous
+ * commands and sensitive paths included. The few operations whose damage
+ * outlives the session (private-read egress, git control writes, shell
+ * startup files) are stopped one line above by `yolo-hard-floor-ask`.
  * ExitPlanMode is deliberately exempt — a plan decision is not a tool
  * operation, so the chain falls through to `session-approval-history` /
  * `exit-plan-mode-review-ask` and yolo keeps plan decisions with the user.

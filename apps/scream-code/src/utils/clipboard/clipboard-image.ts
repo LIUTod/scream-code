@@ -23,6 +23,8 @@ import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { t } from '@scream-code/config';
+
 import { parseImageMeta } from '#/utils/image/image-mime';
 
 import { clipboard, type ClipboardModule } from './clipboard-native';
@@ -237,7 +239,7 @@ function readVideoPath(path: string): ClipboardVideo | null {
   if (!stat.isFile()) return null;
   if (stat.size > MAX_VIDEO_BYTES) {
     throw new ClipboardMediaError(
-      `视频大小为 ${(stat.size / 1024 / 1024).toFixed(1)} MB；最大支持 100 MB。`,
+      t('clipboard.video_too_large', { size: (stat.size / 1024 / 1024).toFixed(1) }),
     );
   }
   return {

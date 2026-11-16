@@ -238,7 +238,10 @@ async function generateAcceptanceCriteria(
   objective: string,
 ): Promise<string> {
   const prompt = buildCriteriaPrompt(objective);
-  const response = await agent.rawGenerate(
+  // `generateWithRetry`, not `rawGenerate`: the raw path skipped secret
+  // obfuscation (the graded output can carry secrets), OAuth resolution,
+  // request logging, usage accounting and transient-error retries.
+  const response = await agent.generateWithRetry(
     agent.config.provider,
     CRITERIA_SYSTEM_PROMPT,
     [],
@@ -259,7 +262,8 @@ async function generateAcceptanceCriteria(
   }
 }
 
-function createGoalGrader(agent: Agent): GoalGraderFn {
+/** Exported for tests; production wiring is the tool context below. */
+export function createGoalGrader(agent: Agent): GoalGraderFn {
   return async (objective, criterion, output) => {
     // Phase 1: determine acceptance criteria
     let criteria: string;
@@ -274,7 +278,8 @@ function createGoalGrader(agent: Agent): GoalGraderFn {
 
     // Phase 2: evaluate against criteria
     const user = buildGraderPrompt(objective, criteria, output);
-    const response = await agent.rawGenerate(
+    // Same seam as the criteria call above (see generateAcceptanceCriteria).
+    const response = await agent.generateWithRetry(
       agent.config.provider,
       GRADER_SYSTEM_PROMPT,
       [],
@@ -781,6 +786,13 @@ export class ToolManager {
         name: qualified,
         description: tool.description,
         parameters: tool.parameters,
+        // Author-declared, unverified hints. The permission layer consumes
+        // them in the conservative direction only: `readOnlyHint` is what lets
+        // ask mode reach a server that declares itself read-only, and
+        // `destructiveHint` forces an approval. Dropping them here made every
+        // MCP tool look annotation-less. Left off entirely when the server
+        // declared none, so the key never appears empty.
+        ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
         resolveExecution: (args) => {
           return {
             description: tool.description,

@@ -24,6 +24,7 @@ import type {
   LoopTurnStopReason,
   MediaProjectionState,
   RecordStepUsageResult,
+  TokenCapState,
   TurnResult,
 } from './types';
 
@@ -79,6 +80,12 @@ export interface RunTurnInput {
   readonly pendingSteerKind?: (() => 'user' | 'parent-interject') | undefined;
   /** Crash-recovery draft sink (see ExecuteLoopStepDeps.onStreamingDraft). */
   readonly onStreamingDraft?: ((text: string, think: string) => void) | undefined;
+  /**
+   * Session token cap probe, consulted before every step — including the first
+   * and the step-budget wrap-up. A defined result ends the turn right there,
+   * without a model request; the result carries it as `tokenCapReached`.
+   */
+  readonly tokenCap?: (() => TokenCapState | undefined) | undefined;
 }
 
 export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
@@ -105,6 +112,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   const stepLimit = maxSteps !== undefined && maxSteps > 0 ? maxSteps : undefined;
   let wrapUpIssued = false;
   let stepBudgetExhausted = false;
+  let tokenCapReached: TokenCapState | undefined;
   // Normal exits overwrite this with the completed step's stop reason.
   let stopReason: LoopTurnStopReason = 'end_turn';
   let activeStep: number | undefined;
@@ -121,6 +129,15 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   try {
     while (true) {
       signal.throwIfAborted();
+
+      // Token cap before anything else: a reached cap forbids the next request,
+      // the step-budget wrap-up request included.
+      const tokenCap = input.tokenCap?.();
+      if (tokenCap !== undefined) {
+        tokenCapReached = tokenCap;
+        stopReason = 'end_turn';
+        break;
+      }
 
       // Budget exhausted → one wrap-up step; step hooks see `finalStep` and
       // inject the wrap-up instruction. Reaching this branch twice is a guard
@@ -225,6 +242,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
     steps,
     usage,
     ...(stepBudgetExhausted ? { stepBudgetExhausted: true } : {}),
+    ...(tokenCapReached !== undefined ? { tokenCapReached } : {}),
   };
 }
 

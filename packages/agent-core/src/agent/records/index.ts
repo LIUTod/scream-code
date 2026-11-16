@@ -87,7 +87,15 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       // currentTurn undefined — there is no live turn during restore.
       agent.usage.record(input.model, input.usage, input.usageScope ?? 'session', {
         skipCurrentTurn: true,
+        source: 'replay',
+        ...(input.fold === undefined ? {} : { fold: input.fold }),
       });
+      // A replayed fold rebuilds the session fold ledger (in-memory state
+      // only — no event, no I/O), so a child resumed in this process folds
+      // only its new usage. Idempotent: see `AgentRecordEvents['usage.record']`.
+      if (input.fold !== undefined) {
+        agent.subagentHost?.restoreFoldedUsage(input.fold.childId, input.model, input.fold.cumulative);
+      }
       return;
     case 'full_compaction.begin':
       agent.fullCompaction.begin(input);

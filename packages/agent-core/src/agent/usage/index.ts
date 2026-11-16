@@ -5,6 +5,14 @@ import type { Agent } from '..';
 
 export type UsageRecordScope = 'session' | 'turn';
 
+/**
+ * Where a usage record comes from. Only `fresh` — a response that just came
+ * back — is new usage and feeds the session token meter; `fold` re-records a
+ * finished subagent's usage into its parent (already metered when the child
+ * recorded it) and `replay` restores the wire log on resume.
+ */
+export type UsageRecordSource = 'fresh' | 'fold' | 'replay';
+
 function copyUsage(usage: TokenUsage): TokenUsage {
   return { ...usage };
 }
@@ -35,13 +43,19 @@ export class UsageRecorder {
     model: string,
     usage: TokenUsage,
     scope: UsageRecordScope = 'session',
-    opts?: { skipCurrentTurn?: boolean },
+    opts?: {
+      skipCurrentTurn?: boolean;
+      source?: UsageRecordSource;
+      fold?: { childId: string; cumulative: TokenUsage };
+    },
   ): void {
+    if ((opts?.source ?? 'fresh') === 'fresh') this.agent?.tokenMeter?.record(usage);
     this.agent?.records.logRecord({
       type: 'usage.record',
       model,
       usage,
       usageScope: scope,
+      ...(opts?.fold === undefined ? {} : { fold: opts.fold }),
     });
     const current = this.byModel[model];
     this.byModel[model] = current === undefined ? copyUsage(usage) : addUsage(current, usage);

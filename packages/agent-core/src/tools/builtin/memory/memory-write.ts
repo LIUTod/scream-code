@@ -104,7 +104,7 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
 
         return {
           isError: false,
-          output: `已保存记忆：${memo.userNeed}（id: ${memo.id}）`,
+          output: `Memory saved: ${memo.userNeed} (id: ${memo.id})`,
         };
       },
     };

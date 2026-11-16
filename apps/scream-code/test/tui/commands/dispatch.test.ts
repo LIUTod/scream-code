@@ -32,6 +32,10 @@ vi.mock('../../../src/tui/commands/grants.js', () => ({
   handleGrantsCommand: vi.fn(async (): Promise<void> => {}),
 }));
 
+vi.mock('../../../src/tui/commands/budget.js', () => ({
+  handleBudgetCommand: vi.fn(async (): Promise<void> => {}),
+}));
+
 vi.mock('../../../src/tui/commands/goal.js', () => ({
   handleGoalCommand: vi.fn(async (): Promise<void> => {}),
 }));
@@ -50,6 +54,7 @@ import {
   handleThemeCommand,
   showPermissionPicker,
 } from '../../../src/tui/commands/config.js';
+import { handleBudgetCommand } from '../../../src/tui/commands/budget.js';
 import { handleGrantsCommand } from '../../../src/tui/commands/grants.js';
 import { showStatusReport, showUsage } from '../../../src/tui/commands/info.js';
 
@@ -167,6 +172,26 @@ describe('dispatchInput — intent routing', () => {
     dispatchInput(host, '/grants');
     await settle();
     expect(handleGrantsCommand).toHaveBeenCalledWith(host);
+  });
+
+  it('builtin: routes /budget with its trimmed args to the budget handler', async () => {
+    const host = makeHost();
+    dispatchInput(host, '/budget');
+    await settle();
+    expect(handleBudgetCommand).toHaveBeenCalledWith(host, '');
+
+    dispatchInput(host, '/budget   50m  ');
+    await settle();
+    expect(handleBudgetCommand).toHaveBeenLastCalledWith(host, '50m');
+  });
+
+  it('builtin: /budget stays available while a turn is streaming', async () => {
+    // Raising the limit mid-turn is the whole point of changing it live.
+    const host = makeHost({ appState: { streamingPhase: 'composing' } });
+    dispatchInput(host, '/budget 100m');
+    await settle();
+    expect(handleBudgetCommand).toHaveBeenLastCalledWith(host, '100m');
+    expect(host.showError).not.toHaveBeenCalled();
   });
 
   it('skill: maps slash alias to sendSkillActivation with trimmed args', async () => {

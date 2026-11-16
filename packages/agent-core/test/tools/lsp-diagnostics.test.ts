@@ -250,7 +250,7 @@ describe('formatDiagnosticsHint', () => {
     expect(formatDiagnosticsHint(result)).toBe('');
   });
 
-  it('returns a Chinese install hint naming the missing server command', () => {
+  it('returns an install hint naming the missing server command', () => {
     const result: DiagnosticsResult = {
       available: false,
       observed: false,
@@ -260,7 +260,7 @@ describe('formatDiagnosticsHint', () => {
       serverCommand: 'typescript-language-server',
     };
     const hint = formatDiagnosticsHint(result);
-    expect(hint).toContain('提示');
+    expect(hint).toContain('Hint: install the language server');
     expect(hint).toContain('typescript-language-server');
     expect(hint.startsWith('\n')).toBe(true);
   });

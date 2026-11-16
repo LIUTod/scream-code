@@ -38,6 +38,8 @@ import type {
   ScreamConfig,
   ScreamConfigPatch,
   ListSessionsOptions,
+  McpAuthenticateResult,
+  SessionTokenBudget,
   McpServerInfo,
   McpStartupMetrics,
   PermissionMode,
@@ -651,6 +653,21 @@ export class SDKRpcClient {
     return rpc.getSessionApprovalGrants({ sessionId: input.sessionId });
   }
 
+  async getSessionTokenBudget(input: SessionIdRpcInput): Promise<SessionTokenBudget> {
+    const rpc = await this.getRpc();
+    return rpc.getSessionTokenBudget({ sessionId: input.sessionId });
+  }
+
+  async setSessionTokenBudget(
+    input: SessionIdRpcInput & { limitTokens: number | null },
+  ): Promise<SessionTokenBudget> {
+    const rpc = await this.getRpc();
+    return rpc.setSessionTokenBudget({
+      sessionId: input.sessionId,
+      limitTokens: input.limitTokens,
+    });
+  }
+
   async revokeSessionApprovalGrant(
     input: SessionIdRpcInput & { pattern: string },
   ): Promise<boolean> {
@@ -783,6 +800,15 @@ export class SDKRpcClient {
   async removeMcpServer(input: RemoveMcpServerRpcInput): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.removeMcpServer({ sessionId: input.sessionId, name: input.name });
+  }
+
+  /**
+   * Starts an OAuth flow for an HTTP MCP server and resolves with the URL to
+   * open. Reuses `RemoveMcpServerRpcInput`'s shape (`{ sessionId, name }`).
+   */
+  async authenticateMcpServer(input: RemoveMcpServerRpcInput): Promise<McpAuthenticateResult> {
+    const rpc = await this.getRpc();
+    return rpc.authenticateMcpServer({ sessionId: input.sessionId, name: input.name });
   }
 
   async listPlugins(): Promise<readonly PluginSummary[]> {

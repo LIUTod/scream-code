@@ -124,6 +124,8 @@ export interface TestAgentOptions {
   /** When set, the agent builds a real MemoryMemoStore under this directory
    *  (used by tests exercising compaction-time memory extraction). */
   readonly screamHomeDir?: string | undefined;
+  /** Session-wide token meter (shared across agents in a real Session). */
+  readonly tokenMeter?: AgentOptions['tokenMeter'];
 }
 
 interface ConfigureOptions {
@@ -250,6 +252,7 @@ export class AgentTestContext {
       log: options.log,
       resolveRuntimeSystemPrompt: options.resolveRuntimeSystemPrompt,
       screamHomeDir: options.screamHomeDir,
+      tokenMeter: options.tokenMeter,
     });
     this.rpc = this.createPromiseAgentApi(this.agent);
     if (options.askTools !== undefined && options.askTools.length > 0) {

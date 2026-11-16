@@ -1,6 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { getLocale, setLocale, t } from '@scream-code/config';
+import { describe, expect, it, vi } from 'vitest';
 
-import { shouldGuardCompaction } from '#/tui/commands/config';
+import { handleCompactCommand, shouldGuardCompaction, showModelPicker } from '#/tui/commands/config';
+
+import { makeMockSession, makeMockSlashCommandHost } from '../fixtures/mock-host';
+
+async function inLocale<T>(locale: 'en' | 'zh', fn: () => Promise<T>): Promise<T> {
+  const previous = getLocale();
+  setLocale(locale);
+  try {
+    return await fn();
+  } finally {
+    setLocale(previous);
+  }
+}
 
 interface GuardState {
   contextTokens: number;
@@ -54,5 +67,56 @@ describe('shouldGuardCompaction (Storm Breaker /compact guard)', () => {
     const guard = shouldGuardCompaction(state);
     expect(guard).not.toBeNull();
     expect(guard!.ratio).toBeCloseTo(0.0125, 5);
+  });
+});
+
+describe('/compact guard notice', () => {
+  const SMALL_CONTEXT = { contextTokens: 5_000, maxContextTokens: 200_000 } as const; // 2.5%
+
+  it.each(['zh', 'en'] as const)('explains in the UI language why compaction is refused (%s)', async (locale) => {
+    const compact = vi.fn(async (): Promise<void> => {});
+    const host = makeMockSlashCommandHost({
+      session: makeMockSession({ overrides: { compact } }),
+      appState: SMALL_CONTEXT,
+    });
+
+    await inLocale(locale, () => handleCompactCommand(host, ''));
+
+    expect(compact).not.toHaveBeenCalled();
+    const [title, detail] = vi.mocked(host.showNotice).mock.calls[0] ?? [];
+    expect(title).toBe(await inLocale(locale, async () => t('handler.storm_breaker_title')));
+    expect(detail).toContain('5.0k');
+    expect(detail).toContain('200.0k');
+    expect(detail).toContain('2.5%');
+    expect(detail).toContain('/compact');
+    if (locale === 'en') expect(detail).toContain('compaction would gain nothing');
+    else expect(detail).toContain('压缩无收益');
+  });
+
+  it('compacts normally once the context is large enough', async () => {
+    const compact = vi.fn(async (): Promise<void> => {});
+    const host = makeMockSlashCommandHost({
+      session: makeMockSession({ overrides: { compact } }),
+      appState: { contextTokens: 50_000, maxContextTokens: 200_000 },
+    });
+
+    await handleCompactCommand(host, 'keep the schema');
+
+    expect(compact).toHaveBeenCalledWith({ instruction: 'keep the schema' });
+    expect(host.showNotice).not.toHaveBeenCalled();
+  });
+});
+
+describe('model picker with no models configured', () => {
+  it.each(['zh', 'en'] as const)('points at /config in the UI language (%s)', async (locale) => {
+    const host = makeMockSlashCommandHost({ appState: { availableModels: {} } });
+
+    await inLocale(locale, () => showModelPicker(host));
+
+    const [title, detail] = vi.mocked(host.showNotice).mock.calls[0] ?? [];
+    expect(title).toBe(await inLocale(locale, async () => t('model.picker_empty_title')));
+    expect(detail).toContain('/config');
+    expect(host.mountEditorReplacement).not.toHaveBeenCalled();
+    if (locale === 'en') expect(`${title} ${detail}`).not.toMatch(/[\u4E00-\u9FFF]/);
   });
 });

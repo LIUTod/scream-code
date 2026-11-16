@@ -19,10 +19,10 @@ export class WorkingSetInjector extends DynamicInjector {
     const text = [
       '## Working Set',
       '',
-      '当前任务可能涉及以下文件：',
+      'Files this task is likely to involve:',
       ...paths.map((p) => `- ${p}`),
       '',
-      '优先检查这些文件，避免重复读取未修改文件。',
+      'Check these first, and do not re-read files that have not changed.',
     ].join('\n');
 
     if (this.injectedAt !== null && text === this.lastInjectedText) return undefined;

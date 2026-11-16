@@ -1,4 +1,5 @@
 import { visibleWidth } from '@liutod-scream/pi-tui';
+import { t } from '@scream-code/config';
 import { describe, expect, it } from 'vitest';
 
 import { buildUsageReportLines, UsagePanelComponent } from '#/tui/components/messages/usage-panel';
@@ -64,6 +65,35 @@ describe('UsagePanelComponent', () => {
     // sub-agent table itself is header + per-agent rows only.
     expect(lines.join('\n')).toMatch(/└ 子 Agent\s+150\s+75\s+225/);
     expect(lines.join('\n')).not.toContain('子 Agent 合计');
+  });
+
+  describe('token limit line', () => {
+    const base = {
+      colors: darkColors,
+      sessionUsage: {
+        byModel: { scream: { inputOther: 1000, inputCacheRead: 0, inputCacheCreation: 0, output: 250 } },
+      } as never,
+      contextUsage: 0,
+      contextTokens: 0,
+      maxContextTokens: 0,
+    };
+
+    it('shows what this run used against the limit while one is set', () => {
+      const text = strip(
+        buildUsageReportLines({
+          ...base,
+          tokenBudget: { usedTokens: 12_300_000, limitTokens: 100_000_000 },
+        }).join('\n'),
+      );
+      expect(text).toContain(t('usage.token_limit', { used: '12.3M', limit: '100M' }));
+    });
+
+    it.each([
+      ['no limit is set', { usedTokens: 5_000, limitTokens: null }],
+      ['the budget could not be read', undefined],
+    ])('adds nothing when %s', (_label, tokenBudget) => {
+      expect(buildUsageReportLines({ ...base, tokenBudget })).toEqual(buildUsageReportLines(base));
+    });
   });
 
   it('omits the cache row when nothing was cached', () => {

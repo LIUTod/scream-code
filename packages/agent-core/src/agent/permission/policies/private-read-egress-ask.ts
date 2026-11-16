@@ -32,10 +32,11 @@ export interface PrivateReadEgressAssessment {
  * private-read data to a destination that is not allowlisted, undefined when
  * the call is clean (or not an egress call at all).
  *
- * Two callers keep the same semantics:
+ * Three callers keep the same semantics:
  * - `PrivateReadEgressAskPermissionPolicy` — prompt the user (once or
- *   session) in the modes that ask (manual, ask); auto and yolo approve above
- *   this policy, so it is unreachable there by design;
+ *   session) in ask mode; auto approves above this policy by design;
+ * - `YoloHardFloorAskPermissionPolicy` — the same prompt in yolo, raised
+ *   above `yolo-mode-approve` so the startup-default mode keeps this check;
  * - bot mode — deny instead, because no human is there to answer a prompt.
  *
  * Fail-closed details:
@@ -74,9 +75,9 @@ export function assessPrivateReadEgress(
  * assumed safe.
  *
  * The chain position is the mechanism (see `createPermissionDecisionPolicies`):
- * the policy sits after `auto-mode-approve`/`yolo-mode-approve`, so auto and
- * yolo never stop to ask — the ask applies only in the modes that prompt
- * (manual, ask). It sits before `warnings-ask`, so a dangerous-command prompt
+ * the policy sits after `auto-mode-approve`/`yolo-mode-approve`, so auto
+ * never stops to ask and yolo is covered earlier by `yolo-hard-floor-ask` —
+ * this line is what ask mode reaches. It sits before `warnings-ask`, so a dangerous-command prompt
  * cannot replace the egress check on a command that matches both, and a
  * memorized grant whose pattern matches this call still silences the ask
  * (checked below).

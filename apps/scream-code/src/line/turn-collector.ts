@@ -23,6 +23,8 @@ export class LineTurnCollector {
   failure: { code: string; message: string } | undefined;
   ended: 'completed' | 'cancelled' | 'failed' | undefined;
   stepBudgetExhausted = false;
+  /** Set when the session token limit stopped the turn (see `turn.ended`). */
+  tokenCapReached: { readonly usedTokens: number; readonly limitTokens: number } | undefined;
   private activeTurnId: number | undefined;
   private activeAgentId: string | undefined;
   private resolveTurn: () => void;
@@ -66,6 +68,9 @@ export class LineTurnCollector {
       this.ended = event.reason;
       if (event.reason === 'completed' && event.stepBudgetExhausted === true) {
         this.stepBudgetExhausted = true;
+      }
+      if (event.reason === 'completed' && event.tokenCapReached !== undefined) {
+        this.tokenCapReached = event.tokenCapReached;
       }
       this.resolveTurn();
     }

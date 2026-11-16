@@ -1,4 +1,4 @@
-import { basename, normalize } from 'pathe';
+import { basename, normalize, relative, resolve } from 'pathe';
 
 import { isPathInside } from '#/utils/path-safety';
 
@@ -25,11 +25,12 @@ const REVERSIBLE_TOOLS = new Set([
   'WebSearch',
   'PaperSearch',
   'FetchURL',
+  // Memory reads only. MemoryWrite / MemoryEdit / MemoryConsolidateApply are
+  // left out on purpose: a memo is injected into every later session, so an
+  // unattended write is the one "reversible" edit that persists an injected
+  // instruction past this session with nobody there to notice.
   'MemoryLookup',
-  'MemoryWrite',
-  'MemoryEdit',
   'MemoryConsolidatePlan',
-  'MemoryConsolidateApply',
   'KnowledgeLookup',
   'TodoList',
   'TaskList',
@@ -96,6 +97,46 @@ export class BotModePermissionPolicy implements PermissionPolicy {
     return rawPath.split(/[/\\]+/).some((segment) => segment.toLowerCase() === '.git');
   }
 
+  /**
+   * Paths whose content runs *later, outside bot mode*: git hook managers,
+   * CI definitions (which run with repository secrets), editor tasks, direnv.
+   * A bot edit there is not reversible within the session — it executes when a
+   * human commits, CI picks the branch up, or someone opens the folder.
+   */
+  private static readonly DEFERRED_EXEC_SEGMENTS = new Set([
+    '.husky',
+    '.githooks',
+    '.github',
+    '.gitlab',
+    '.circleci',
+    '.buildkite',
+    '.vscode',
+    '.idea',
+    '.devcontainer',
+  ]);
+
+  private static readonly DEFERRED_EXEC_FILES = new Set([
+    '.envrc',
+    '.gitlab-ci.yml',
+    '.pre-commit-config.yaml',
+    '.lefthook.yml',
+    'lefthook.yml',
+    'azure-pipelines.yml',
+    'jenkinsfile',
+  ]);
+
+  private static isDeferredExecPath(rawPath: string): boolean {
+    const segments = rawPath
+      .split(/[/\\]+/)
+      .filter((segment) => segment.length > 0)
+      .map((segment) => segment.toLowerCase());
+    const last = segments.at(-1);
+    return (
+      segments.some((segment) => BotModePermissionPolicy.DEFERRED_EXEC_SEGMENTS.has(segment)) ||
+      (last !== undefined && BotModePermissionPolicy.DEFERRED_EXEC_FILES.has(last))
+    );
+  }
+
   private isAllowedWritePath(rawPath: string): boolean {
     if (rawPath.trim().length === 0) return false;
     // `~` expands to the user home in the Write tool — reject rather than
@@ -103,6 +144,10 @@ export class BotModePermissionPolicy implements PermissionPolicy {
     if (rawPath.startsWith('~')) return false;
     if (BotModePermissionPolicy.hasGitSegment(rawPath)) return false;
     const cwd = this.agent.config?.cwd ?? '.';
+    // Judged on the part of the path BELOW the workspace: a project checked out
+    // under e.g. `~/.vscode/extensions/…` or `~/.idea/…` must not have every
+    // write refused because of where it lives.
+    if (BotModePermissionPolicy.isDeferredExecPath(relative(cwd, resolve(cwd, rawPath)))) return false;
     // Absolute, drive-qualified (`C:\...`) and UNC paths are judged as
     // written; anything else is resolved against the workspace, on component
     // boundaries so `/work-evil` cannot pass as inside `/work`.
@@ -136,7 +181,9 @@ export class BotModePermissionPolicy implements PermissionPolicy {
       if (!this.isAllowedWritePath(path)) {
         return {
           kind: 'deny',
-          reason: { reason: `bot: write to '${path}' is outside the workspace or targets a sensitive file` },
+          reason: {
+            reason: `bot: write to '${path}' is outside the workspace, targets a sensitive file, or lands where code runs later (git hooks, CI, editor tasks)`,
+          },
         };
       }
       return { kind: 'approve', reason: { reason: 'bot: in-workspace reversible edit' } };

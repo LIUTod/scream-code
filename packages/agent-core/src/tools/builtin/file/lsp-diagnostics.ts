@@ -141,7 +141,7 @@ export function formatDiagnosticsHint(result: DiagnosticsResult): string {
   if (result.reason !== 'server-missing') return '';
   const cmd = result.serverCommand;
   if (cmd === undefined) return '';
-  return `\n提示：为获得编辑后的类型与语法诊断，建议安装语言服务器 \`${cmd}\`。`;
+  return `\nHint: install the language server \`${cmd}\` to get type and syntax diagnostics after edits.`;
 }
 
 /**

@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
 import { testJian } from '../fixtures/test-jian';
-import type { ToolCall } from '@scream-code/ltod';
+import type { TokenUsage, ToolCall } from '@scream-code/ltod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
-import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
+import { AGENT_WIRE_PROTOCOL_VERSION, InMemoryAgentRecordPersistence } from '../../src/agent/records';
 import { createRlmHostHandlers } from '../../src/agent/tool';
 import type { ScreamConfig } from '../../src/config';
 import { DEFAULT_AGENT_PROFILES } from '../../src/profile';
@@ -649,6 +649,116 @@ describe('SessionSubagentHost', () => {
       .toBe(childAfterResume.inputOther - childBeforeResume.inputOther);
     expect(parentAfterResume.output - parentAfterFirst.output)
       .toBe(childAfterResume.output - childBeforeResume.output);
+  });
+
+  it('does not re-fold a resumed child after a process restart (ledger rebuilt from the wire)', async () => {
+    const LONG_SUMMARY =
+      'Explored the earlier context and completed the requested investigation with a complete technical summary so the parent can continue without repeating any of the work described here in detail. No files were modified during the investigation.';
+    const parentWire = new InMemoryAgentRecordPersistence();
+    const parent = testAgent({ persistence: parentWire });
+    parent.configure();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+
+    // Process 1: the child runs once and its usage folds into the parent.
+    const child = testAgent({ type: 'sub', permission: { parent: parent.agent.permission } });
+    child.configure({ tools: ['Read'] });
+    child.agent.useProfile(profile({ name: 'explore', tools: ['Read'], systemPrompt: 'explore prompt' }));
+    child.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier context' }]);
+    child.mockNextResponse({ type: 'text', text: LONG_SUMMARY });
+    child.agent.usage.record(
+      'seed-model',
+      { inputOther: 100, output: 20, inputCacheRead: 0, inputCacheCreation: 0 },
+      'turn',
+    );
+    const meta = {
+      'agent-0': { homedir: '/tmp/scream-session/agents/agent-0', type: 'sub' as const, parentAgentId: 'main' },
+    };
+    const host1 = new SessionSubagentHost(fakeSession(parent.agent, child.agent, { ...meta }), 'main');
+    const first = await host1.resume('agent-0', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Continue from context',
+      description: 'Continue work',
+      runInBackground: false,
+      signal,
+    });
+    await first.completion;
+    const foldedByModel = child.agent.usage.data().byModel ?? {};
+    // The fold is persisted with its source child and that child's cumulative
+    // usage, which is what lets a later process rebuild the ledger.
+    const foldRecord = parentWire.records.find(
+      (record) => record.type === 'usage.record' && (record as { fold?: unknown }).fold !== undefined,
+    ) as { model: string; fold: { childId: string; cumulative: TokenUsage } } | undefined;
+    expect(foldRecord?.fold.childId).toBe('agent-0');
+    expect(foldRecord?.fold.cumulative).toEqual(foldedByModel[foldRecord!.model]);
+
+    // Process 2: a brand-new Session (empty in-memory ledger). The parent is
+    // replayed from its wire through the real restore path.
+    let host2: SessionSubagentHost | undefined;
+    const parent2 = testAgent({
+      persistence: new InMemoryAgentRecordPersistence(parentWire.records),
+      subagentHost: {
+        restoreFoldedUsage: (...args: Parameters<SessionSubagentHost['restoreFoldedUsage']>) =>
+          host2?.restoreFoldedUsage(...args),
+      } as unknown as SessionSubagentHost,
+    });
+    const rehydrated = testAgent({
+      type: 'sub',
+      agentId: 'agent-0',
+      permission: { parent: parent2.agent.permission },
+    });
+    host2 = new SessionSubagentHost(fakeSession(parent2.agent, rehydrated.agent, { ...meta }), 'main');
+    await parent2.agent.resume();
+    // The same fold replayed AGAIN in this process — what happens when a middle
+    // agent that received folds from its own children is evicted and then
+    // re-hydrated: its wire is replayed over a ledger that already holds them —
+    // and an OLDER cumulative arriving after the newer one. Neither may change
+    // the ledger (it used to double, and the child's next fold under-counted).
+    host2.restoreFoldedUsage('agent-0', foldRecord!.model, foldRecord!.fold.cumulative);
+    host2.restoreFoldedUsage('agent-0', foldRecord!.model, {
+      inputOther: 1,
+      output: 1,
+      inputCacheRead: 0,
+      inputCacheCreation: 0,
+    });
+    parent2.configure();
+    const parentAfterRestart = parent2.agent.usage.data().total ?? zeroUsage();
+    expect(parentAfterRestart.inputOther).toBe(
+      (parent.agent.usage.data().total ?? zeroUsage()).inputOther,
+    );
+
+    // The child re-hydrates with its whole history (as its own wire replay
+    // would give it), then accrues new usage on the resumed run.
+    rehydrated.configure({ tools: ['Read'] });
+    rehydrated.agent.useProfile(profile({ name: 'explore', tools: ['Read'], systemPrompt: 'explore prompt' }));
+    rehydrated.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier context' }]);
+    for (const [model, usage] of Object.entries(foldedByModel)) {
+      rehydrated.agent.usage.record(model, usage, 'turn', { source: 'replay' });
+    }
+    const childBeforeResume = rehydrated.agent.usage.data().total ?? zeroUsage();
+    rehydrated.agent.usage.record(
+      'seed-model',
+      { inputOther: 30, output: 10, inputCacheRead: 0, inputCacheCreation: 0 },
+      'turn',
+    );
+    rehydrated.mockNextResponse({ type: 'text', text: LONG_SUMMARY });
+    const resumed = await host2.resume('agent-0', {
+      parentToolCallId: 'call_agent2',
+      prompt: 'Continue again',
+      description: 'Continue work',
+      runInBackground: false,
+      signal,
+    });
+    await resumed.completion;
+
+    // Only what the child accrued in process 2 reaches the parent.
+    const parentAfterResume = parent2.agent.usage.data().total ?? zeroUsage();
+    const childAfterResume = rehydrated.agent.usage.data().total ?? zeroUsage();
+    expect(parentAfterResume.inputOther - parentAfterRestart.inputOther).toBe(
+      childAfterResume.inputOther - childBeforeResume.inputOther,
+    );
+    expect(parentAfterResume.output - parentAfterRestart.output).toBe(
+      childAfterResume.output - childBeforeResume.output,
+    );
   });
 
   it('rolls a grandchild usage up to the nearest resident ancestor after the middle layer finished', async () => {

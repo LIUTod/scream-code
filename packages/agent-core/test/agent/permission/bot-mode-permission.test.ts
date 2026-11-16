@@ -159,6 +159,61 @@ describe('BotModePermissionPolicy', () => {
     }
   });
 
+  it('refuses writes where code runs later outside bot mode (hooks, CI, editor tasks)', () => {
+    for (const path of [
+      '.husky/pre-commit',
+      '/work/.github/workflows/ci.yml',
+      '.github/actions/setup/action.yml',
+      '.vscode/tasks.json',
+      '.devcontainer/devcontainer.json',
+      '.envrc',
+      'sub/.gitlab-ci.yml',
+      '.pre-commit-config.yaml',
+      'Jenkinsfile',
+      '.HUSKY/pre-push',
+    ]) {
+      expect(botPolicy().evaluate(ctx('Write', { path }))?.kind).toBe('deny');
+      expect(botPolicy().evaluate(ctx('Edit', { path }))?.kind).toBe('deny');
+    }
+  });
+
+  it('judges deferred-execution directories below the workspace, not where the workspace lives', () => {
+    // A project checked out under ~/.vscode/extensions (extension development)
+    // must not have every write refused because an ancestor is named `.vscode`.
+    const policy = new BotModePermissionPolicy({
+      permission: permissionStub('bot'),
+      config: { cwd: '/home/me/.vscode/extensions/myext' },
+    } as unknown as Agent);
+    for (const path of ['src/a.ts', '/home/me/.vscode/extensions/myext/src/a.ts', './docs/notes.md']) {
+      expect(policy.evaluate(ctx('Write', { path }))?.kind, path).toBe('approve');
+    }
+    // …while the workspace's OWN deferred-execution directories stay protected,
+    // however the path is spelled.
+    for (const path of [
+      '.vscode/tasks.json',
+      '/home/me/.vscode/extensions/myext/.vscode/tasks.json',
+      '/home/me/.vscode/extensions/myext/.github/workflows/ci.yml',
+      'src/../.husky/pre-commit',
+    ]) {
+      expect(policy.evaluate(ctx('Write', { path }))?.kind, path).toBe('deny');
+    }
+  });
+
+  it('keeps look-alike names writable', () => {
+    for (const path of ['src/github.ts', 'docs/husky.md', 'src/.vscode-notes.md', 'env.ts']) {
+      expect(botPolicy().evaluate(ctx('Write', { path }))?.kind).toBe('approve');
+    }
+  });
+
+  it('denies cross-session memory writes but keeps memory reads', () => {
+    for (const tool of ['MemoryWrite', 'MemoryEdit', 'MemoryConsolidateApply']) {
+      expect(botPolicy().evaluate(ctx(tool))?.kind).toBe('deny');
+    }
+    for (const tool of ['MemoryLookup', 'MemoryConsolidatePlan']) {
+      expect(botPolicy().evaluate(ctx(tool))?.kind).toBe('approve');
+    }
+  });
+
   it('approves plain in-workspace file writes in bot mode', () => {
     for (const path of ['/work/src/a.ts', 'src/a.ts', './docs/notes.md']) {
       expect(botPolicy().evaluate(ctx('Write', { path }))?.kind).toBe('approve');

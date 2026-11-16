@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContentPart } from '@scream-code/ltod';
 
 import { CronManager } from '../../../src/agent/cron/manager';
+import { SessionTokenMeter } from '../../../src/agent/usage/token-meter';
 import type { ClockSources } from '../../../src/tools/cron/clock';
 import type { CronTask } from '../../../src/tools/cron/types';
 import {
@@ -98,6 +99,77 @@ describe('CronManager', () => {
       // Exactly one envelope — guards against an accidental double-wrap
       // (e.g. handleFire calling renderCronFireXml on already-rendered
       expect((text.match(/<cron-fire /g) ?? []).length).toBe(1);
+    });
+  });
+
+  describe('handleFire — session token limit', () => {
+    const USAGE = { inputOther: 900, output: 200, inputCacheRead: 0, inputCacheCreation: 0 };
+
+    function trippedMeter(): SessionTokenMeter {
+      const meter = new SessionTokenMeter({ limitTokens: 1_000 });
+      meter.record(USAGE); // 1,100 ≥ 1,000
+      expect(meter.exhausted()).toBeDefined();
+      return meter;
+    }
+
+    function setup(meter: SessionTokenMeter | undefined) {
+      const stub = createAgentStub(meter === undefined ? {} : { tokenMeter: meter });
+      const harness = createClocks();
+      const manager = new CronManager(stub.agent, { clocks: harness.clocks, pollIntervalMs: null });
+      return { stub, harness, manager };
+    }
+
+    it('skips a recurring fire while the limit is tripped, and keeps the job', () => {
+      const { stub, harness, manager } = setup(trippedMeter());
+      const task = manager.store.add({ cron: '*/5 * * * *', prompt: 'check the deploy' }, harness.now() - 1);
+
+      harness.advance(6 * 60_000);
+      manager.tick();
+
+      // No turn is opened, no unanswered prompt lands in the context…
+      expect(stub.steerCalls).toEqual([]);
+      // …and the job is still there to run once the limit is raised.
+      expect(manager.store.get(task.id)).toBeDefined();
+    });
+
+    it('resumes on the next fire once the limit is raised', () => {
+      const meter = trippedMeter();
+      const { stub, harness, manager } = setup(meter);
+      manager.store.add({ cron: '*/5 * * * *', prompt: 'check the deploy' }, harness.now() - 1);
+
+      harness.advance(6 * 60_000);
+      manager.tick();
+      expect(stub.steerCalls).toHaveLength(0);
+
+      meter.setLimit(1_000_000); // what /budget does
+      harness.advance(6 * 60_000);
+      manager.tick();
+      expect(stub.steerCalls).toHaveLength(1);
+      expect(stub.steerCalls[0]!.origin.kind).toBe('cron_job');
+    });
+
+    it('still delivers a one-shot (it is deleted on delivery — a lost reminder is worse than a notice)', () => {
+      const { stub, harness, manager } = setup(trippedMeter());
+      const task = manager.store.add(
+        { cron: '*/5 * * * *', prompt: 'one-shot ping', recurring: false },
+        harness.now() - 1,
+      );
+
+      harness.advance(6 * 60_000);
+      manager.tick();
+
+      expect(stub.steerCalls).toHaveLength(1);
+      expect(manager.store.get(task.id)).toBeUndefined();
+    });
+
+    it('fires normally while under the limit, or with no meter at all', () => {
+      for (const meter of [new SessionTokenMeter({ limitTokens: 1_000_000 }), undefined]) {
+        const { stub, harness, manager } = setup(meter);
+        manager.store.add({ cron: '*/5 * * * *', prompt: 'check the deploy' }, harness.now() - 1);
+        harness.advance(6 * 60_000);
+        manager.tick();
+        expect(stub.steerCalls).toHaveLength(1);
+      }
     });
   });
 

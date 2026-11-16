@@ -317,6 +317,54 @@ describe('Agent compaction', () => {
     expect(ctx.agent.usage.data().byModel?.['scream-code']).toBeUndefined();
   });
 
+  // A default secret pattern (GitHub PAT) — active with no user `secrets` config.
+  const LEAKED_TOKEN = `ghp_${'A1b2C3d4E5'.repeat(3)}abcdef`;
+
+  it('obfuscates secrets in the compaction request history (session model)', async () => {
+    const { calls, generate, mockNextResponse } = createCapturingGenerate();
+    const ctx = testAgent({ generate });
+    ctx.configure({
+      tools: ['Bash'],
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, `my token is ${LEAKED_TOKEN}`, `noted ${LEAKED_TOKEN}`, 20);
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+
+    mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    expect(calls).toHaveLength(1);
+    const sent = JSON.stringify(calls[0]?.history);
+    expect(sent).not.toContain(LEAKED_TOKEN);
+    expect(sent).toMatch(/#[A-Z2-9]{6}#/);
+  });
+
+  it('obfuscates secrets in the compaction request history (housekeeping model)', async () => {
+    const { calls, generate, mockNextResponse } = createCapturingGenerate();
+    const ctx = testAgent({ generate, initialConfig: HOUSEKEEPING_TEST_CONFIG });
+    ctx.agent.config.update({ modelAlias: 'session-alias', thinkingLevel: 'off' });
+    ctx.appendExchange(1, `my token is ${LEAKED_TOKEN}`, `noted ${LEAKED_TOKEN}`, 20);
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+
+    mockNextResponse({ type: 'text', text: 'Housekeeping summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    expect(calls).toHaveLength(1);
+    expect((calls[0]?.provider as { modelName: string }).modelName).toBe('housekeeping-model');
+    expect(JSON.stringify(calls[0]?.history)).not.toContain(LEAKED_TOKEN);
+  });
+
   it('prefers the live /model diy housekeeping binding over the config fallback', async () => {
     // A second housekeeping-capable alias exists only in the config under
     // test; the live tier getter points at it, so it must outrank
@@ -1463,7 +1511,7 @@ describe('Agent compaction', () => {
       [wire] usage.record             { "model": "scream-code", "usage": { "inputOther": 1386, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
       [emit] agent.status.updated     { "agentId": "main", "model": "scream-code", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "scream-code": { "inputOther": 1386, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1386, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.cancel   { "time": "<time>" }
-      [emit] compaction.cancelled     { "reason": "上下文已被更改（如 /revoke），压缩已取消" }
+      [emit] compaction.cancelled     { "reason": "Compaction cancelled: the context changed while it ran (e.g. /revoke)", "code": "context_changed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
@@ -3158,6 +3206,7 @@ interface CapturedGenerateCall {
   readonly systemPrompt: unknown;
   readonly tools: unknown;
   readonly auth: unknown;
+  readonly history: readonly unknown[];
 }
 
 /**
@@ -3174,7 +3223,7 @@ function createCapturingGenerate(): {
   const scripted = createScriptedGenerate();
   const calls: CapturedGenerateCall[] = [];
   const generate: GenerateFn = (chat, systemPrompt, tools, history, callbacks, options) => {
-    calls.push({ provider: chat, systemPrompt, tools, auth: options?.auth });
+    calls.push({ provider: chat, systemPrompt, tools, auth: options?.auth, history });
     return scripted.generate(chat, systemPrompt, tools, history, callbacks, options);
   };
   return {

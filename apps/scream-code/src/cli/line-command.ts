@@ -7,6 +7,7 @@
  */
 
 import { LineConfigError, getLineConfigPath, loadLineConfig } from '#/line/config';
+import { t } from '@scream-code/config';
 import { runLineDaemon } from '#/line/daemon';
 import { readLineDaemonStatus, startLineDaemonDetached, stopLineDaemon } from '#/line/pidfile';
 
@@ -24,20 +25,20 @@ export async function runLineCommand(action: LineAction): Promise<void> {
     case 'start': {
       const config = await loadLineConfig();
       if (!config?.feishu && !config?.weixin) {
-        out('尚未配置任何平台（飞书/微信）。请在 scream TUI 里运行 /line 完成配置向导。');
+        out(t('cli.line.not_configured'));
         return;
       }
       const { pid, alreadyRunning } = await startLineDaemonDetached();
       out(
         alreadyRunning
-          ? `line 守护进程已在运行（pid ${pid}）。`
-          : `line 守护进程已启动（pid ${pid}）。日志：~/.scream-code/line/daemon.log`,
+          ? t('cli.line.already_running', { pid: String(pid) })
+          : t('cli.line.started', { pid: String(pid) }),
       );
       return;
     }
     case 'stop': {
       const stopped = await stopLineDaemon();
-      out(stopped ? 'line 守护进程已停止。' : 'line 守护进程未在运行。');
+      out(stopped ? t('cli.line.stopped') : t('cli.line.not_running'));
       return;
     }
     case 'status': {
@@ -60,14 +61,23 @@ export async function runLineCommand(action: LineAction): Promise<void> {
         throw error;
       }
       const status = await readLineDaemonStatus();
-      const state = status.running ? `运行中（pid ${status.pid}）` : '未运行';
-      out(`line 守护进程：${state}`);
-      out(`飞书配置：${feishu ? '已配置' : '未配置'}；微信配置：${weixin ? '已配置' : '未配置'}`);
-      out(`配置文件：${getLineConfigPath()}`);
+      const state = status.running
+        ? t('cli.line.state_running', { pid: String(status.pid) })
+        : t('cli.line.state_stopped');
+      out(t('cli.line.status', { state }));
+      const configured = (on: unknown): string =>
+        on ? t('cli.line.configured') : t('cli.line.unconfigured');
+      out(t('cli.line.platforms', { feishu: configured(feishu), weixin: configured(weixin) }));
+      out(t('cli.line.config_file', { path: getLineConfigPath() }));
       if (feishu || weixin) {
-        out(`权限模式：${permissionMode}；开机随 scream 自动拉起：${autoStart ? '开' : '关'}`);
+        out(
+          t('cli.line.mode', {
+            mode: permissionMode,
+            auto: autoStart ? t('cli.line.on') : t('cli.line.off'),
+          }),
+        );
       } else {
-        out('提示：在 scream TUI 里运行 /line 完成配置向导（飞书或微信）。');
+        out(t('cli.line.setup_hint'));
       }
       return;
     }

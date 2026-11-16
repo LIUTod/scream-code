@@ -9,6 +9,7 @@
  */
 
 import { createInterface } from "node:readline";
+import { t } from '@scream-code/config';
 import { readFile, rm } from "node:fs/promises";
 
 import {
@@ -662,7 +663,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
     cleaned = true;
     // Reject any pending approvals so the core doesn't hang on shutdown.
     for (const [, pending] of pendingApprovals) {
-      pending.resolve({ decision: "rejected", feedback: "会话已结束" });
+      pending.resolve({ decision: "rejected", feedback: t("cli.stream.session_ended") });
     }
     pendingApprovals.clear();
 
@@ -888,18 +889,18 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         // Subagent lifecycle events — show progress in chat
         if (event.type === "subagent.spawned") {
           subagentNames.set(event.subagentId, event.subagentName);
-          writer.writeAssistantDelta(`\n[子任务: ${event.subagentName}]\n`);
+          writer.writeAssistantDelta(`\n${t("cli.stream.subtask_started", { name: event.subagentName })}\n`);
           return;
         }
         if (event.type === "subagent.completed") {
           const name = subagentNames.get(event.subagentId) ?? event.subagentId;
-          writer.writeAssistantDelta(`\n[子任务完成: ${name}]\n`);
+          writer.writeAssistantDelta(`\n${t("cli.stream.subtask_done", { name })}\n`);
           subagentNames.delete(event.subagentId);
           return;
         }
         if (event.type === "subagent.failed") {
           const name = subagentNames.get(event.subagentId) ?? event.subagentId;
-          writer.writeAssistantDelta(`\n[子任务失败: ${name} - ${event.error}]\n`);
+          writer.writeAssistantDelta(`\n${t("cli.stream.subtask_failed", { name, error: event.error })}\n`);
           subagentNames.delete(event.subagentId);
           return;
         }
@@ -949,7 +950,17 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           }
         } else if (type === "turn.ended") {
           if (event.reason === "completed") {
-            if (event.stepBudgetExhausted === true) {
+            if (event.tokenCapReached !== undefined) {
+              // Exit 4 = incomplete, like the step budget: the session token limit
+              // (loop_control.max_session_tokens) stopped the turn before its
+              // next model request.
+              finish(
+                new Error(
+                  `Turn ended: session token limit reached (${event.tokenCapReached.usedTokens} of ${event.tokenCapReached.limitTokens})`,
+                ),
+                4,
+              );
+            } else if (event.stepBudgetExhausted === true) {
               // Exit 4 = incomplete: the turn ran out of steps and wrapped up
               // (soft landing — see `TurnResult.stepBudgetExhausted`). The loop
               // no longer throws for this case, so the flag is the only signal.
@@ -1001,14 +1012,14 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           });
           // Reject pending approvals so session.prompt() doesn't hang.
           for (const [, pending] of pendingApprovals) {
-            pending.resolve({ decision: "rejected", feedback: "会话已重置" });
+            pending.resolve({ decision: "rejected", feedback: t("cli.stream.session_reset") });
           }
           pendingApprovals.clear();
           // Close and delete in the background, fire-and-forget.
           void session?.close({ extractMemories: false }).catch(() => {});
           void harness.deleteSession(sessionKey).catch(() => {});
           session = undefined;
-          finish(new Error("会话已自动重置，请重新发送你的消息。"));
+          finish(new Error(t("cli.stream.session_auto_reset")));
           return;
         }
         throw error instanceof Error ? error : new Error(msg);

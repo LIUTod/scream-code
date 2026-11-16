@@ -1,3 +1,4 @@
+import { getLocale, setLocale, t } from '@scream-code/config';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Event, Session } from '@scream-code/scream-code-sdk';
@@ -217,6 +218,142 @@ describe('SessionEventHandler', () => {
 
     expect(host.streamingUI.finalizeTurn).toHaveBeenCalled();
     expect(host.streamingUI.resetToolUi).toHaveBeenCalled();
+  });
+
+  it('warns with the used/limit numbers and points at /budget when the token limit stopped the turn', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.ended'),
+        turnId: 1,
+        reason: 'completed',
+        tokenCapReached: { usedTokens: 5_250_000, limitTokens: 5_000_000 },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.showStatus).toHaveBeenCalledWith(
+      t('handler.token_cap_reached', { used: '5.3M', limit: '5M' }),
+      host.state.theme.colors.warning,
+    );
+    expect(t('handler.token_cap_reached', { used: '1', limit: '2' })).toContain('/budget');
+  });
+
+  it('does not warn about a token limit on a normal turn end', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      { ...baseEvent('turn.ended'), turnId: 1, reason: 'completed' } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.showStatus).not.toHaveBeenCalledWith(
+      expect.stringContaining('/budget'),
+      expect.anything(),
+    );
+  });
+
+  // The engine words these in English (headless output, logs); the TUI keys off
+  // `code` so a Chinese UI is not shown English, nor an English UI Chinese.
+  describe('engine notices follow the UI language', () => {
+    function withLocale(locale: 'en' | 'zh', run: () => void): void {
+      const previous = getLocale();
+      setLocale(locale);
+      try {
+        run();
+      } finally {
+        setLocale(previous);
+      }
+    }
+
+    it.each(['en', 'zh'] as const)('localizes the compaction circuit-breaker warnings (%s)', (locale) => {
+      withLocale(locale, () => {
+        for (const code of ['compaction_circuit_open', 'compaction_circuit_open_overflow'] as const) {
+          const host = createMockHost();
+          const handler = new SessionEventHandler(host);
+          handler.handleEvent(
+            { ...baseEvent('warning'), code, message: 'engine English text' } as unknown as Event,
+            vi.fn(),
+          );
+          expect(host.showStatus).toHaveBeenCalledWith(
+            t('handler.warning_prefix', { message: t(`handler.${code}`) }),
+            'yellow',
+          );
+          expect(host.showStatus).not.toHaveBeenCalledWith(
+            expect.stringContaining('engine English text'),
+            expect.anything(),
+          );
+        }
+      });
+    });
+
+    it('shows the engine text of a warning that has no localized code', () => {
+      const host = createMockHost();
+      new SessionEventHandler(host).handleEvent(
+        { ...baseEvent('warning'), code: 'plugin:warn', message: '[p] hello' } as unknown as Event,
+        vi.fn(),
+      );
+      expect(host.showStatus).toHaveBeenCalledWith(
+        t('handler.warning_prefix', { message: '[p] hello' }),
+        'yellow',
+      );
+    });
+
+    it.each(['en', 'zh'] as const)('localizes an engine-cancelled compaction (%s)', (locale) => {
+      withLocale(locale, () => {
+        for (const code of ['timeout', 'context_changed'] as const) {
+          const host = createMockHost();
+          new SessionEventHandler(host).handleEvent(
+            {
+              ...baseEvent('compaction.cancelled'),
+              code,
+              reason: 'engine English text',
+            } as unknown as Event,
+            vi.fn(),
+          );
+          expect(host.showStatus).toHaveBeenCalledWith(
+            t(code === 'timeout' ? 'handler.compaction_timeout' : 'handler.compaction_context_changed'),
+            'yellow',
+          );
+        }
+      });
+    });
+
+    it('falls back to the engine reason when a cancel has no code, and stays silent for a plain cancel', () => {
+      const withReason = createMockHost();
+      new SessionEventHandler(withReason).handleEvent(
+        { ...baseEvent('compaction.cancelled'), reason: 'custom reason' } as unknown as Event,
+        vi.fn(),
+      );
+      expect(withReason.showStatus).toHaveBeenCalledWith('custom reason', 'yellow');
+
+      const plain = createMockHost();
+      new SessionEventHandler(plain).handleEvent(
+        baseEvent('compaction.cancelled') as unknown as Event,
+        vi.fn(),
+      );
+      expect(plain.showStatus).not.toHaveBeenCalled();
+    });
+
+    it('has both languages for every localized engine notice', () => {
+      const keys = [
+        'handler.compaction_circuit_open',
+        'handler.compaction_circuit_open_overflow',
+        'handler.compaction_timeout',
+        'handler.compaction_context_changed',
+      ] as const;
+      for (const key of keys) {
+        withLocale('en', () => {
+          expect(t(key)).toMatch(/\/compact|\/revoke/);
+        });
+        withLocale('zh', () => {
+          expect(t(key)).toMatch(/[\u4E00-\u9FFF]/);
+        });
+      }
+    });
   });
 
   it('resets live text and tool UI on step retrying', () => {
@@ -974,6 +1111,68 @@ describe('SessionEventHandler', () => {
       expect(request).toContain('weather-report-doc');
       expect(request).toContain('AskUserQuestion');
       expect(request).toContain('生成');
+    });
+
+    /** Run `fn` with the UI in `locale`, restoring the suite's default (zh) afterwards. */
+    function inLocale<T>(locale: 'en' | 'zh', fn: () => T): T {
+      const previous = getLocale();
+      setLocale(locale);
+      try {
+        return fn();
+      } finally {
+        setLocale(previous);
+      }
+    }
+
+    it('asks in English — request and option labels — when the UI is English', () => {
+      // The request is both a user message in the transcript and the model's
+      // instruction, so it has to follow the UI language: a hard-coded Chinese
+      // text made an English session offer Chinese options (生成 / 忽略).
+      inLocale('en', () => {
+        const { handler, prompt } = makeHandlerWithSession();
+        handler.handleEvent(candidateEvent('weather-report-doc', 'build a weather report'), vi.fn());
+        const request = String(prompt.mock.calls[0]![0]);
+        expect(request).toContain('"weather-report-doc" (build a weather report)');
+        expect(request).toContain('AskUserQuestion');
+        expect(request).toContain('Generate / Dismiss');
+        expect(request).not.toMatch(/[\u4E00-\u9FFF]/);
+      });
+    });
+
+    it('formats the purpose per language and omits it when empty', () => {
+      inLocale('zh', () => {
+        const { handler, prompt } = makeHandlerWithSession();
+        handler.handleEvent(candidateEvent('a', '做周报'), vi.fn());
+        expect(String(prompt.mock.calls[0]![0])).toContain('「a」（做周报）。');
+      });
+      inLocale('en', () => {
+        const { handler, prompt } = makeHandlerWithSession();
+        handler.handleEvent(candidateEvent('b', ''), vi.fn());
+        expect(String(prompt.mock.calls[0]![0])).toContain('process "b" was detected');
+      });
+    });
+
+    it('reports a failed ask in the UI language', async () => {
+      const host = createMockHost();
+      const prompt = vi.fn().mockRejectedValue(new Error('session closed'));
+      host.session = { prompt } as unknown as Session;
+      const handler = new SessionEventHandler(host);
+
+      // The notice is built in the rejection handler, after this call returns,
+      // so the language has to stay English until the wait is over.
+      const previous = getLocale();
+      setLocale('en');
+      try {
+        handler.handleEvent(candidateEvent('weather-report-doc'), vi.fn());
+        await vi.waitFor(() => {
+          expect(host.showStatus).toHaveBeenCalledWith(
+            'A reusable process "weather-report-doc" was detected, but asking about it failed. You can handle it manually later.',
+            host.state.theme.colors.warning,
+          );
+        });
+      } finally {
+        setLocale(previous);
+      }
     });
 
     it('deduplicates candidates by name within a session', () => {

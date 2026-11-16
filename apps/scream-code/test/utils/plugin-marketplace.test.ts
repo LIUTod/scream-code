@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { getLocale, setLocale } from '@scream-code/config';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SCREAM_CODE_PLUGIN_MARKETPLACE_URL } from '#/constant/app';
@@ -155,5 +156,41 @@ describe('loadPluginMarketplace', () => {
     await expect(loadPluginMarketplace({ workDir: '/tmp/work', source: file })).rejects.toThrow(
       /"tier" 必须是以下之一/,
     );
+  });
+
+  describe('error messages follow the UI language', () => {
+    async function load(manifest: unknown, locale: 'en' | 'zh'): Promise<Error> {
+      const dir = await mkdtemp(join(tmpdir(), 'scream-plugin-marketplace-'));
+      const file = join(dir, 'marketplace.json');
+      await writeFile(file, typeof manifest === 'string' ? manifest : JSON.stringify(manifest), 'utf8');
+      const previous = getLocale();
+      setLocale(locale);
+      try {
+        await loadPluginMarketplace({ workDir: '/tmp/work', source: file });
+      } catch (error) {
+        return error as Error;
+      } finally {
+        setLocale(previous);
+      }
+      throw new Error('expected the marketplace to be rejected');
+    }
+
+    it.each([
+      ['not json', 'The plugin marketplace is not valid JSON:', '插件市场不是有效的 JSON:'],
+      ['[]', 'The plugin marketplace must be an object.', '插件市场必须是一个对象.'],
+      [{ nope: true }, 'The plugin marketplace must contain a "plugins" array.', '插件市场必须包含 "plugins" 数组.'],
+      [{ plugins: [1] }, 'Plugin marketplace entry 1 must be an object.', '插件市场条目 1 必须是一个对象.'],
+      [{ plugins: [{ displayName: 'x' }] }, 'Plugin marketplace entry 1 must define "id".', '插件市场条目 1 必须定义 "id".'],
+      [{ plugins: [{ id: 'demo' }] }, 'Plugin marketplace entry demo must define "source".', '插件市场条目 demo 必须定义 "source".'],
+      [{ plugins: [{ id: 'demo', source: './d', tier: 3 }] }, 'Plugin marketplace entry demo "tier" must be a string.', '插件市场条目 demo "tier" 必须是字符串.'],
+      [
+        { plugins: [{ id: 'demo', source: './d', tier: 'community' }] },
+        'Plugin marketplace entry demo "tier" must be one of: official, curated.',
+        '插件市场条目 demo "tier" 必须是以下之一: official, curated.',
+      ],
+    ])('rejects %j in both languages', async (manifest, english, chinese) => {
+      expect((await load(manifest, 'en')).message).toContain(english);
+      expect((await load(manifest, 'zh')).message).toContain(chinese);
+    });
   });
 });

@@ -73,6 +73,7 @@ import { handleCopyCommand } from './copy';
 import { handleLikeCommand } from './like';
 import { handleKnowledgeCommand } from './knowledge';
 import { handleGrantsCommand } from './grants';
+import { handleBudgetCommand } from './budget';
 import { runEvalCommand } from './eval';
 
 // ---------------------------------------------------------------------------
@@ -321,6 +322,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'grants':
       await handleGrantsCommand(host);
+      return;
+    case 'budget':
+      await handleBudgetCommand(host, args);
       return;
     case 'settings':
       showSettingsSelector(host);

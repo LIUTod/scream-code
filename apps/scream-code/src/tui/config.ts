@@ -5,13 +5,13 @@
  * terminal UI preferences for the scream-code client.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
-import { t, getLocale } from '@scream-code/config';
+import { t, getLocale, type Locale } from '@scream-code/config';
 
 import { getDataDir } from '#/utils/paths';
 
@@ -165,6 +165,27 @@ export async function loadTuiConfig(filePath: string = getTuiConfigPath()): Prom
     return parseTuiConfig(text);
   } catch {
     throw new TuiConfigParseError(DEFAULT_TUI_CONFIG);
+  }
+}
+
+/**
+ * The UI language the user saved, read synchronously and without side effects:
+ * no file is created, and a missing, empty or malformed config simply yields
+ * `undefined` so the system locale stands.
+ *
+ * The CLI needs this before it can load the config the normal way — `--help`
+ * text and option-conflict errors are produced before `runShell` / `runPrompt`
+ * call `setLocale(config.language)`, so without it they would follow `LANG`
+ * instead of the language chosen with `/language`.
+ */
+export function loadSavedLanguageSync(filePath: string = getTuiConfigPath()): Locale | undefined {
+  try {
+    if (!existsSync(filePath)) return undefined;
+    const text = readFileSync(filePath, 'utf-8');
+    if (text.trim().length === 0) return undefined;
+    return parseTuiConfig(text).language;
+  } catch {
+    return undefined;
   }
 }
 

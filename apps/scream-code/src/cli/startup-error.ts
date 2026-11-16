@@ -1,4 +1,5 @@
 import { SCREAM_ERROR_INFO, isScreamError } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 import { chalkStderr } from 'chalk';
 
 import { STARTUP_ERROR_COLOR } from '#/constant/startup-error';
@@ -20,14 +21,14 @@ export function formatStartupError(
 
   if (!isScreamError(error)) {
     const operation = options.operation ?? 'start shell';
-    return `${errorStyle(`错误：${operation} 失败：${formatUnknownErrorMessage(error)}`)}\n`;
+    return `${errorStyle(t('cli.err.operation_failed', { operation, message: formatUnknownErrorMessage(error) }))}\n`;
   }
 
   const info = SCREAM_ERROR_INFO[error.code];
   const lines = [
-    errorStyle(`错误：${info.title}`),
+    errorStyle(t('cli.err.title', { title: info.title })),
     '',
-    errorStyle('消息：'),
+    errorStyle(t('cli.err.message_label')),
     errorStyle(error.message),
   ];
 
