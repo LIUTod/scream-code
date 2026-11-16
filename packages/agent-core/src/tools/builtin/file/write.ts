@@ -1,7 +1,7 @@
 /**
  * WriteTool — overwrite or append to a file.
  *
- * Creates the file if it does not exist; parent directory must already exist.
+ * Creates the file if it does not exist, and any missing parent directories.
  * Path access policy is resolved before any Jian I/O.
  */
 
@@ -17,6 +17,7 @@ import type { ToolResultDisplay } from '../../display';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { countLines, fileDiffSummary } from '../../support/file-diff';
 import type { EditRecoveryQueue } from '../../support/edit-recovery-queue';
+import { renameArgAliases } from '../../support/arg-aliases';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import { withFileMutationLock } from './mutation-queue';
@@ -60,7 +61,7 @@ export const WriteInputSchema = z.object({
   path: z
     .string()
     .describe(
-      'Path to the file to create, append to, or completely overwrite. Relative paths resolve against the working directory; a path outside the working directory must be absolute. The parent directory must already exist.',
+      'Path to the file to create, append to, or completely overwrite. Relative paths resolve against the working directory; a path outside the working directory must be absolute. Missing parent directories are created.',
     ),
   content: z
     .string()
@@ -83,10 +84,20 @@ export const WriteOutputSchema = z.object({
 export type WriteInput = z.Infer<typeof WriteInputSchema>;
 export type WriteOutput = z.Infer<typeof WriteOutputSchema>;
 
+/**
+ * Spellings models use for this tool's arguments; renamed before validation
+ * (`ExecutableTool.normalizeArgs`). Taken from calls that were rejected in practice.
+ */
+export const WRITE_ARG_ALIASES = { file_path: 'path' } as const;
+
 export class WriteTool implements BuiltinTool<WriteInput> {
   readonly name = 'Write' as const;
   readonly description = WRITE_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(WriteInputSchema);
+
+  normalizeArgs(args: Record<string, unknown>): Record<string, unknown> {
+    return renameArgAliases(args, WRITE_ARG_ALIASES);
+  }
 
   constructor(
     private readonly jian: Jian,
@@ -131,11 +142,6 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     signal?: AbortSignal,
   ): Promise<ExecutableToolResult> {
     signal?.throwIfAborted();
-    const parentError = await this.checkParentDirectory(safePath);
-    if (parentError !== undefined) {
-      return { isError: true, output: parentError };
-    }
-
     const contentBlocks = scanConflictLines(args.content.split('\n'));
     if (contentBlocks.length > 0) {
       const blockList = contentBlocks
@@ -147,6 +153,13 @@ export class WriteTool implements BuiltinTool<WriteInput> {
           `Content contains merge conflict markers (${blockList}). ` +
           'Resolve the conflict before writing. Merge conflict markers (<<<<<<< / ======= / >>>>>>>) indicate an unresolved merge.',
       };
+    }
+
+    // Last, so a write that is refused above has no side effect: creating the
+    // directories first left a refused write's empty tree on disk.
+    const parent = await this.ensureParentDirectory(safePath);
+    if (parent.error !== undefined) {
+      return { isError: true, output: parent.error };
     }
 
     try {
@@ -177,7 +190,10 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // can self-correct in the same turn; the install hint travels on the
       // `message` side channel for the UI. `hasErrors` keeps isError so the
       // fix-then-re-verify gate still picks the write up.
-      const base = `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`;
+      // A created directory is reported so a mistyped path is visible to the
+      // model instead of silently growing a new tree.
+      const created = parent.created === undefined ? '' : `\nCreated directory ${parent.created}`;
+      const base = `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}${created}`;
       const output =
         notice.length > 0
           ? `${base}\n\nWrite applied; the language server reports:\n${notice}`
@@ -266,30 +282,39 @@ export class WriteTool implements BuiltinTool<WriteInput> {
   }
 
   /**
-   * Best-effort check that the parent directory exists and is a directory.
+   * Make sure the parent directory exists and is a directory, creating it (and
+   * any missing ancestors) when it is absent.
    *
-   * The path schema documents this precondition; probing it up front turns a
-   * bare `ENOENT` from the underlying write into an actionable message.
-   * Returns an error string when the precondition is definitively violated,
-   * or `undefined` otherwise. Any other `stat` failure (permissions, an
-   * environment without `stat`) is treated as inconclusive: the check is
-   * skipped and the write proceeds, surfacing the real I/O error if any.
+   * Models routinely write a new file into a directory that does not exist yet;
+   * refusing cost a whole extra step plus a shell `mkdir`. The write itself was
+   * already authorized for this exact path, so creating its parents adds no
+   * reach. Returns `created` when directories were made, `error` when the
+   * precondition cannot be met (a non-directory in the way, a failed `mkdir`).
+   * Any other `stat` failure (permissions, an environment without `stat`) is
+   * inconclusive: nothing is created and the write proceeds, surfacing the real
+   * I/O error if any.
    */
-  private async checkParentDirectory(safePath: string): Promise<string | undefined> {
+  private async ensureParentDirectory(
+    safePath: string,
+  ): Promise<{ readonly created?: string; readonly error?: string }> {
     const parent = dirname(safePath);
     let stat;
     try {
       stat = await this.jian.stat(parent);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return `Parent directory does not exist: ${parent}. Create it before writing this file.`;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return {};
+      try {
+        await this.jian.mkdir(parent, { parents: true, existOk: true });
+      } catch (mkdirError) {
+        const reason = mkdirError instanceof Error ? mkdirError.message : String(mkdirError);
+        return { error: `Could not create parent directory ${parent}: ${reason}` };
       }
-      return undefined;
+      return { created: parent };
     }
     if ((stat.stMode & S_IFMT) !== S_IFDIR) {
-      return `Parent path is not a directory: ${parent}.`;
+      return { error: `Parent path is not a directory: ${parent}.` };
     }
-    return undefined;
+    return {};
   }
 
   private async appendDiagnostics(

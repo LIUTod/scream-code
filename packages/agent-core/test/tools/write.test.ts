@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -201,21 +201,62 @@ describe('WriteTool', () => {
     expect(result.output).toContain('Appended 5 bytes');
   });
 
-  it('reports a friendly error when the parent directory does not exist', async () => {
+  it('creates a missing parent directory instead of failing, and says so', async () => {
     const enoent = Object.assign(new Error('ENOENT: no such file or directory'), {
       code: 'ENOENT',
     });
     const stat = vi.fn().mockRejectedValue(enoent);
+    const mkdir = vi.fn().mockResolvedValue(undefined);
     const writeText = vi.fn().mockResolvedValue(4);
-    const tool = new WriteTool(createFakeJian({ stat, writeText }), PERMISSIVE_WORKSPACE);
+    const tool = new WriteTool(createFakeJian({ stat, mkdir, writeText }), PERMISSIVE_WORKSPACE);
 
     const result = await executeTool(tool,
       context({ path: '/tmp/missing-dir/file.txt', content: 'data' }),
     );
 
+    expect(result.isError).toBeUndefined();
+    expect(mkdir).toHaveBeenCalledWith('/tmp/missing-dir', { parents: true, existOk: true });
+    expect(writeText).toHaveBeenCalledWith('/tmp/missing-dir/file.txt', 'data');
+    expect(toolContentString(result)).toContain('Created directory /tmp/missing-dir');
+  });
+
+  it('does not create the parent directory for a write it then refuses', async () => {
+    const enoent = Object.assign(new Error('ENOENT: no such file or directory'), {
+      code: 'ENOENT',
+    });
+    const stat = vi.fn().mockRejectedValue(enoent);
+    const mkdir = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(4);
+    const tool = new WriteTool(createFakeJian({ stat, mkdir, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(tool,
+      context({ path: '/tmp/never-made/file.txt', content: '<<<<<<< HEAD\na\n=======\nb\n>>>>>>> x\n' }),
+    );
+
     expect(result).toMatchObject({ isError: true });
-    expect(result.output).toContain('/tmp/missing-dir');
-    expect(result.output).toMatch(/parent directory/i);
+    expect(result.output).toMatch(/merge conflict markers/);
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('reports the failure when the missing parent cannot be created', async () => {
+    const enoent = Object.assign(new Error('ENOENT: no such file or directory'), {
+      code: 'ENOENT',
+    });
+    const stat = vi.fn().mockRejectedValue(enoent);
+    const mkdir = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+    const writeText = vi.fn().mockResolvedValue(4);
+    const tool = new WriteTool(createFakeJian({ stat, mkdir, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(tool,
+      context({ path: '/tmp/locked/file.txt', content: 'data' }),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('/tmp/locked');
+    expect(result.output).toMatch(/could not create/i);
     expect(writeText).not.toHaveBeenCalled();
   });
 
@@ -803,5 +844,66 @@ describe('WriteTool edit-recovery reminders', () => {
     );
 
     expect(queue.drain()).toEqual([]);
+  });
+});
+
+describe('WriteTool on a real filesystem: missing parents', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    // realpath: on macOS the tmpdir sits behind a symlink the tool resolves.
+    dir = await realpath(await mkdtemp(join(tmpdir(), 'scream-write-parents-')));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+  });
+
+  it('creates every missing level and writes the file', async () => {
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+    const target = join(dir, 'a', 'b', 'c', 'file.txt');
+
+    const result = await executeTool(tool, context({ path: target, content: 'hello' }));
+
+    expect(result.isError).toBeUndefined();
+    expect(await readFile(target, 'utf8')).toBe('hello');
+    expect(toolContentString(result)).toContain(`Created directory ${join(dir, 'a', 'b', 'c')}`);
+  });
+
+  it('leaves no directories behind when the write is refused', async () => {
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: join(dir, 'new', 'deeper', 'file.txt'),
+        content: '<<<<<<< HEAD\na\n=======\nb\n>>>>>>> x\n',
+      }),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    await expect(stat(join(dir, 'new'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('does not mention directory creation when the parent already existed', async () => {
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(tool, context({ path: join(dir, 'file.txt'), content: 'x' }));
+
+    expect(result.isError).toBeUndefined();
+    expect(toolContentString(result)).not.toContain('Created directory');
+  });
+
+  it('still refuses when a path component is a regular file', async () => {
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+    await writeFile(join(dir, 'blocker'), 'i am a file');
+
+    const result = await executeTool(
+      tool,
+      context({ path: join(dir, 'blocker', 'child.txt'), content: 'x' }),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    expect(await readFile(join(dir, 'blocker'), 'utf8')).toBe('i am a file');
   });
 });

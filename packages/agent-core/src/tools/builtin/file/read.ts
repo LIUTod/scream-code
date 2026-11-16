@@ -16,6 +16,7 @@ import { resolvePathAccessPath } from '../../policies/path-access';
 import type { EditSnapshotStore } from '../../support/edit-snapshot-store';
 import { EDIT_SNAPSHOT_MAX_CONTENT_BYTES } from '../../support/edit-snapshot-store';
 import { MEDIA_SNIFF_BYTES, detectFileType } from '../../support/file-type';
+import { renameArgAliases } from '../../support/arg-aliases';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { RepetitionGuard } from '../../support/repetition-guard';
 import { byteLength, truncateToBytes } from '../../support/result-builder';
@@ -227,10 +228,20 @@ const READ_DESCRIPTION = renderPrompt(readDescriptionTemplate, {
   MAX_LINE_BYTES,
 });
 
+/**
+ * Spellings models use for this tool's arguments; renamed before validation
+ * (`ExecutableTool.normalizeArgs`). Taken from calls that were rejected in practice.
+ */
+export const READ_ARG_ALIASES = { file_path: 'path', offset: 'line_offset', limit: 'n_lines', n: 'n_lines' } as const;
+
 export class ReadTool implements BuiltinTool<ReadInput> {
   readonly name = 'Read' as const;
   readonly description = READ_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(ReadInputSchema);
+
+  normalizeArgs(args: Record<string, unknown>): Record<string, unknown> {
+    return renameArgAliases(args, READ_ARG_ALIASES);
+  }
   /** (path → mtime + outline footer) memoization; see resolveOutlineFooter. */
   private readonly outlineCache = new Map<string, { mtimeMs: number; footer: Promise<string> }>();
   constructor(

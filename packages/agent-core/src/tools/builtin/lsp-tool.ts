@@ -11,6 +11,7 @@ import type { LspRegistry } from '../../lsp/registry';
 import type { LspWorkspaceEdit } from '../../lsp/client';
 import { formatDiagnostic, formatLocation, formatOutlineEntry } from '../../lsp/client';
 import { applyWorkspaceEdit, formatWorkspaceEditPreview } from '../../lsp/edits';
+import { lspStartFailureHint } from '../../lsp/start-failure';
 
 /** document_symbols listing cap; the trailer reports how many were hidden. */
 const OUTLINE_LIST_CAP = 200;
@@ -268,7 +269,17 @@ export class LspTool implements BuiltinTool<LspInput> {
       }
     }
 
-    const client = await this.lspRegistry.getClient(safePath, this.workspace.workspaceDir);
+    let client;
+    try {
+      client = await this.lspRegistry.getClient(safePath, this.workspace.workspaceDir);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const hint = lspStartFailureHint(message);
+      return {
+        isError: true,
+        output: `The language server for ${args.path ?? safePath} could not start: ${message}${hint === undefined ? '' : `\n${hint}`}`,
+      };
+    }
     if (client === undefined) {
       return {
         isError: true,

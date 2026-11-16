@@ -73,6 +73,63 @@ const SNAPSHOT_FOLDED_LINE_PREFIX_BYTES: readonly Buffer[] = SNAPSHOT_FOLDED_LIN
 );
 
 /**
+ * How a snapshot line with an empty debug trail is serialized (`JSON.stringify`
+ * writes no whitespace). A superseded snapshot that has it has nothing left to
+ * reclaim, which is what keeps compaction idempotent.
+ */
+const EMPTY_TRAIL_MARKER = Buffer.from('"compactedHistory":[]', 'utf8');
+
+/**
+ * Whether a retained line is a snapshot that a LATER snapshot supersedes and
+ * whose `compactedHistory` debug trail still holds data.
+ *
+ * Superseded snapshots are kept on purpose — resume replays each one's
+ * `history` into the replay window, so dropping them would hide earlier
+ * compaction summaries (see wire-reclaim-equivalence). Their trail, though, is
+ * overwritten by the last snapshot's on restore, and it is the bulk of a
+ * snapshot: one long session carried 16 of them, 2–44 MB each, for under 1 MB
+ * of history.
+ */
+function hasReclaimableSnapshotTrail(
+  head: Buffer,
+  headLength: number,
+  line: Buffer,
+  currentLine: number,
+  lastSnapshotLineNumber: number,
+): boolean {
+  return (
+    currentLine < lastSnapshotLineNumber &&
+    headStartsWithPrefix(head, headLength, SNAPSHOT_RECORD_LINE_PREFIX_BYTES) &&
+    !line.includes(EMPTY_TRAIL_MARKER)
+  );
+}
+
+/** {@link withEmptySnapshotTrail} for a line that still carries its `\n` or `\r\n`, which is kept as it was. */
+function rewriteWithEmptySnapshotTrail(data: Buffer): Buffer {
+  let end = data.length;
+  if (end > 0 && data[end - 1] === 0x0a) {
+    end -= 1;
+    if (end > 0 && data[end - 1] === 0x0d) end -= 1;
+  }
+  return Buffer.concat([withEmptySnapshotTrail(data.subarray(0, end)), data.subarray(end)]);
+}
+
+/**
+ * Re-serialize one snapshot line (without its terminator) with an empty trail.
+ * Records are written with `JSON.stringify`, so parsing and stringifying again
+ * changes only the trail. A line that does not parse is returned untouched.
+ */
+function withEmptySnapshotTrail(line: Buffer): Buffer {
+  try {
+    const record = JSON.parse(line.toString('utf8')) as Record<string, unknown>;
+    record['compactedHistory'] = [];
+    return Buffer.from(JSON.stringify(record), 'utf8');
+  } catch {
+    return line;
+  }
+}
+
+/**
  * Longest folded-type line prefix: the number of leading bytes a line needs
  * before the parse filter can decide whether to drop it. Until that many bytes
  * are seen the head is the only part of the line held in memory.
@@ -516,6 +573,14 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
               headerSeen = true;
               skipFoldedBeforeSnapshot = readSkipFoldedFlag(lineText);
             }
+            // Counted so a wire whose only dead weight is superseded snapshot
+            // trails still reaches the compaction watermark on resume.
+            if (
+              skipFoldedBeforeSnapshot &&
+              hasReclaimableSnapshotTrail(head, headLength, lineData, lineNumber, lastSnapshotLineNumber)
+            ) {
+              skippedBytes += lineBytes;
+            }
             const record = parseRecordLine(lineText, lineNumber, this.filePath, false);
             if (record !== undefined) yield record;
           }
@@ -814,8 +879,17 @@ async function copyRetainingLines(
     return true;
   };
 
-  const writeRetainedLine = async (): Promise<void> => {
-    const data = openChunks.length === 1 ? openChunks[0]! : Buffer.concat(openChunks);
+  // `currentLine` is this line's own 1-based number: the unterminated tail is
+  // counted separately, because `lineNumber` has not advanced past it.
+  const writeRetainedLine = async (currentLine: number): Promise<void> => {
+    let data = openChunks.length === 1 ? openChunks[0]! : Buffer.concat(openChunks);
+    if (
+      skipFoldedBeforeSnapshot &&
+      data.length > 0 &&
+      hasReclaimableSnapshotTrail(head, headLength, data, currentLine, lastSnapshotLineNumber)
+    ) {
+      data = rewriteWithEmptySnapshotTrail(data);
+    }
     if (data.length > 0) {
       await out.write(data);
       written += data.length;
@@ -863,7 +937,7 @@ async function copyRetainingLines(
           }
           skipFoldedBeforeSnapshot = readSkipFoldedFlag(lineData.toString('utf8'));
         }
-        await writeRetainedLine();
+        await writeRetainedLine(lineNumber);
       }
       openChunks = [];
       headLength = 0;
@@ -880,7 +954,7 @@ async function copyRetainingLines(
     if (retaining) openChunks.push(Buffer.from(head.subarray(0, headLength)));
   }
   if (retaining && openChunks.length > 0) {
-    await writeRetainedLine();
+    await writeRetainedLine(lineNumber + 1);
   }
   return written;
 }

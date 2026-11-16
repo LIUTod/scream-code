@@ -57,6 +57,15 @@ export interface CompactedHistory {
   text: string;
 }
 
+/**
+ * How many compactions the debug trail remembers. Each entry renders the whole
+ * pre-fold history (megabytes on a long session) and every `context.snapshot`
+ * persists the full trail, so an unbounded trail made a session's snapshots
+ * grow quadratically. Nothing reads it back; the latest few are enough to see
+ * what a compaction summarized.
+ */
+export const MAX_COMPACTED_HISTORY_ENTRIES = 2;
+
 export const MAX_COMPACTION_RETRY_ATTEMPTS = 5;
 
 /** Max recursion depth for re-summarize fallback. Each level halves the
@@ -300,7 +309,8 @@ export class FullCompaction {
    * longer re-render it — the snapshot carries the trail instead.
    */
   restoreCompactedHistory(entries: readonly CompactedHistory[]): void {
-    this._compactedHistory = [...entries];
+    // Also trims a trail written by an older version, which kept every entry.
+    this._compactedHistory = entries.slice(-MAX_COMPACTED_HISTORY_ENTRIES);
   }
 
   /** One-shot: true if session memory summary should be injected at the next step. */
@@ -394,6 +404,9 @@ export class FullCompaction {
     this._compactedHistory.push({
       text: renderMessagesToText(this.agent.context.history),
     });
+    if (this._compactedHistory.length > MAX_COMPACTED_HISTORY_ENTRIES) {
+      this._compactedHistory.splice(0, this._compactedHistory.length - MAX_COMPACTED_HISTORY_ENTRIES);
+    }
   }
 
   private get tokenCountWithPending(): number {

@@ -16,6 +16,7 @@ import type { ExecutableTool } from '#/loop/types';
 import { EchoTool } from './fixtures/tools';
 
 const REPAIR_NOTE_FRAGMENT = 'reconstructed from a truncated provider stream';
+const TRAILING_NOTE_FRAGMENT = 'ignored the extra content after the JSON arguments';
 
 describe('parseToolCallArguments: repair provenance', () => {
   it('leaves a clean parse unmarked', () => {
@@ -36,6 +37,60 @@ describe('parseToolCallArguments: repair provenance', () => {
   it('leaves unrepairable garbage unmarked as a failure', () => {
     const parsed = parseToolCallArguments('not json at all');
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe('parseToolCallArguments: content after the JSON value', () => {
+  it('uses the first object when a duplicate object follows it', () => {
+    const parsed = parseToolCallArguments('{"text":"hello"}{"text":"hello"}');
+    expect(parsed).toEqual({
+      success: true,
+      data: { text: 'hello' },
+      trailingDiscarded: true,
+    });
+  });
+
+  it('uses the first object when a different object follows it', () => {
+    const parsed = parseToolCallArguments('{"text":"one"}\n{"text":"two"}');
+    expect(parsed).toEqual({ success: true, data: { text: 'one' }, trailingDiscarded: true });
+  });
+
+  it('uses the first object when stray markup follows it', () => {
+    const parsed = parseToolCallArguments('{"text":"hello"} </parameter>');
+    expect(parsed).toEqual({ success: true, data: { text: 'hello' }, trailingDiscarded: true });
+  });
+
+  it('is not fooled by braces and quotes inside strings of the first object', () => {
+    const parsed = parseToolCallArguments('{"text":"a } b \\" { c"} trailing');
+    expect(parsed).toEqual({
+      success: true,
+      data: { text: 'a } b " { c' },
+      trailingDiscarded: true,
+    });
+  });
+
+  it('does not mark trailing whitespace as discarded content', () => {
+    expect(parseToolCallArguments('{"text":"hello"}  \n')).toEqual({
+      success: true,
+      data: { text: 'hello' },
+    });
+  });
+
+  it('still reconstructs a truncated stream, and a truncated second object does not hide the first', () => {
+    const truncated = parseToolCallArguments('{"text":"hello');
+    expect(truncated.success && truncated.repaired).toBe(true);
+
+    const withTruncatedTail = parseToolCallArguments('{"text":"one"}{"text":"tw');
+    expect(withTruncatedTail).toEqual({
+      success: true,
+      data: { text: 'one' },
+      trailingDiscarded: true,
+    });
+  });
+
+  it('refuses a leading value that is not an object', () => {
+    expect(parseToolCallArguments('"just a string" extra').success).toBe(false);
+    expect(parseToolCallArguments('[1,2] extra').success).toBe(false);
   });
 });
 
@@ -98,6 +153,16 @@ describe('runnable tool results carry the repair note', () => {
     const text = typeof event.result.output === 'string' ? event.result.output : '';
     expect(text).toContain('hello');
     expect(text).toContain(REPAIR_NOTE_FRAGMENT);
+  });
+
+  it('runs on the first object and tells the model the extra content was ignored', async () => {
+    const event = await collectToolResultEvent('{"text":"hello"}{"text":"again"}');
+    const text = typeof event.result.output === 'string' ? event.result.output : '';
+    expect(event.result.isError).not.toBe(true);
+    expect(text).toContain('hello');
+    expect(text).not.toContain('again');
+    expect(text).toContain(TRAILING_NOTE_FRAGMENT);
+    expect(text).not.toContain(REPAIR_NOTE_FRAGMENT);
   });
 
   it('appends no note when the arguments parsed cleanly', async () => {

@@ -20,6 +20,16 @@ export interface MemoryMemoStoreLogger {
   error?: (message: string, ...args: unknown[]) => void;
 }
 
+/**
+ * Texts embedded per model call during a flush. The model runs on the main
+ * thread, so one call blocks the event loop for as long as it takes (~130 ms
+ * per memo). Measured on a real 106-memo backlog: sent as one batch it froze
+ * the TUI for 14 s in one stretch; two per call gave a 555 ms worst stall; one
+ * per call gives 267 ms (p90 131 ms) and finishes no later. A turn of the event
+ * loop between calls keeps the UI responsive while a backlog drains.
+ */
+export const EMBEDDING_FLUSH_CHUNK_SIZE = 1;
+
 export class MemoryMemoStore {
   private readonly projectDir: string;
   private readonly jsonlPath: string;
@@ -926,6 +936,44 @@ export class MemoryMemoStore {
     // Always enqueue — never drop. If the engine isn't ready yet, kick an
     // async model load; a late-ready engine flushes the preserved queue.
     this.embeddingQueue.add(memo.id);
+    this.armEmbeddingFlush();
+  }
+
+  /**
+   * Queue every memo that has no vector yet (newest first, at most `limit`) and
+   * arm a flush. Memos written while embeddings could not be stored — or before
+   * an engine existed — would otherwise never get one: `scheduleEmbedding` only
+   * runs for a write. Safe to call repeatedly; already-embedded memos are
+   * skipped by the SQL.
+   *
+   * Loading the engine can download the model, which must stay the user's
+   * decision, so an engine that is not loaded yet is left alone unless the
+   * caller passes `loadEngine` (it knows the model is already on disk).
+   */
+  async backfillMissingEmbeddings(
+    options: { readonly limit?: number; readonly loadEngine?: boolean } = {},
+  ): Promise<number> {
+    const engine = this.embeddingEngine;
+    if (engine === undefined) return 0;
+    if (!engine.available && options.loadEngine !== true) return 0;
+    await this.init();
+    if (this.db === undefined) return 0;
+    const limit = Math.max(0, Math.floor(options.limit ?? 500));
+    const rows = this.db
+      .prepare(
+        `SELECT m.id AS id FROM memos m
+         WHERE NOT EXISTS (SELECT 1 FROM memory_embeddings e WHERE e.memory_id = m.id)
+         ORDER BY m.recorded_at DESC
+         LIMIT ?`,
+      )
+      .all(limit) as Array<{ id: string }>;
+    for (const row of rows) this.embeddingQueue.add(row.id);
+    if (rows.length > 0) this.armEmbeddingFlush();
+    return rows.length;
+  }
+
+  /** Debounced flush of the queue, loading the engine first when it is not ready yet. */
+  private armEmbeddingFlush(): void {
     if (this.embeddingEngine === undefined) return;
     if (!this.embeddingEngine.available) {
       void this.embeddingEngine
@@ -969,13 +1017,15 @@ export class MemoryMemoStore {
 
     this.embeddingFlushing = true;
 
-    // Snapshot the queue up front (so failures below can restore it) and
-    // define the re-enqueue helper OUTSIDE the try, since the outer catch
-    // must be able to restore ids on any failure path.
+    // Snapshot the queue up front (so failures below can restore it). `owed` is
+    // what still needs a vector: everything queued at first, then only the memos
+    // after the last chunk that was stored — a failure puts back exactly that.
     const ids = [...this.embeddingQueue];
     this.embeddingQueue.clear();
-    const reenqueue = (): void => {
-      for (const id of ids) {
+    let owed: readonly string[] = ids;
+    let failed = false;
+    const requeueOwed = (): void => {
+      for (const id of owed) {
         this.embeddingQueue.add(id);
       }
     };
@@ -988,7 +1038,7 @@ export class MemoryMemoStore {
       const pending: Array<{ id: string; text: string }> = [];
       for (const id of ids) {
         const row = this.db
-          .prepare('SELECT id FROM memory_embeddings WHERE memory_id = ?')
+          .prepare('SELECT 1 FROM memory_embeddings WHERE memory_id = ?')
           .get(id);
         if (row !== undefined) continue; // Already has embedding
 
@@ -997,46 +1047,68 @@ export class MemoryMemoStore {
           pending.push({ id, text: buildEmbeddingText(memo) });
         }
       }
+      owed = pending.map((entry) => entry.id);
 
-      if (pending.length === 0) return;
-
-      const vectors = await this.tryEmbedBatch(pending.map((p) => p.text));
-      if (vectors === null || vectors.length !== pending.length) {
-        this.markEmbeddingFailure(
-          new Error(vectors === null ? 'embedBatch returned null' : 'embedding count mismatch'),
-        );
-        // Re-enqueue the failed ids so a later flush (triggered by the next
-        // write, or by a late-ready engine) retries them — honoring the
-        // "caller retries on the next flush" contract in embeddings.ts.
-        reenqueue();
-        return;
-      }
-
-      this.clearEmbeddingFailure();
-
-      const insert = this.db.prepare(
-        'INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding_json, model, created_at) VALUES (?, ?, ?, ?)',
-      );
-      const now = Date.now();
-      this.db.exec('BEGIN TRANSACTION');
-      try {
-        for (let i = 0; i < pending.length; i++) {
-          insert.run(
-            pending[i]!.id,
-            JSON.stringify([...vectors[i]!]),
-            EMBEDDING_MODEL_NAME,
-            now,
-          );
+      // Embed and store in small chunks (see EMBEDDING_FLUSH_CHUNK_SIZE), each in
+      // its own transaction, with a turn of the event loop between them. A chunk
+      // that fails leaves the earlier ones stored and the rest owed.
+      for (let start = 0; start < pending.length; start += EMBEDDING_FLUSH_CHUNK_SIZE) {
+        const db = this.db;
+        if (db === undefined) {
+          failed = true; // closed mid-flush: put the rest back, do not re-arm
+          requeueOwed();
+          return;
         }
-        this.db.exec('COMMIT');
-      } catch (error) {
-        this.db.exec('ROLLBACK');
-        this.markEmbeddingFailure(error instanceof Error ? error : new Error(String(error)));
-        reenqueue();
+        const chunk = pending.slice(start, start + EMBEDDING_FLUSH_CHUNK_SIZE);
+        const vectors = await this.tryEmbedBatch(chunk.map((entry) => entry.text));
+        if (vectors === null || vectors.length !== chunk.length) {
+          this.markEmbeddingFailure(
+            new Error(vectors === null ? 'embedBatch returned null' : 'embedding count mismatch'),
+          );
+          // Re-enqueue the failed ids so a later flush (triggered by the next
+          // write, or by a late-ready engine) retries them — honoring the
+          // "caller retries on the next flush" contract in embeddings.ts.
+          failed = true;
+          requeueOwed();
+          return;
+        }
+
+        this.clearEmbeddingFailure();
+
+        const insert = db.prepare(
+          'INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding_json, model, created_at) VALUES (?, ?, ?, ?)',
+        );
+        const now = Date.now();
+        db.exec('BEGIN TRANSACTION');
+        try {
+          for (const [index, entry] of chunk.entries()) {
+            insert.run(
+              entry.id,
+              JSON.stringify([...vectors[index]!]),
+              EMBEDDING_MODEL_NAME,
+              now,
+            );
+          }
+          db.exec('COMMIT');
+        } catch (error) {
+          db.exec('ROLLBACK');
+          this.markEmbeddingFailure(error instanceof Error ? error : new Error(String(error)));
+          failed = true;
+          requeueOwed();
+          return;
+        }
+        owed = pending.slice(start + chunk.length).map((entry) => entry.id);
+
+        if (owed.length > 0) {
+          await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+          });
+        }
       }
     } catch (error) {
       this.markEmbeddingFailure(error instanceof Error ? error : new Error(String(error)));
-      reenqueue();
+      failed = true;
+      requeueOwed();
     } finally {
       this.embeddingFlushing = false;
       // Clear the timer reference so scheduleEmbedding's ensureReady path
@@ -1044,6 +1116,10 @@ export class MemoryMemoStore {
       // after a late engine load. Without this, the first flush leaves the
       // timer stale and subsequent late-ready writes never trigger a flush.
       this.embeddingTimer = undefined;
+      // Memos queued while this flush was running (a backlog takes seconds) would
+      // otherwise wait for the next write. Only after a clean run: re-arming after
+      // a failure would retry a broken engine every couple of seconds forever.
+      if (!failed && this.embeddingQueue.size > 0) this.armEmbeddingFlush();
     }
   }
 

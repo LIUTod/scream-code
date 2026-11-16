@@ -66,6 +66,15 @@ const UNEXECUTED_TOOL_CALL_OUTPUT =
   'This tool call was not executed: the model response ended before tool execution could start ' +
   '(the provider stream was interrupted). Do not assume the tool ran - ' +
   're-issue the call if it is still needed.';
+/**
+ * The output-limit variant. Saying the stream was interrupted would invite the
+ * model to re-send the same oversized call, so it is told the real cause and the
+ * way out (Write has `mode: "append"` for exactly this).
+ */
+const TRUNCATED_TOOL_CALL_OUTPUT =
+  'This tool call was not executed: your response hit the output-token limit while you were writing it, ' +
+  'so its arguments are cut off. Do not re-send the same large call. Split the work into several smaller ' +
+  'calls — for Write, write the first part and add the rest with mode "append"; for Edit, make smaller edits.';
 
 const validators = new WeakMap<ExecutableTool, ToolArgsValidator>();
 
@@ -207,6 +216,12 @@ interface RunnableToolCall {
    * carries a note so the model can verify or re-issue.
    */
   readonly argsRepaired?: true;
+  /**
+   * The arguments were a complete JSON object followed by extra content (a
+   * duplicated object, stray markup). The object ran and the rest was dropped;
+   * the result carries a note so the model can re-issue anything it meant.
+   */
+  readonly argsTrailingDiscarded?: true;
 }
 
 interface RejectedToolCall {
@@ -257,7 +272,9 @@ export interface ToolCallBatchResult {
 export async function recordUnexecutedToolCalls(
   step: ToolCallStepContext,
   response: LLMChatResponse,
+  reason: 'truncated' | 'interrupted' = 'interrupted',
 ): Promise<void> {
+  const output = reason === 'truncated' ? TRUNCATED_TOOL_CALL_OUTPUT : UNEXECUTED_TOOL_CALL_OUTPUT;
   for (const [toolCallIndex, toolCall] of response.toolCalls.entries()) {
     const parsedArgs = parseToolCallArguments(toolCall.arguments);
     if (!parsedArgs.success) {
@@ -302,7 +319,7 @@ export async function recordUnexecutedToolCalls(
       type: 'tool.result',
       parentUuid: toolCall.id,
       toolCallId: toolCall.id,
-      result: { output: UNEXECUTED_TOOL_CALL_OUTPUT, isError: true },
+      result: { output, isError: true },
     });
   }
 }
@@ -515,7 +532,7 @@ function preflightToolCall(
       toolCall,
       toolName,
       args,
-      output: `Tool "${toolName}" not found`,
+      output: describeUnknownTool(toolName, tools),
     };
   }
   if (!parsedArgs.success) {
@@ -527,7 +544,8 @@ function preflightToolCall(
       output: `Invalid args for tool "${toolName}": malformed JSON in arguments: ${parsedArgs.error}`,
     };
   }
-  const validationError = validateExecutableToolArgs(tool, parsedArgs.data);
+  const normalizedArgs = normalizeToolArgs(tool, parsedArgs.data);
+  const validationError = validateExecutableToolArgs(tool, normalizedArgs);
   if (validationError !== null) {
     return {
       kind: 'rejected',
@@ -542,15 +560,59 @@ function preflightToolCall(
     toolCall,
     toolName,
     tool,
-    args: parsedArgs.data,
+    args: normalizedArgs,
     argsRepaired: parsedArgs.repaired === true ? true : undefined,
+    argsTrailingDiscarded: parsedArgs.trailingDiscarded === true ? true : undefined,
   };
+}
+
+/** Longest tool list echoed back to the model in an unknown-tool reply. */
+const UNKNOWN_TOOL_LIST_LIMIT = 30;
+
+/**
+ * Reply for a call to a tool that is not in the table. The `Tool "X" not found`
+ * prefix is matched on by callers and stays; after it the model gets what it can
+ * act on — the same tool under a different spelling, or the tools it has now.
+ */
+export function describeUnknownTool(
+  toolName: string,
+  tools: readonly ExecutableTool[] | undefined,
+): string {
+  const prefix = `Tool "${toolName}" not found.`;
+  const names = (tools ?? []).map((tool) => tool.name);
+  if (names.length === 0) return `${prefix} No tools are available in this context.`;
+  const squash = (name: string): string => name.toLowerCase().replaceAll(/[^a-z0-9]/g, '');
+  const wanted = squash(toolName);
+  const close = names.find((name) => squash(name) === wanted);
+  if (close !== undefined) return `${prefix} Did you mean "${close}"?`;
+  const shown = names.slice(0, UNKNOWN_TOOL_LIST_LIMIT).join(', ');
+  const more =
+    names.length > UNKNOWN_TOOL_LIST_LIMIT
+      ? `, and ${String(names.length - UNKNOWN_TOOL_LIST_LIMIT)} more`
+      : '';
+  return `${prefix} Tools available now: ${shown}${more}.`;
+}
+
+/** Apply the tool's own alias renames to a parsed object; anything else passes through. */
+function normalizeToolArgs(tool: ExecutableTool, args: unknown): unknown {
+  if (tool.normalizeArgs === undefined) return args;
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) return args;
+  try {
+    return tool.normalizeArgs(args as Record<string, unknown>);
+  } catch {
+    return args;
+  }
 }
 
 export function parseToolCallArguments(
   raw: string | null,
 ):
-  | { readonly success: true; readonly data: unknown; readonly repaired?: true }
+  | {
+      readonly success: true;
+      readonly data: unknown;
+      readonly repaired?: true;
+      readonly trailingDiscarded?: true;
+    }
   | { readonly success: false; readonly error: string } {
   if (raw === null || raw.length === 0) {
     return { success: true, data: {} };
@@ -558,6 +620,13 @@ export function parseToolCallArguments(
   try {
     return { success: true, data: JSON.parse(raw) as unknown };
   } catch (error) {
+    // A complete object followed by more content is not a broken stream — the
+    // call is intact and only the tail is noise — so it must not be rebuilt by
+    // the truncation balancer (which would either fail or guess).
+    const leading = extractLeadingJsonObject(raw);
+    if (leading !== undefined) {
+      return { success: true, data: leading, trailingDiscarded: true };
+    }
     const repaired = repairTruncatedJson(raw);
     try {
       // `repaired` is load-bearing: the caller appends a note to the tool
@@ -568,6 +637,45 @@ export function parseToolCallArguments(
       return { success: false, error: errorMessage(error) };
     }
   }
+}
+
+/**
+ * The first complete top-level JSON object of `raw`, when the whole string is
+ * not valid JSON only because something follows that object. Braces and quotes
+ * inside strings do not count; a leading value that is not an object, or an
+ * object that never closes (a truncated stream), yields `undefined`.
+ */
+function extractLeadingJsonObject(raw: string): Record<string, unknown> | undefined {
+  const start = raw.search(/\S/);
+  if (start < 0 || raw.charAt(start) !== '{') return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw.charAt(i);
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          const value = JSON.parse(raw.slice(start, i + 1)) as unknown;
+          return typeof value === 'object' && value !== null && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -964,25 +1072,43 @@ async function runRunnableToolCall(
   return makeToolResult(
     call,
     effectiveArgs,
-    appendArgsRepairedNote(tagAbortedToolResult(toolResult, signal), call.argsRepaired === true),
+    appendArgsNotes(tagAbortedToolResult(toolResult, signal), {
+      repaired: call.argsRepaired === true,
+      trailingDiscarded: call.argsTrailingDiscarded === true,
+    }),
   );
 }
 
 /**
- * Append the reconstruction note to a tool result whose arguments came from a
- * repaired (mid-call broken) argument stream.
+ * Append a note to a tool result whose arguments did not arrive as the model
+ * wrote them: reconstructed from a stream that broke mid-call, or a complete
+ * object whose trailing content was dropped.
  *
  * The note rides in the result *output* — the channel the model reads — so the
- * model learns that the values it just ran on are the balancer's best effort,
+ * model learns that the values it just ran on are the runtime's best effort,
  * not its own words, and can verify or re-issue. Tool-authored error results
  * get the note too: the repair happened before the tool ran, so its verdict
  * about the run does not remove the doubt about the inputs.
  */
-function appendArgsRepairedNote(result: ExecutableToolResult, argsRepaired: boolean): ExecutableToolResult {
-  if (!argsRepaired) return result;
-  const note =
-    '[note] Tool arguments were reconstructed from a truncated provider stream: the stream broke mid-call. ' +
-    'The call ran with reconstructed values — verify the effect and re-issue the call with explicit arguments if it looks wrong.';
+function appendArgsNotes(
+  result: ExecutableToolResult,
+  flags: { readonly repaired: boolean; readonly trailingDiscarded: boolean },
+): ExecutableToolResult {
+  const notes: string[] = [];
+  if (flags.repaired) {
+    notes.push(
+      '[note] Tool arguments were reconstructed from a truncated provider stream: the stream broke mid-call. ' +
+        'The call ran with reconstructed values — verify the effect and re-issue the call with explicit arguments if it looks wrong.',
+    );
+  }
+  if (flags.trailingDiscarded) {
+    notes.push(
+      '[note] The tool arguments were a complete JSON object followed by extra content; the runtime ignored the extra content after the JSON arguments ' +
+        'and ran the call with the first object only. If the extra content was meant as a second call, issue it as its own tool call.',
+    );
+  }
+  if (notes.length === 0) return result;
+  const note = notes.join('\n');
   const output = result.output;
   if (typeof output === 'string') {
     return { ...result, output: `${output}${output.length > 0 ? '\n' : ''}${note}` };

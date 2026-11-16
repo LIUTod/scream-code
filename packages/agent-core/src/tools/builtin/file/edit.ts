@@ -27,6 +27,7 @@ import {
   type EditRecoverySignature,
 } from '../../support/edit-recovery-queue';
 import { fileDiffSummary } from '../../support/file-diff';
+import { renameArgAliases } from '../../support/arg-aliases';
 import { toInputJsonSchema } from '../../support/input-schema';
 import {
   buildLineMapping,
@@ -280,10 +281,20 @@ interface RecoveryContext {
   readonly preApplyText: string;
 }
 
+/**
+ * Spellings models use for this tool's arguments; renamed before validation
+ * (`ExecutableTool.normalizeArgs`). Taken from calls that were rejected in practice.
+ */
+export const EDIT_ARG_ALIASES = { file_path: 'path' } as const;
+
 export class EditTool implements BuiltinTool<EditInput> {
   readonly name = 'Edit' as const;
   readonly description = EDIT_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(EditInputSchema);
+
+  normalizeArgs(args: Record<string, unknown>): Record<string, unknown> {
+    return renameArgAliases(args, EDIT_ARG_ALIASES);
+  }
 
   /**
    * Last diagnostics observation per file (canonical path → signature set).

@@ -153,7 +153,7 @@ describe('current builtin file and shell tools', () => {
     expect(result.output).toContain('old_string not found');
   });
 
-  it('Glob exposes parameters and rejects pure wildcard patterns', async () => {
+  it('Glob exposes parameters and schema', async () => {
     const tool = new GlobTool(createFakeJian(), workspace);
 
     expect(GlobInputSchema.safeParse({ pattern: '*.ts' }).success).toBe(true);
@@ -161,10 +161,6 @@ describe('current builtin file and shell tools', () => {
       type: 'object',
       properties: { pattern: { type: 'string' } },
     });
-
-    const result = await executeTool(tool, context({ pattern: '**' }));
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toContain('pure wildcard');
   });
 
   it('Grep exposes parameters and rejects relative workspace escapes before spawning rg', async () => {

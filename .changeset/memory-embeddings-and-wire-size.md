@@ -1,0 +1,9 @@
+---
+"scream-code": patch
+---
+
+Semantic memory search now works, and long sessions stop growing their wire without bound.
+
+Memory embeddings were never stored: the flush checked for an existing vector with `SELECT id FROM memory_embeddings`, but that table's key column is `memory_id`, so every flush failed with `no such column: id`, re-queued the memo, and left the vector index empty (the store silently fell back to keyword search). It now stores vectors, and a backfill at startup embeds the memos that were written while it was broken (newest first, up to 500 per start). The backfill only wakes the embedding engine when the model is already on disk — it never starts a model download, which stays the user's decision. Embedding runs on the main thread (about 130 ms per memo), so the flush now embeds one memo at a time with a turn of the event loop between them instead of one batch: a real 106-memo backlog used to block the UI for 14 s in one stretch and now stalls it for at most about 0.3 s. A chunk that fails keeps the earlier chunks and re-queues only the rest, and memos written while a flush is running are no longer left waiting for the next write. Real-SQLite tests cover the flush, the chunking, the failure handling and the backfill.
+
+Session wires: every compaction wrote a `context.snapshot` carrying the whole accumulated `compactedHistory` debug trail, so a session that compacted 16 times wrote 16 snapshots of 2–44 MB each (about 400 MB) while the state actually restored was under 1 MB. The trail is now limited to the two most recent compactions, and resume-time compaction empties the trail of snapshots that a later snapshot supersedes. Superseded snapshots themselves are kept — their `history` still feeds the resume replay window — and the rewrite is idempotent. On a real 401 MB session this brought the wire to 54 MB and resume from about 1.0 s to 0.2 s, with identical restored history, replay and trail.

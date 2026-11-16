@@ -9,12 +9,14 @@
  * downstream Read/Edit can consume them directly.
  *
  * Safety rails:
- *   - Pure-wildcard patterns (nothing but `*` / `?` / `/`) are rejected
- *     because they have no literal anchor — they would enumerate every
- *     file under the search root and exhaust the caller's context on
- *     large trees. Examples: `**`, `** / *`, `** / **`, `* / *`.
- *     Constrained patterns (with any literal anchor such as an extension
- *     or subdirectory) are allowed — the literal bounds the result set.
+ *   - Unanchored patterns — those that start with a recursive `**` segment, and
+ *     pure wildcards such as `**` or `* / *` — have no literal to bound the walk. They used to be
+ *     rejected, but models reach for `**` + extension constantly (a fifth of
+ *     all Glob calls in practice), and the output was already bounded by
+ *     `MAX_MATCHES` and `MAX_OUTPUT_BYTES`. What is not bounded is the time a
+ *     walk of a huge tree takes, so those patterns run under a wall-clock
+ *     budget (`UNANCHORED_WALK_BUDGET_MS`) and report a cut-short search as
+ *     partial. Anchored patterns are walked as before, with no budget.
  *   - Patterns using brace expansion (`{a,b,c}`) are rejected up-front
  *     because the underlying `_globWalk` treats `{` / `}` as literals,
  *     so such patterns would silently match zero files.
@@ -46,7 +48,6 @@ import { resolvePathAccessPath } from '../../policies/path-access';
 import type { PathClass } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { byteLength, truncateToBytes } from '../../support/result-builder';
-import { listDirectory } from '../../support/list-directory';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
 import { scanCache } from '../../support/scan-cache';
 import type { WorkspaceConfig } from '../../support/workspace';
@@ -72,6 +73,17 @@ export const GlobInputSchema = z.object({
 export type GlobInput = z.Infer<typeof GlobInputSchema>;
 
 export const MAX_MATCHES = 1000;
+
+/**
+ * Wall-clock ceiling for walking an unanchored pattern (see the header).
+ * Matches found before it fires are returned, marked partial.
+ */
+export const UNANCHORED_WALK_BUDGET_MS = 8_000;
+
+export interface GlobToolOptions {
+  /** Override of {@link UNANCHORED_WALK_BUDGET_MS}; tests use a few milliseconds. */
+  readonly unanchoredWalkBudgetMs?: number;
+}
 
 /** Byte ceiling for the rendered path list (the match count is not a size cap). */
 export const MAX_OUTPUT_BYTES = 50 * 1024;
@@ -126,20 +138,23 @@ const S_IFDIR = 0o040000;
 /**
  * Tool-level description shown to the LLM at tool declaration time.
  * Tells the model — before any round-trip — which patterns are
- * accepted, which are rejected, and which directories are too large to
- * recurse into. Patterns with a literal anchor before a double-star are
- * allowed; pure-wildcard patterns (a bare double-star or a double-star
- * followed by `/<wildcard>`) are rejected outright. On a Windows backend
+ * accepted and which directories are too large to recurse into. Every
+ * pattern is accepted except brace expansion; ones with no literal anchor
+ * are time-boxed and their results marked partial when cut short. On a Windows backend
  * the description also carries `WINDOWS_PATH_HINT` (path-shape guidance).
  */
 export class GlobTool implements BuiltinTool<GlobInput> {
   readonly name = 'Glob' as const;
   readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(GlobInputSchema);
+  private readonly unanchoredWalkBudgetMs: number;
+
   constructor(
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
+    options: GlobToolOptions = {},
   ) {
+    this.unanchoredWalkBudgetMs = options.unanchoredWalkBudgetMs ?? UNANCHORED_WALK_BUDGET_MS;
     this.description =
       this.jian.pathClass() === 'win32'
         ? GLOB_DESCRIPTION + WINDOWS_PATH_HINT
@@ -173,48 +188,6 @@ export class GlobTool implements BuiltinTool<GlobInput> {
     signal?: AbortSignal,
   ): Promise<ExecutableToolResult> {
     signal?.throwIfAborted();
-    if (startsWithDoubleStarPrefix(args.pattern)) {
-      let tree: string;
-      try {
-        tree = await listDirectory(this.jian, this.workspace.workspaceDir, signal);
-      } catch {
-        tree = '(listing unavailable)';
-      }
-      return {
-        isError: true,
-        output:
-          `Pattern "${args.pattern}" starts with '**' which is not allowed — ` +
-          `the leading '**/' has no literal anchor in front of it and would ` +
-          `enumerate every file under the search root, typically exhausting ` +
-          `the caller's context on large trees. Use more specific patterns ` +
-          `instead, such as "src/**/*.py" or "test/**/*.py".\n\n` +
-          `Top of ${this.workspace.workspaceDir}:\n${tree}`,
-      };
-    }
-
-    if (isPureWildcard(args.pattern)) {
-      const allowedRoots = [this.workspace.workspaceDir, ...this.workspace.additionalDirs];
-      const rootList = allowedRoots.map((d) => `  - ${d}`).join('\n');
-      let tree: string;
-      try {
-        tree = await listDirectory(this.jian, this.workspace.workspaceDir, signal);
-      } catch {
-        tree = '(listing unavailable)';
-      }
-      return {
-        isError: true,
-        output:
-          `Pattern "${args.pattern}" is a pure wildcard (only \`*\`, \`?\`, \`**\`, \`/\`) ` +
-          `and would enumerate every file under the search root — with no literal ` +
-          `anchor to bound the result set, this typically exhausts your context on ` +
-          `large trees. Add an extension ` +
-          `("${args.pattern === '**' || args.pattern === '**/*' ? '**/*.ts' : '**/*.md'}") ` +
-          `or a subdirectory ("src/**/*.ts") to constrain the walk.\n\n` +
-          `Allowed roots for explicit path searches:\n${rootList}\n\n` +
-          `Top of ${this.workspace.workspaceDir}:\n${tree}`,
-      };
-    }
-
     if (containsBraceExpansion(args.pattern)) {
       return {
         isError: true,
@@ -298,6 +271,20 @@ export class GlobTool implements BuiltinTool<GlobInput> {
       // result: the same pattern always resolves to the same exclusions.
       const exclude = globExcludesForPattern(args.pattern);
 
+      // An unanchored pattern may have to walk an enormous tree to find few
+      // matches, so it gets a wall-clock budget on top of the caller's signal.
+      // The walker stops gracefully on abort, which is how a budget that ran
+      // out is told apart from a cancelled call below.
+      const budgetSignal = isUnanchoredPattern(args.pattern)
+        ? AbortSignal.timeout(this.unanchoredWalkBudgetMs)
+        : undefined;
+      const walkSignal =
+        budgetSignal === undefined
+          ? signal
+          : signal === undefined
+            ? budgetSignal
+            : AbortSignal.any([signal, budgetSignal]);
+
       outer: for (const root of searchRoots) {
         for await (const filePath of this.jian.glob(root, args.pattern, {
           allowedRoots: [root],
@@ -306,7 +293,7 @@ export class GlobTool implements BuiltinTool<GlobInput> {
           // checks per directory entry, which is what stops a pattern with
           // few or no matches (the `yielded % 128` heartbeat below never
           // fires for those, since it only counts yielded matches).
-          signal,
+          signal: walkSignal,
         })) {
           yielded++;
           if (signal && yielded % 128 === 0) {
@@ -348,6 +335,7 @@ export class GlobTool implements BuiltinTool<GlobInput> {
       // Re-check the signal so the abort surfaces as AbortError, exactly as
       // the heartbeat check above and the catch block below expect.
       signal?.throwIfAborted();
+      const budgetExhausted = budgetSignal?.aborted === true;
 
       entries.sort((a, b) => b.mtime - a.mtime);
 
@@ -363,14 +351,21 @@ export class GlobTool implements BuiltinTool<GlobInput> {
       // Header lines are not paths; the byte-cut accounting has to know how
       // many of the surviving lines are headers rather than matches.
       let headerLines = 0;
-      if (entries.length === 0 && !truncated) {
+      if (entries.length === 0 && !truncated && !budgetExhausted) {
         output = 'No matches found';
       } else {
         const lines: string[] = [];
+        if (budgetExhausted) {
+          lines.push(
+            `[Search stopped after ${String(this.unanchoredWalkBudgetMs / 1000)}s: the tree is large and "${args.pattern}" has no literal anchor, so these results are partial. ` +
+              `Pass \`path\` or anchor the pattern with a subdirectory, such as "src/**/*.ts".]`,
+          );
+          headerLines += 1;
+        }
         if (truncated) {
           lines.push(`[Truncated at ${String(MAX_MATCHES)} matches — use a more specific pattern]`);
           lines.push(`Only the first ${String(MAX_MATCHES)} matches are returned.`);
-          headerLines = 2;
+          headerLines += 2;
         }
         lines.push(...displayLines);
         if (!truncated && entries.length === MAX_MATCHES) {
@@ -393,7 +388,9 @@ export class GlobTool implements BuiltinTool<GlobInput> {
         const omitted = Math.max(1, displayLines.length - keptPaths);
         output = `${kept}\n[...${String(omitted)} paths omitted: output exceeds ${String(MAX_OUTPUT_BYTES / 1024)} KB — narrow the pattern]`;
       }
-      scanCache.set(searchRoots[0]!, args.pattern, includeDirs, output);
+      // A search that ran out of time is not the answer to its pattern; caching
+      // it would keep serving the partial list until the next file write.
+      if (!budgetExhausted) scanCache.set(searchRoots[0]!, args.pattern, includeDirs, output);
       return { output };
     } catch (error) {
       // Re-throw AbortError so the tool runtime (runRunnableToolCall) can
@@ -437,12 +434,16 @@ function relativizeIfUnder(candidate: string, base: string, pathClass: PathClass
 
 // Return true iff `pattern` begins with the literal sequence `**` followed
 // by a `/`. Such patterns have no literal anchor in front of the recursive
-// wildcard, so the walk has nothing to bound it on the left and would
-// descend into every top-level directory of the search root before any
-// suffix constraint can filter. Rejected up-front to match the Python Glob
-// behavior — callers must anchor with a top-level subdirectory.
+// wildcard, so the walk has nothing to bound it on the left and descends into
+// every top-level directory of the search root before any suffix constraint
+// can filter.
 function startsWithDoubleStarPrefix(pattern: string): boolean {
   return pattern.startsWith('**/');
+}
+
+/** A pattern with nothing literal to bound the walk: it starts with a recursive wildcard segment, or is pure wildcards. */
+function isUnanchoredPattern(pattern: string): boolean {
+  return startsWithDoubleStarPrefix(pattern) || isPureWildcard(pattern);
 }
 
 /**

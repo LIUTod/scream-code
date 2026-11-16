@@ -227,6 +227,28 @@ describe('hasErrors', () => {
   });
 });
 
+describe('formatDiagnosticsHint: server started but typescript is missing', () => {
+  it('names typescript, not the language server, as the missing piece', async () => {
+    const registry = fakeRegistry({
+      clientError: new Error(
+        'Request initialize failed with message: Could not find a valid TypeScript installation.',
+      ),
+    });
+    const result = await fetchDiagnostics(registry, createFakeJian(), '/ws/a.ts', '/ws');
+
+    const hint = formatDiagnosticsHint(result);
+    expect(hint).toContain('npm i -g typescript');
+    expect(hint).not.toContain('install the language server');
+  });
+
+  it('keeps the install-the-server hint for other start failures', async () => {
+    const registry = fakeRegistry({ clientError: new Error('spawn typescript-language-server ENOENT') });
+    const result = await fetchDiagnostics(registry, createFakeJian(), '/ws/a.ts', '/ws');
+
+    expect(formatDiagnosticsHint(result)).toContain('install the language server `typescript-language-server`');
+  });
+});
+
 describe('formatDiagnosticsHint', () => {
   it('returns empty string for unsupported file types', () => {
     const result: DiagnosticsResult = { available: false, observed: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };

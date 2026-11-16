@@ -135,23 +135,19 @@ describe('GlobTool', () => {
     });
   });
 
-  it('rejects pure wildcard patterns before walking the tree', async () => {
-    const glob = vi.fn();
+  it('walks pure wildcard patterns instead of rejecting them', async () => {
+    const glob = vi.fn().mockReturnValue(asyncPaths(['/workspace/a.ts', '/workspace/src/b.py']));
     const tool = new GlobTool(
-      createFakeJian({
-        glob,
-        iterdir: vi.fn().mockReturnValue(asyncPaths(['/workspace/src'])),
-        stat: vi.fn().mockResolvedValue(stat(0, 0o040000)),
-      }),
+      createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1)) }),
       workspace,
     );
 
     const result = await executeTool(tool, context({ pattern: '**' }));
 
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toContain('pure wildcard');
-    expect(result.output).toContain('/workspace');
-    expect(glob).not.toHaveBeenCalled();
+    expect(result.isError).toBeUndefined();
+    expect(result.output).toContain('a.ts');
+    expect(result.output).toContain('src/b.py');
+    expect(glob).toHaveBeenCalledTimes(1);
   });
 
   it('rejects brace expansion patterns with a clear split-call hint', async () => {
@@ -344,25 +340,17 @@ describe('GlobTool', () => {
     });
   });
 
-  it('rejects "**/" prefix patterns even with a literal anchor', async () => {
-    // py rejects every pattern starting with "**/". TS only rejects pure-
-    // wildcard patterns and accepts "**/*.py" because the `.py` literal
-    // anchors the walk. Test as a lockdown of the py contract — expected
-    // to fail under the current TS policy.
-    const glob = vi.fn();
+  it('walks a leading "**/" pattern instead of rejecting it', async () => {
+    const glob = vi.fn().mockReturnValue(asyncPaths(['/workspace/src/main.py']));
     const tool = new GlobTool(
-      createFakeJian({
-        glob,
-        iterdir: vi.fn().mockReturnValue(asyncPaths([])),
-        stat: vi.fn().mockResolvedValue(stat(0, 0o040000)),
-      }),
+      createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1)) }),
       workspace,
     );
 
     const result = await executeTool(tool, context({ pattern: '**/*.py' }));
 
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toMatch(/starts with '\*\*' which is not allowed/);
+    expect(result.isError).toBeUndefined();
+    expect(result.output).toBe('src/main.py');
   });
 
   it('walks safe recursive patterns with a literal subdirectory anchor', async () => {
@@ -425,38 +413,6 @@ describe('GlobTool', () => {
     expect(iterdirCalls).toEqual([{ signal: controller.signal, maxEntries: 1 }]);
   });
 
-  it('forwards the execution signal into the listing iterdir calls on the rejection path', async () => {
-    // The "**/" rejection renders a workspace listing through listDirectory;
-    // its iterdir walks (root level and one child) must carry the same signal
-    // so an abandoned call stops listing too.
-    const controller = new AbortController();
-    const iterdirCalls: Array<{ signal?: AbortSignal; maxEntries?: number } | undefined> = [];
-    const iterdir = vi.fn(
-      (path: string, options?: { signal?: AbortSignal; maxEntries?: number }) => {
-        iterdirCalls.push(options);
-        return path === '/workspace' ? asyncPaths(['/workspace/src']) : asyncPaths([]);
-      },
-    );
-    const glob = vi.fn();
-    const tool = new GlobTool(
-      createFakeJian({
-        iterdir,
-        glob,
-        stat: vi.fn().mockResolvedValue(stat(0, 0o040000)),
-      }),
-      workspace,
-    );
-
-    const result = await executeTool(tool, {
-      ...context({ pattern: '**/*.py' }),
-      signal: controller.signal,
-    });
-
-    expect(result).toMatchObject({ isError: true });
-    expect(glob).not.toHaveBeenCalled();
-    expect(iterdirCalls).toEqual([{ signal: controller.signal }, { signal: controller.signal }]);
-  });
-
   it('reports "does not exist" when the search directory is missing', async () => {
     // Real jian.glob silently returns empty for a missing root because
     // its _globWalk catches readdir failures. The tool now pre-checks
@@ -517,30 +473,19 @@ describe('GlobTool', () => {
     expect(result.output).toContain(`Only the first ${String(MAX_MATCHES)} matches are returned`);
   });
 
-  it('includes a directory listing in the rejection message for "**/" patterns', async () => {
-    // py rejection includes the top-level directory listing as a hint.
-    const iterdir = vi
-      .fn()
-      .mockReturnValue(asyncPaths(['/workspace/file1.txt', '/workspace/file2.py', '/workspace/src', '/workspace/docs']));
-    const glob = vi.fn();
+  it('answers a "**/" pattern with its matches and no rejection text', async () => {
+    const glob = vi.fn().mockReturnValue(asyncPaths(['/workspace/file1.txt', '/workspace/docs/n.txt']));
     const tool = new GlobTool(
-      createFakeJian({
-        glob,
-        iterdir,
-        stat: vi.fn().mockResolvedValue(stat(0, 0o100000)),
-      }),
+      createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1, 0o100000)) }),
       workspace,
     );
 
     const result = await executeTool(tool, context({ pattern: '**/*.txt' }));
 
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toMatch(/starts with '\*\*' which is not allowed/);
-    expect(result.output).toContain('Use more specific patterns instead');
+    expect(result.isError).toBeUndefined();
     expect(result.output).toContain('file1.txt');
-    expect(result.output).toContain('file2.py');
-    expect(result.output).toContain('src');
-    expect(result.output).toContain('docs');
+    expect(result.output).toContain('docs/n.txt');
+    expect(result.output).not.toContain('not allowed');
   });
 
   it('returns a "Found N matches" footer at exactly MAX_MATCHES without truncation', async () => {
@@ -562,22 +507,17 @@ describe('GlobTool', () => {
     expect(result.output).toContain(`Found ${String(MAX_MATCHES)} matches`);
   });
 
-  it('rejects "**/" patterns with literal subdirectory anchors after the prefix', async () => {
-    const glob = vi.fn();
+  it('walks "**/" patterns that carry a literal segment after the prefix', async () => {
+    const glob = vi.fn().mockReturnValue(asyncPaths(['/workspace/src/main/app.py']));
     const tool = new GlobTool(
-      createFakeJian({
-        glob,
-        iterdir: vi.fn().mockReturnValue(asyncPaths([])),
-        stat: vi.fn().mockResolvedValue(stat(0, 0o040000)),
-      }),
+      createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1)) }),
       workspace,
     );
 
     const result = await executeTool(tool, context({ pattern: '**/main/*.py' }));
 
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toMatch(/starts with '\*\*' which is not allowed/);
-    expect(glob).not.toHaveBeenCalled();
+    expect(result.isError).toBeUndefined();
+    expect(result.output).toBe('src/main/app.py');
   });
 
   it('matches dotfiles like .gitlab-ci.yml under a simple "*.yml" pattern', async () => {
@@ -892,5 +832,92 @@ describe('globExcludesForPattern', () => {
 
   it('does not treat a longer segment containing a name as that name', () => {
     expect(globExcludesForPattern('node_modules_backup/*.js')).toEqual(DEFAULT_GLOB_EXCLUDES);
+  });
+});
+
+describe('GlobTool: unanchored patterns are time-boxed', () => {
+  /** Two matches, then a walk that only ends when its signal aborts (a huge tree). */
+  function endlessWalk() {
+    return vi.fn((_root: string, _pattern: string, options: { signal?: AbortSignal }) => {
+      async function* walk(): AsyncGenerator<string> {
+        yield '/workspace/a.ts';
+        yield '/workspace/b.ts';
+        await new Promise<void>((resolve) => {
+          if (options.signal?.aborted) resolve();
+          options.signal?.addEventListener('abort', () => {
+            resolve();
+          });
+        });
+      }
+      return walk();
+    });
+  }
+
+  it('returns the partial matches and says the search was cut short', async () => {
+    const glob = endlessWalk();
+    const tool = new GlobTool(
+      createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1)) }),
+      workspace,
+      { unanchoredWalkBudgetMs: 20 },
+    );
+
+    const result = await executeTool(tool, context({ pattern: '**/*.ts' }));
+
+    expect(result.isError).toBeUndefined();
+    expect(result.output).toContain('a.ts');
+    expect(result.output).toContain('b.ts');
+    // The real budget is 8 s; a sub-second one must not read as "0s".
+    expect(result.output).toMatch(/Search stopped after 0\.02s/);
+    expect(result.output).toMatch(/partial/);
+  });
+
+  it('does not cache a partial result', async () => {
+    const glob = endlessWalk();
+    const tool = new GlobTool(
+      createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1)) }),
+      workspace,
+      { unanchoredWalkBudgetMs: 20 },
+    );
+
+    await executeTool(tool, context({ pattern: '**/*.cache-probe' }));
+    await executeTool(tool, context({ pattern: '**/*.cache-probe' }));
+
+    expect(glob).toHaveBeenCalledTimes(2);
+  });
+
+  it('a caller abort still surfaces as an abort, not as a partial result', async () => {
+    const glob = endlessWalk();
+    const tool = new GlobTool(
+      createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1)) }),
+      workspace,
+      { unanchoredWalkBudgetMs: 60_000 },
+    );
+    const controller = new AbortController();
+    const pending = executeTool(tool, {
+      turnId: '0',
+      toolCallId: 'call_glob',
+      args: { pattern: '**/*.abort-probe' },
+      signal: controller.signal,
+    });
+    setTimeout(() => {
+      controller.abort();
+    }, 10);
+
+    await expect(pending).rejects.toThrow();
+  });
+
+  it('leaves an anchored pattern un-boxed: the caller signal goes straight to the walk', async () => {
+    const glob = vi.fn().mockReturnValue(asyncPaths(['/workspace/src/a.ts']));
+    const tool = new GlobTool(
+      createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1)) }),
+      workspace,
+      { unanchoredWalkBudgetMs: 1 },
+    );
+
+    const result = await executeTool(tool, context({ pattern: 'src/**/*.ts' }));
+
+    expect(result.output).toBe('src/a.ts');
+    expect(glob.mock.calls[0]?.[2]).toMatchObject({ signal });
+    expect(result.output).not.toContain('Search stopped');
   });
 });

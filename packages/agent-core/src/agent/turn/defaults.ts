@@ -38,6 +38,15 @@ export const TURN_DEFAULTS = {
   minFinalResponseLength: 60,
 
   /**
+   * How many times one turn continues after a response was cut off by the
+   * output-token limit in the middle of a tool call. The call is recorded as
+   * not run, with a result telling the model to split the work; continuing is
+   * what lets it see that. Bounded so a model that cannot fit its work in the
+   * output limit ends the turn instead of overrunning forever.
+   */
+  maxTruncatedToolRetries: 2,
+
+  /**
    * Goal mode: max continuation turns when the goal has no explicit turn
    * budget. Prevents a goal from spinning forever and burning tokens.
    */

@@ -248,6 +248,14 @@ export type ToolExecution = RunnableToolExecution | ExecutableToolErrorResult;
 export interface ExecutableTool<Input = unknown> extends Tool {
   resolveExecution(input: Input): ToolExecution | Promise<ToolExecution>;
   /**
+   * Rename argument spellings the model commonly uses (`limit`, `file_path`)
+   * to this tool's own keys. Runs on the parsed arguments of a call before
+   * schema validation, because the schema is a closed object and would reject
+   * the alias. Must be pure; a throw is ignored and the original arguments are
+   * validated as sent.
+   */
+  normalizeArgs?(args: Record<string, unknown>): Record<string, unknown>;
+  /**
    * The tool manages its own lifetime and must not be cut short by the loop's
    * generic execution deadline: a subagent host can legitimately run for
    * hours, and a blocking user prompt (question, plan approval) can wait
@@ -317,6 +325,13 @@ export interface LoopAfterStepContext extends LoopStepHookContext {
 export interface LoopStoppedStepContext extends LoopStepHookContext {
   readonly usage: TokenUsage;
   readonly stopReason: LoopTerminalStepStopReason;
+  /**
+   * Tool calls in the step's response that were recorded but not run because
+   * the response ended abnormally (output-limit truncation, a broken stream).
+   * Their results are synthetic errors the model has not seen yet — so a stop
+   * hook that continues the turn lets it react to them.
+   */
+  readonly unexecutedToolCalls?: number | undefined;
 }
 
 export interface BeforeStepResult {

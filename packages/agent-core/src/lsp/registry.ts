@@ -1,5 +1,5 @@
-import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import type { Dirent } from 'node:fs';
 
@@ -31,22 +31,93 @@ const LANGUAGE_SERVERS: Readonly<Record<string, LspCommand>> = {
  * Resolve a `tsserver` lib directory for `typescript-language-server`.
  *
  * `typescript-language-server` is only the LSP protocol layer; it shells out to
- * TypeScript's own `tsserver.js` to compute diagnostics. It searches the
- * workspace's `node_modules/typescript` by default, so editing a standalone
- * `.ts` file outside any JS project makes it exit with "Could not find a valid
- * TypeScript installation." Passing `initializationOptions.tsserver.path`
- * points it at a known-good install so diagnostics work regardless of where
- * the edited file lives.
+ * TypeScript's own `tsserver.js` to compute diagnostics, and exits with "Could
+ * not find a valid TypeScript installation." when it cannot find one — as it
+ * does for a standalone `.ts` file or a project that has not installed
+ * `typescript`. `initializationOptions.tsserver.path` points it at a known-good
+ * install, so this looks for one the user already has, nearest first:
  *
- * Resolution order: workspace `node_modules/typescript`, then the
- * `typescript` dependency bundled with scream-code itself (resolved via
- * `require.resolve`). Returns undefined when neither is available, in which
- * case the server will fall back to its own search (and likely fail for
- * project-less files).
+ *  1. `node_modules/typescript` in the workspace or any ancestor (a monorepo
+ *     package whose `typescript` is hoisted to the repo root);
+ *  2. next to the language server itself, found on `PATH` (a global install of
+ *     both, or the server's own nested copy);
+ *  3. the global prefix of the running Node (`<prefix>/lib/node_modules`, or
+ *     `<prefix>/node_modules` on Windows);
+ *  4. the `typescript` that happens to resolve from this package — only true in
+ *     a repository checkout; an installed CLI does not ship it.
+ *
+ * Returns undefined when none exists, in which case the server falls back to
+ * its own search and reports its own error.
  */
-function resolveTsserverPath(workspaceRoot: string): string | undefined {
-  const workspaceCandidate = join(workspaceRoot, 'node_modules', 'typescript', 'lib');
-  if (existsSync(join(workspaceCandidate, 'tsserver.js'))) return workspaceCandidate;
+export interface TsserverSearch {
+  /** `PATH` to look for the language server on. Defaults to the process's. */
+  readonly pathEnv?: string;
+  /** The Node executable whose prefix is searched. Defaults to `process.execPath`. */
+  readonly execPath?: string;
+  /** The package-local fallback. Defaults to `require.resolve` from this module. */
+  readonly bundled?: () => string | undefined;
+}
+
+export function resolveTsserverPath(
+  workspaceRoot: string,
+  search: TsserverSearch = {},
+): string | undefined {
+  const hasTsserver = (lib: string): boolean => existsSync(join(lib, 'tsserver.js'));
+
+  for (let dir = resolve(workspaceRoot); ; ) {
+    const lib = join(dir, 'node_modules', 'typescript', 'lib');
+    if (hasTsserver(lib)) return lib;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  const server = findOnPath('typescript-language-server', search.pathEnv ?? process.env['PATH'] ?? '');
+  if (server !== undefined) {
+    let real = server;
+    try {
+      real = realpathSync(server);
+    } catch {
+      // A dangling link: fall back to where PATH said it was.
+    }
+    // Windows npm shims sit in the prefix itself, with node_modules beside them.
+    const beside = join(dirname(server), 'node_modules', 'typescript', 'lib');
+    if (hasTsserver(beside)) return beside;
+    let dir = dirname(real);
+    for (let depth = 0; depth < 5; depth += 1) {
+      for (const lib of [join(dir, 'node_modules', 'typescript', 'lib'), join(dir, 'typescript', 'lib')]) {
+        if (hasTsserver(lib)) return lib;
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+
+  const nodeDir = dirname(search.execPath ?? process.execPath);
+  for (const lib of [
+    resolve(nodeDir, '..', 'lib', 'node_modules', 'typescript', 'lib'),
+    resolve(nodeDir, 'node_modules', 'typescript', 'lib'),
+  ]) {
+    if (hasTsserver(lib)) return lib;
+  }
+
+  return (search.bundled ?? bundledTsserverPath)();
+}
+
+/** `name` on `pathEnv`; on Windows npm installs a `.cmd` shim rather than a bare file. */
+function findOnPath(name: string, pathEnv: string): string | undefined {
+  for (const dir of pathEnv.split(delimiter)) {
+    if (dir === '') continue;
+    for (const file of [name, `${name}.cmd`]) {
+      const candidate = join(dir, file);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+function bundledTsserverPath(): string | undefined {
   try {
     const bundled = createRequire(import.meta.url).resolve('typescript/lib/tsserver.js');
     return bundled.slice(0, -'/tsserver.js'.length);

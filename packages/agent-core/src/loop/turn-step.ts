@@ -78,6 +78,8 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   readonly rejectedCalls: number;
   /** Total tool calls in this step's response. */
   readonly totalCalls: number;
+  /** Calls recorded but not run because the response ended abnormally. */
+  readonly unexecutedToolCalls: number;
 }> {
   const {
     turnId,
@@ -257,6 +259,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     stopTurnAfterUsage && stopReason === 'tool_use' ? 'end_turn' : stopReason;
   let rejectedCalls = 0;
   let totalCalls = 0;
+  let unexecutedToolCalls = 0;
   if (effectiveStopReason === 'tool_use') {
     const toolBatch = await runToolCallBatch(step, response);
     rejectedCalls = toolBatch.rejectedCount;
@@ -271,7 +274,12 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     // Record each call and close it with a synthetic interrupted result:
     // dropping them would lose the model's intent and can persist an
     // assistant message strict providers reject as empty.
-    await recordUnexecutedToolCalls(step, response);
+    await recordUnexecutedToolCalls(
+      step,
+      response,
+      stopReason === 'max_tokens' ? 'truncated' : 'interrupted',
+    );
+    unexecutedToolCalls = response.toolCalls.length;
   }
 
   // When a tool batch runs, it drains paired `tool.result` events even when
@@ -315,6 +323,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       stopTurnAfterStep && effectiveStopReason === 'tool_use' ? 'end_turn' : effectiveStopReason,
     rejectedCalls,
     totalCalls,
+    unexecutedToolCalls,
   };
 }
 

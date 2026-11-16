@@ -335,7 +335,7 @@ Always use tools to implement your code changes:
 {% endif -%}When working on an existing codebase, you should:
 
 - Understand the codebase by reading it with tools (`Read`, `Glob`, `Grep`) before making changes. Identify the ultimate goal and the most important criteria to achieve the goal.
-- When using `Glob`, include a literal anchor (file extension or subdirectory) in the pattern. Pure wildcards like `*` or `**/*` are rejected by the tool.
+- When using `Glob`, anchor the pattern when you can — a subdirectory (`src/**/*.ts`) or the `path` argument. Patterns that start with `**` or are pure wildcards are accepted, but they are time-boxed and return partial results on a very large tree.
 - For a bug fix, you typically need to check error logs or failed tests, scan over the codebase to find the root cause, and figure out a fix. If user mentioned any failed tests, you should make sure they pass after the changes.
 - For a feature, you typically need to design the architecture, and write the code in a modular and maintainable way, with minimal intrusions to existing code. Add new tests if the project already has tests.
 - For a code refactoring, you typically need to update all the places that call the code you are refactoring if the interface changes. DO NOT change any existing logic especially in tests, focus only on fixing any errors caused by the interface changes.

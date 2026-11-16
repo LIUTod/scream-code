@@ -319,7 +319,10 @@ export class TurnFlow {
     this.activeTurn = null;
   }
 
+  /** Compaction recovery for a response truncated at max_tokens: once per turn. */
   private maxTokensRecoveryAttempted = false;
+  /** Continuations spent this turn on a tool call cut off by the output limit. */
+  private truncatedToolRetries = 0;
 
   private flushSteerBuffer(): boolean {
     const steers = this.steerBuffer;
@@ -534,6 +537,8 @@ export class TurnFlow {
     this.agent.workingSet.decay(turnId);
     this.summaryGuardInjected = false;
     this.verificationFailureInjected = false;
+    this.maxTokensRecoveryAttempted = false;
+    this.truncatedToolRetries = 0;
     this.turnStartWorkingSetPathCount = this.agent.workingSet.getPaths().length;
     this.turnStartVerificationCount = this.agent.workingSet.getVerificationCount();
     this.currentStepByTurn.set(turnId, 0);
@@ -911,7 +916,7 @@ export class TurnFlow {
               return undefined;
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
-            shouldContinueAfterStop: async ({ signal, stopReason }) => {
+            shouldContinueAfterStop: async ({ signal, stopReason, unexecutedToolCalls }) => {
               // Continuation categories for the stop gate. Every
               // `return { continue: true }` below carries an `// allow: <category>`
               // tag on the line directly above it; `test/agent/turn-stop-gate.test.ts`
@@ -942,18 +947,37 @@ export class TurnFlow {
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
 
-              // Output-limit recovery: when the response was truncated at
+              // A tool call cut off by the output limit: the loop recorded it as
+              // not run, with a result telling the model its output was too long
+              // and to split the work. Continue so it sees that result instead of
+              // leaving the user to type "continue". Compacting would not help —
+              // the context is not what ran out. Bounded per turn; subagent turns
+              // keep their fail-on-truncation semantics.
+              if (
+                stopReason === 'max_tokens' &&
+                (unexecutedToolCalls ?? 0) > 0 &&
+                this.agent.config.profileName === 'agent' &&
+                this.truncatedToolRetries < TURN_DEFAULTS.maxTruncatedToolRetries
+              ) {
+                this.truncatedToolRetries += 1;
+                // allow: correction
+                return { continue: true };
+              }
+
+              // Output-limit recovery: when a TEXT response was truncated at
               // max_tokens, compact the context once and continue so long
               // output resumes instead of ending the turn. Bounded to one
-              // recovery per agent session (like the overflow recovery),
-              // which matches the bounded-retry semantics of truncation
-              // recovery: repeated truncations after a recovery let the turn
-              // end normally rather than compacting in a loop. max_tokens
-              // with tool calls is handled separately as an interrupted
-              // tool-call result, and subagent turns keep their
+              // recovery per turn (like the overflow recovery, which resets
+              // the same way): a repeated truncation after a recovery lets the
+              // turn end normally rather than compacting in a loop. A cut-off
+              // TOOL call never reaches here: it was the output limit, not the
+              // window (every truncation in 3 months of real sessions had
+              // 36–83K input tokens), so compacting cannot help and the retry
+              // above is the whole recovery. Subagent turns keep their
               // fail-on-truncation semantics.
               if (
                 stopReason === 'max_tokens' &&
+                (unexecutedToolCalls ?? 0) === 0 &&
                 !this.maxTokensRecoveryAttempted &&
                 this.agent.config.profileName === 'agent'
               ) {

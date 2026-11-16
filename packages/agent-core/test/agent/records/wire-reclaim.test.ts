@@ -152,7 +152,18 @@ describe('reclaiming intermediate stream drafts', () => {
       .filter((line) => line.length > 0);
     const expected = expectedRetainedLines();
 
-    expect(onDisk).toEqual(expected);
+    // compact() keeps the same lines read() yields; the one difference is that
+    // a snapshot a later snapshot supersedes is rewritten with an empty debug
+    // trail (restore overwrites that trail with the last snapshot's, so nothing
+    // observable changes — see snapshot-trail-reclaim.test.ts).
+    const supersededSnapshot = JSON.stringify(snapshot('s1'));
+    expect(onDisk).toEqual(
+      expected.map((line) =>
+        line === supersededSnapshot
+          ? JSON.stringify({ ...snapshot('s1'), compactedHistory: [] })
+          : line,
+      ),
+    );
     // read() yields the same set of lines as the file retains — same fold
     // decision in both passes, no drift between them.
     expect(fromFile).toEqual(expected);
@@ -196,8 +207,9 @@ describe('reclaiming intermediate stream drafts', () => {
       .split('\n')
       .filter((line) => line.length > 0);
     const snapshots = onDisk.filter((line) => line.startsWith('{"type":"context.snapshot"'));
-    // The wire has two snapshots; the last one is the restore point and stays,
-    // the earlier one is NOT reclaimed yet (step-2 candidate, not landed).
+    // The wire has two snapshots; the last one is the restore point and stays
+    // byte-for-byte. The earlier one is NOT removed — its history still feeds
+    // the replay window — though its debug trail is emptied (see below).
     expect(snapshots).toHaveLength(2);
     expect(snapshots.at(-1)).toBe(JSON.stringify(snapshot('s2')));
   });

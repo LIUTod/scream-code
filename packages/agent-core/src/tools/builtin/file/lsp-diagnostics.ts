@@ -19,6 +19,7 @@ import type { Jian } from '@scream-code/jian';
 
 import type { LspRegistry } from '../../../lsp/registry';
 import { formatDiagnostic, type LspDiagnostic } from '../../../lsp/client';
+import { lspStartFailureHint } from '../../../lsp/start-failure';
 import {
   diagnosticsSignatures,
   type EditRecoveryQueue,
@@ -52,6 +53,8 @@ export interface DiagnosticsResult {
   readonly reason?: DiagnosticsUnavailableReason;
   /** The server command name, when known — used to build the install hint. */
   readonly serverCommand?: string;
+  /** Why the server could not be started, when it threw — selects the hint. */
+  readonly startError?: string;
 }
 
 /** Returns true when any diagnostic is severity 1 (Error) per LSP spec. */
@@ -86,7 +89,7 @@ export async function fetchDiagnostics(
   let client;
   try {
     client = await registry.getClient(path, workspaceRoot);
-  } catch {
+  } catch (error) {
     return {
       available: false,
       observed: false,
@@ -94,6 +97,7 @@ export async function fetchDiagnostics(
       hasErrors: false,
       reason: 'server-missing',
       serverCommand,
+      startError: error instanceof Error ? error.message : String(error),
     };
   }
   if (client === undefined) {
@@ -139,6 +143,8 @@ export function formatDiagnosticsNotice(result: DiagnosticsResult): string {
  */
 export function formatDiagnosticsHint(result: DiagnosticsResult): string {
   if (result.reason !== 'server-missing') return '';
+  const specific = result.startError === undefined ? undefined : lspStartFailureHint(result.startError);
+  if (specific !== undefined) return `\nHint: ${specific}`;
   const cmd = result.serverCommand;
   if (cmd === undefined) return '';
   return `\nHint: install the language server \`${cmd}\` to get type and syntax diagnostics after edits.`;

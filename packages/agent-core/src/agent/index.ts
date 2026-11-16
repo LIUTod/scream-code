@@ -50,7 +50,7 @@ import { USER_PROMPT_ORIGIN } from './context/types';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
-import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createEmbeddingEngine, parseMemoryMemos, sharedMemoStore, type EmbeddingEngine } from '@scream-code/memory';
+import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createEmbeddingEngine, hasEmbeddingModelCache, parseMemoryMemos, sharedMemoStore, type EmbeddingEngine } from '@scream-code/memory';
 import { KnowledgeStore, sharedKnowledgeStore, sharedKnowledgeStoreReady } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
@@ -476,6 +476,17 @@ export class Agent {
         }
       } catch (error: unknown) {
         this.log.warn('embedding engine init failed; falling back to keyword search', error);
+      }
+      try {
+        // Memos written while vectors could not be stored (or before an engine
+        // existed) are only embedded by this pass; a write is the sole other trigger.
+        // Loading the engine can download the model, which stays the user's call
+        // (the setup card), so it is only woken when the model is already on disk.
+        const modelCached =
+          this.embeddingCacheDir !== undefined && hasEmbeddingModelCache(this.embeddingCacheDir);
+        await this.memoStore!.backfillMissingEmbeddings({ loadEngine: modelCached });
+      } catch (error: unknown) {
+        this.log.warn('memory embedding backfill failed', error);
       }
     })();
   }

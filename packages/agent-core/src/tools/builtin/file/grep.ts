@@ -33,6 +33,7 @@ import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import type { PathClass } from '../../policies/path-access';
 import { isSensitiveFile, SENSITIVE_DOT_VARIANT_SUFFIXES } from '../../policies/sensitive';
+import { renameArgAliases } from '../../support/arg-aliases';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { RepetitionGuard } from '../../support/repetition-guard';
 import { ensureRgPath, rgUnavailableMessage } from '../../support/rg-locator';
@@ -170,10 +171,20 @@ const GREP_DESCRIPTION = renderPrompt(grepDescriptionTemplate, {
   DEFAULT_HEAD_LIMIT,
 });
 
+/**
+ * Spellings models use for this tool's arguments; renamed before validation
+ * (`ExecutableTool.normalizeArgs`). Taken from calls that were rejected in practice.
+ */
+export const GREP_ARG_ALIASES = { context: '-C', C: '-C', A: '-A', B: '-B' } as const;
+
 export class GrepTool implements BuiltinTool<GrepInput> {
   readonly name = 'Grep' as const;
   readonly description = GREP_DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(GrepInputSchema);
+
+  normalizeArgs(args: Record<string, unknown>): Record<string, unknown> {
+    return renameArgAliases(args, GREP_ARG_ALIASES);
+  }
   constructor(
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
