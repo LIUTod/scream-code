@@ -1,0 +1,14 @@
+---
+"scream-code": patch
+---
+
+Scheduled tasks keep the right time and survive restarts.
+
+- One-off reminders no longer depend on the model doing clock arithmetic. `CronCreate` takes `in` (`"20m"`, `"2h"`, `"1h30m"`) or `at` (`"15:00"`, `"tomorrow 09:00"`, `"2026-11-20 09:00"`) and works out the date against the real local clock. Before, the model only had a UTC timestamp from when the session was opened: "in 1 hour" could fire five hours late in New York or be refused as "next year" in Shanghai. These fire on the stated minute: the anti-herd jitter that pulls a one-shot on `:00` / `:30` up to 90 seconds earlier does not apply to them, so "at 15:00" rings at 15:00. A time that cannot be pinned exactly (the repeated hour when daylight saving ends) is refused instead of firing an hour early. Empty `cron` / `in` / `at` values are treated as not given.
+- Times the model sees are local: the system prompt shows local time with its UTC offset and zone (and says it does not advance), `CronCreate` / `CronList` report `nextFireAt` in local time and end with the current `now:` / `timeZone:`, and each fired task carries its local delivery time.
+- A one-shot whose time passes while the user is approving it is refused rather than stored for the same time next year.
+- `scream -p` refuses to create scheduled tasks (the process exits when the run ends, so they could never fire) and no longer fires a resumed session's own tasks inside the one-off run, which used to use them up there instead of in the interactive session.
+- The chat channel daemon (`scream line`) reopens chats that have scheduled tasks when it starts, so tasks keep firing after a restart without waiting for a new message. Feishu remembers which chat each session belongs to across restarts; WeChat reuses the saved context token (if WeChat has expired it, one message from the user restores delivery). Chats are found wherever their session lives, even after the configured work directory changed. A task that fell due while the daemon was down fires right after the chat is reopened and its result still reaches the chat: chat sessions now start firing only once the daemon is listening (new SDK `Session.startScheduledTasks()`). The background reopen never deletes or rebuilds a session when it fails.
+- The terminal UI does the same when it reopens a session (`--continue`, `--session`, `/sessions`, `/fork`): a task that fell due while it was closed fires after the history is back on screen, instead of possibly before the UI was listening.
+- The chat channel daemon retries the channel prompt for a chat whose first attempt failed, as its code always intended; before, that chat ran without it until the session was closed.
+- SDK: `forkSession` accepts `scheduledTasks` like `resumeSession`. `resumeSession` now forwards its options to the core instead of only the session id, so `permissionDenyRules` (`--disallowedTools` in stream-json mode) apply to resumed sessions too.

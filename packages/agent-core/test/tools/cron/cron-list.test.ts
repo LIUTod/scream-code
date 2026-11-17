@@ -86,8 +86,10 @@ describe('CronListTool', () => {
   it('renders the empty case with a zero header and no separator', async () => {
     const { tool } = makeHarness();
     const out = assertSuccess(await runTool(tool, {}));
-    expect(out).toMatchInlineSnapshot(`
+    expect(scrubCronOutput(out)).toMatchInlineSnapshot(`
       "cron_jobs: 0
+      now: <iso>
+      timeZone: <tz>
       No cron jobs scheduled."
     `);
   });
@@ -106,6 +108,8 @@ describe('CronListTool', () => {
     // false (recurring, only 0 days old). id + nextFireAt are scrubbed.
     expect(scrubCronOutput(out)).toMatchInlineSnapshot(`
       "cron_jobs: 1
+      now: <iso>
+      timeZone: <tz>
       id: <id>
       cron: */5 * * * *
       humanSchedule: every 5 minutes
@@ -132,6 +136,8 @@ describe('CronListTool', () => {
     const out = assertSuccess(await runTool(tool, {}));
     expect(scrubCronOutput(out)).toMatchInlineSnapshot(`
       "cron_jobs: 2
+      now: <iso>
+      timeZone: <tz>
       id: <id>
       cron: */5 * * * *
       humanSchedule: every 5 minutes
@@ -166,6 +172,8 @@ describe('CronListTool', () => {
     // ageDays formatted via toFixed(2) is deterministic at 8.00.
     expect(scrubCronOutput(out)).toMatchInlineSnapshot(`
       "cron_jobs: 1
+      now: <iso>
+      timeZone: <tz>
       id: <id>
       cron: */5 * * * *
       humanSchedule: every 5 minutes
@@ -208,6 +216,8 @@ describe('CronListTool', () => {
 
     expect(scrubCronOutput(out)).toMatchInlineSnapshot(`
       "cron_jobs: 1
+      now: <iso>
+      timeZone: <tz>
       id: <id>
       cron: 0 12 * * *
       humanSchedule: at 12:00 every day
@@ -232,6 +242,8 @@ describe('CronListTool', () => {
     const out = assertSuccess(await runTool(tool, {}));
     expect(scrubCronOutput(out)).toMatchInlineSnapshot(`
       "cron_jobs: 1
+      now: <iso>
+      timeZone: <tz>
       id: <id>
       cron: garbage
       humanSchedule: garbage

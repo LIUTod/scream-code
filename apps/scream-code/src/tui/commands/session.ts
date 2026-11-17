@@ -91,6 +91,8 @@ export async function handleForkCommand(host: SlashCommandHost, args: string): P
     forked = await host.harness.forkSession({
       id: session.id,
       title: `Fork: ${sourceTitle}`,
+      // Held until switchToSession has subscribed and replayed; it starts them.
+      scheduledTasks: false,
     });
   } catch (error) {
     const msg = formatErrorMessage(error);

@@ -455,4 +455,26 @@ describe('proactive send (scheduled tasks)', () => {
 
     expect(await platform.sendProactive(sessionKey, 'x')).toBe('failed');
   });
+  it('still reaches the chat after a daemon restart, from the persisted token, before any new message', async () => {
+    // Before the restart: one inbound message records the peer and token.
+    const before = setup();
+    await before.platform.dispatchInbound(msg());
+    const sessionKey = before.dispatched[0]?.sessionKey ?? '';
+
+    // After it: a fresh platform has only what is on disk. `start` loads the
+    // token cache; the long-poll is parked so nothing arrives.
+    const after = setup({}, { getUpdates: vi.fn(() => new Promise<never>(() => {})) } as Partial<MockClient>);
+    await after.platform.start();
+    try {
+      expect(await after.platform.sendProactive(sessionKey, '定时任务结果')).toBe('sent');
+      const [peer, text, token] = after.client.sendText.mock.calls[0] as [string, string, string];
+      expect(peer).toBe('user@im.wechat');
+      expect(text).toBe('定时任务结果');
+      expect(token).toBe('ctx_1');
+      // A session no known peer hashes to is still no-target.
+      expect(await after.platform.sendProactive(makeWeixinSessionKey('someone-else'), 'x')).toBe('no-target');
+    } finally {
+      await after.platform.stop();
+    }
+  });
 });

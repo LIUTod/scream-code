@@ -355,6 +355,8 @@ async function runWizard(host: SlashCommandHost, session: CronSession): Promise<
     const task = await session.createCronTask({ cron, prompt: trimmedPrompt, recurring });
     spinner.stop({ ok: true, label: t('cron.created') });
     host.showNotice(t('cron.created'), describeTask(task));
+    // Tasks live in this session's process: closing the terminal stops them.
+    host.showStatus(t('cron.session_only'), host.state.theme.colors.textDim);
   } catch (error) {
     // Validation errors are the core's own sentences (shared with the model's
     // CronCreate tool), so show them verbatim instead of rewording here.

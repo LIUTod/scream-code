@@ -13,6 +13,8 @@ export interface CLIOptions {
   outputFormat: PromptOutputFormat | undefined;
   prompt: string | undefined;
   skillsDirs: string[];
+  /** `--max-time`: wall-clock limit for a prompt-mode run, in ms. */
+  maxTimeMs?: number | undefined;
 }
 
 export interface ValidatedOptions {
@@ -38,6 +40,9 @@ export function validateOptions(opts: CLIOptions): ValidatedOptions {
   }
   if (!promptMode && opts.outputFormat !== undefined) {
     throw new OptionConflictError(t('cli.err.output_format_prompt_only'));
+  }
+  if (!promptMode && opts.maxTimeMs !== undefined) {
+    throw new OptionConflictError(t('cli.err.max_time_prompt_only'));
   }
   if (promptMode && opts.yolo) {
     throw new OptionConflictError(t('cli.err.prompt_conflict', { flag: '--yolo' }));

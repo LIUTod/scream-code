@@ -129,6 +129,11 @@ export interface AgentOptions {
   readonly permission?: PermissionManagerOptions | undefined;
   readonly log?: Logger;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
+  /**
+   * False when the host process will not outlive the current run (a one-off
+   * `scream -p`): scheduled tasks are refused and none fire. Main agent only.
+   */
+  readonly scheduledTasks?: boolean | undefined;
   readonly resolveRuntimeSystemPrompt?: ((basePrompt: string) => string) | undefined;
   /** Process supervisor tracking this agent's LSP children (session-scoped). */
   readonly lspSupervisor?: LspProcessSupervisor | undefined;
@@ -332,7 +337,10 @@ export class Agent {
     // Dependent on Groups 1-3; memoStore/knowledgeStore are async-initialized
     // (memoStoreReady/knowledgeStoreReady) and shared across sessions.
     this.background = new BackgroundManager(this);
-    this.cron = this.type === 'sub' ? null : new CronManager(this);
+    this.cron =
+      this.type === 'sub'
+        ? null
+        : new CronManager(this, { firing: options.scheduledTasks !== false });
     this.goal = new GoalMode(this);
     // Use a global memory store shared across all sessions/workDirs.
     const screamHomeDir = options.screamHomeDir;
@@ -1242,6 +1250,7 @@ export class Agent {
         return this.cronTaskInfo(manager, created.task, created.nextFireAt);
       },
       removeCronTasks: (payload) => this.requireCron().removeTasks(payload.ids),
+      startScheduledTasks: () => this.requireCron().enableFiring(),
       extractMemoriesOnExit: async () => {
         return this.extractMemoriesOnExit();
       },

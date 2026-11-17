@@ -165,7 +165,7 @@ describe('SessionManager.init — startup decision tree', () => {
       workDir: nestedDir,
     });
 
-    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-a' });
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-a', scheduledTasks: false });
     expect(result.session).toBe(resumed);
   });
 
@@ -183,7 +183,7 @@ describe('SessionManager.init — startup decision tree', () => {
       workDir: '/tmp/scream-test',
     });
 
-    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-r' });
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-r', scheduledTasks: false });
     expect(resumed.setModel).toHaveBeenCalledWith('gpt-new');
     expect(result.shouldReplay).toBe(true);
     expect(result.session).toBe(resumed);
@@ -402,7 +402,7 @@ describe('SessionManager.init — prefetched session listing (prune candidates o
       sessionsPrefetch: prefetch,
     });
 
-    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-newer' });
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-newer', scheduledTasks: false });
     expect(result.shouldReplay).toBe(true);
     expect(listSessions).toHaveBeenCalledTimes(2);
   });
@@ -501,7 +501,7 @@ describe('SessionManager.init — prefetched session listing (prune candidates o
     });
 
     expect(result.session).toBe(resumed);
-    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-live' });
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-live', scheduledTasks: false });
     // Only the sweep is degraded, and it says so.
     expect(host.showStatus).toHaveBeenCalledWith(expect.stringContaining('Session cleanup skipped'));
   });
@@ -562,6 +562,9 @@ describe('SessionManager.resumeSession — guards (cc-connect contract)', () => 
     const res = await manager.resumeSession('ses-ok');
     expect(res).toEqual({ switched: true });
     expect(host.showStatus).toHaveBeenCalledWith(t('session.resumed', { sessionId: 'ses-ok' }));
+    // Opened held, started by the switch once it listens.
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-ok', scheduledTasks: false });
+    expect(resumed.startScheduledTasks).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -586,11 +589,32 @@ describe('SessionManager.switchToSession', () => {
     expect(host.clearTranscriptAndRedraw).toHaveBeenCalledTimes(1);
     expect(sessionReplay.hydrateFromReplay).toHaveBeenCalledWith(incoming);
     expect(sessionEventHandler.startSubscription).toHaveBeenCalledTimes(1);
+    // The resumed session's held scheduled tasks start only once the history is
+    // on screen and the subscription is live — an overdue task fires at once.
+    expect(incoming.startScheduledTasks).toHaveBeenCalledTimes(1);
+    const replayed = vi.mocked(sessionReplay.hydrateFromReplay).mock.invocationCallOrder[0]!;
+    const subscribed = vi.mocked(sessionEventHandler.startSubscription).mock.invocationCallOrder[0]!;
+    const started = incoming.startScheduledTasks.mock.invocationCallOrder[0]!;
+    expect(replayed).toBeLessThan(started);
+    expect(subscribed).toBeLessThan(started);
     expect(host.refreshSessionTitle).toHaveBeenCalled();
     expect(host.showStatus).toHaveBeenCalledWith('switched ok');
     // reverse RPC handlers registered on the fresh session
     expect(incoming.setApprovalHandler).toHaveBeenCalled();
     expect(incoming.setQuestionHandler).toHaveBeenCalled();
+  });
+
+  it('still starts scheduled tasks when the history replay fails, and survives a start failure', async () => {
+    const failing = makeMockSession({
+      id: 'ses-in',
+      overrides: { startScheduledTasks: vi.fn(async () => { throw new Error('rpc gone'); }) },
+    });
+    const { manager, host, sessionReplay } = makeHost();
+    vi.mocked(sessionReplay.hydrateFromReplay).mockRejectedValueOnce(new Error('replay broke'));
+    await manager.switchToSession(failing as never, 'switched');
+    expect(failing.startScheduledTasks).toHaveBeenCalledTimes(1);
+    // A failed start is logged, never fatal: the switch completes.
+    expect(host.showStatus).toHaveBeenCalledWith('switched');
   });
 
   it('dynamic skill refresh failures are swallowed', async () => {

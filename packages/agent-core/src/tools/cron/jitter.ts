@@ -134,11 +134,16 @@ export function jitteredNextCronRunMs(
  * behaviour for them.
  */
 export function oneShotJitteredNextCronRunMs(
-  task: { id: string; createdAt?: number | undefined },
+  task: { id: string; createdAt?: number | undefined; exact?: boolean | undefined },
   idealMs: number,
   config: JitterConfig = DEFAULT_CRON_JITTER_CONFIG,
 ): number {
   if (jitterDisabledByEnv()) {
+    return idealMs;
+  }
+  // A time the user stated (`in` / `at`) is kept to the minute: the round
+  // `:00` / `:30` here was asked for, not picked out of habit.
+  if (task.exact === true) {
     return idealMs;
   }
   // `idealMs % MS_PER_MINUTE === 0` is a UTC minute-boundary check.

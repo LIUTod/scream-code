@@ -128,7 +128,10 @@ export class ScreamHarness {
     const active = this.activeSessions.get(id);
     if (active !== undefined) return active;
 
-    const summary = await this.rpc.resumeSession({ id });
+    // Forward the caller's session options, not just the id: a resumed session
+    // is rebuilt from scratch, so its deny list and scheduled-task switch must
+    // be sent again (dropping them silently re-enabled denied tools).
+    const summary = await this.rpc.resumeSession({ ...input, id });
     const session = new Session({
       id: summary.id,
       workDir: summary.workDir,
@@ -148,6 +151,7 @@ export class ScreamHarness {
       forkId: input.forkId,
       title: input.title,
       metadata: input.metadata,
+      ...(input.scheduledTasks === undefined ? {} : { scheduledTasks: input.scheduledTasks }),
     });
     const session = new Session({
       id: summary.id,

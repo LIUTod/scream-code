@@ -190,6 +190,16 @@ that pointed at it.
   the debug tools return that install command instead of a raw spawn error.
 - `@ast-grep/napi` — bundled with the CLI and backing the AST search/edit
   tools; a source checkout resolves it through the workspace install.
+- `rg` (ripgrep) — backs `Grep`. It is looked up on `PATH`, then in
+  `~/.scream-code/bin`; if neither has it, a pinned release is downloaded from
+  GitHub once. The download gives up if the server does not answer or the data
+  stops for 30 seconds, and a failed attempt is not repeated for two minutes (so
+  a blocked network costs one wait, not one per search). Where GitHub is slow or
+  unreachable, either install ripgrep with your package manager, put a static
+  `rg` in `~/.scream-code/bin`, or set `SCREAM_RG_DOWNLOAD_BASE_URL` to a mirror
+  of `https://github.com/BurntSushi/ripgrep/releases/download/15.0.0` (same file
+  names). Archives are always checked against pinned SHA-256 digests, so a mirror
+  cannot supply different bytes.
 
 ## Verifying a configuration
 

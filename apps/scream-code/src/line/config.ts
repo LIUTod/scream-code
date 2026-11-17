@@ -46,6 +46,19 @@ export function getWeixinContextTokensFile(): string {
   return join(getWeixinStateDir(), 'context_tokens.json');
 }
 
+/** Per-platform state dir for feishu. */
+export function getFeishuStateDir(): string {
+  return join(getLineDir(), 'feishu');
+}
+
+/**
+ * Session key → chat id. Session keys are hashes, so after a restart this file
+ * is the only way a scheduled task's result can find its chat again.
+ */
+export function getFeishuChatsFile(): string {
+  return join(getFeishuStateDir(), 'chats.json');
+}
+
 // ─── Schema (option names aligned with the reference) ────────────────────────
 
 /**

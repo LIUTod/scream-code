@@ -226,6 +226,13 @@ export async function runLineDaemon(): Promise<void> {
     workDir: lineConfig.workDir ?? process.cwd(),
   });
   out(`line 守护进程已启动（${handles.map((h) => h.name).join(' + ')}）。按 Ctrl+C 退出。`);
+  // Chat sessions are opened by messages, so after a restart their scheduled
+  // tasks would sleep until the user wrote again. Open the ones that have tasks
+  // now — in the background, so a slow session start never delays the chats.
+  const prefixes = handles.map((handle) => `line-${handle.name}-`);
+  void driver.resumeScheduledSessions(prefixes).then((opened) => {
+    if (opened.length > 0) out(`已恢复 ${String(opened.length)} 个带定时任务的会话，到点会照常推送。`);
+  });
   // Platform loops keep the event loop alive; park until shutdown.
   await new Promise<void>(() => {});
 }
@@ -276,6 +283,9 @@ async function startFeishu(cfg: FeishuPlatformConfig, driver: LineSessionDriver)
     }
   });
 
+  // Before any event: a scheduled task resumed at boot may fire right away
+  // and must already know which chat it reports to.
+  await platform.loadChats();
   await client.connect(async (event) => {
     try {
       await platform.handleEvent(event);

@@ -66,6 +66,15 @@ function makeDriver(): { driver: LineSessionDriver; internals: DriverInternals }
   } as unknown as LineSessionDriverOptions);
   const internals = driver as unknown as DriverInternals;
   internals.harness = {};
+  // Sessions are injected as if opened normally, channel prompt included —
+  // otherwise every use would first retry the prompt, which is not what a
+  // live chat session does and is not what these tests are about.
+  const prompted = (driver as unknown as { promptedSessions: WeakSet<object> }).promptedSessions;
+  const set = internals.sessions.set.bind(internals.sessions);
+  internals.sessions.set = (key, value) => {
+    prompted.add(value as object);
+    return set(key, value);
+  };
   return { driver, internals };
 }
 

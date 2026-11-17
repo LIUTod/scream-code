@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { FeishuClient, FeishuEventMessage } from '#/line/feishu/client';
 import { normalizeReceiveEvent } from '#/line/feishu/client';
@@ -572,6 +572,28 @@ describe('quoted replies with media', () => {
 });
 
 describe('proactive send (scheduled tasks)', () => {
+  // The chat map is one file per data dir, and every platform built by the
+  // tests above writes its own snapshot of it asynchronously. A restart test
+  // gets its own dir so a straggling write from another instance cannot
+  // overwrite the entry it checks (one daemon per machine, so production has
+  // a single writer).
+  let homeBefore: string | undefined;
+  async function useFreshHome(): Promise<void> {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    homeBefore = process.env['SCREAM_CODE_HOME'];
+    process.env['SCREAM_CODE_HOME'] = mkdtempSync(join(tmpdir(), 'line-feishu-chats-'));
+  }
+  afterEach(async () => {
+    if (homeBefore === undefined) return;
+    const { rmSync } = await import('node:fs');
+    const fresh = process.env['SCREAM_CODE_HOME'];
+    process.env['SCREAM_CODE_HOME'] = homeBefore;
+    homeBefore = undefined;
+    if (fresh !== undefined) rmSync(fresh, { recursive: true, force: true });
+  });
+
   async function registered(): Promise<Harness & { sessionKey: string }> {
     const h = setup();
     await h.platform.handleEvent(msg());
@@ -608,5 +630,33 @@ describe('proactive send (scheduled tasks)', () => {
     h.client.sendToChat.mockRejectedValueOnce(new Error('chat not found'));
 
     expect(await h.platform.sendProactive(h.sessionKey, 'x')).toBe('failed');
+  });
+  it('still reaches the chat after a daemon restart, before any new message', async () => {
+    await useFreshHome();
+    const before = await registered();
+    await before.platform.flushChats();
+
+    // A fresh platform knows only what is on disk.
+    const after = setup();
+    expect(await after.platform.sendProactive(before.sessionKey, 'x')).toBe('no-target');
+    await after.platform.loadChats();
+    expect(await after.platform.sendProactive(before.sessionKey, '定时任务结果')).toBe('sent');
+    const [chatId, , body] = after.client.sendToChat.mock.calls[0] as [string, string, string];
+    expect(chatId).toBe('oc_chat');
+    expect(body).toContain('定时任务结果');
+  });
+
+  it('keeps the chat file in step with the latest chat and tolerates a corrupt file', async () => {
+    await useFreshHome();
+    const { mkdirSync, readFileSync, writeFileSync } = await import('node:fs');
+    const { getFeishuChatsFile, getFeishuStateDir } = await import('#/line/config');
+    mkdirSync(getFeishuStateDir(), { recursive: true });
+    writeFileSync(getFeishuChatsFile(), '{not json');
+    const h = setup();
+    await h.platform.loadChats(); // corrupt: ignored, no throw
+    await h.platform.handleEvent(msg());
+    await h.platform.flushChats();
+    const sessionKey = h.dispatched[0]?.sessionKey ?? '';
+    expect(JSON.parse(readFileSync(getFeishuChatsFile(), 'utf-8'))).toEqual({ [sessionKey]: 'oc_chat' });
   });
 });

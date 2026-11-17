@@ -47,6 +47,29 @@ jobs:
       - run: pnpm run build:packages
       - run: pnpm run test:coverage
 
+  # The same build, smoke test and suite on macOS, which no other job covers.
+  # Reported but not blocking yet: this job has not run on a macOS runner
+  # before, so turn `continue-on-error` off once it has been seen green.
+  test-macos:
+    runs-on: macos-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Smoke test CLI bundle
+        run: pnpm -C apps/scream-code run smoke
+      - run: pnpm run test
+
   lint:
     runs-on: ubuntu-latest
 

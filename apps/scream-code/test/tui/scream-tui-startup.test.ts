@@ -212,10 +212,30 @@ describe("ScreamTUI startup", () => {
 
     await expect(driver.init()).resolves.toBe(true);
 
-    expect(harness.resumeSession).toHaveBeenCalledWith({ id: "ses-latest" });
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: "ses-latest", scheduledTasks: false });
     expect(harness.createSession).not.toHaveBeenCalled();
     expect(driver.state.startupState).toBe("ready");
     expect(driver.state.appState.sessionId).toBe("ses-latest");
+  });
+
+  it("starts the resumed session's scheduled tasks only after the history replay", async () => {
+    const startScheduledTasks = vi.fn(async () => true);
+    const session = makeSession({ id: "ses-latest", startScheduledTasks, getResumeState: () => undefined });
+    const harness = makeHarness(session, {
+      listSessions: vi.fn(async () => [{ id: "ses-latest" }]),
+    });
+    const driver = makeDriver(harness, makeStartupInput({ continue: true })) as unknown as StartupDriver & {
+      finishStartup(shouldReplay: boolean): Promise<void>;
+      sessionReplay: { hydrateFromReplay: (s: unknown) => Promise<boolean> };
+      refreshSkillCommands: () => Promise<void>;
+    };
+    await expect(driver.init()).resolves.toBe(true);
+    expect(startScheduledTasks).not.toHaveBeenCalled(); // held through init
+    const hydrate = vi.spyOn(driver.sessionReplay, "hydrateFromReplay").mockResolvedValue(true);
+    vi.spyOn(driver, "refreshSkillCommands").mockResolvedValue();
+    await driver.finishStartup(true);
+    expect(startScheduledTasks).toHaveBeenCalledTimes(1);
+    expect(hydrate.mock.invocationCallOrder[0]!).toBeLessThan(startScheduledTasks.mock.invocationCallOrder[0]!);
   });
 
   it("forwards the prefetched session listing into SessionManager.init", async () => {

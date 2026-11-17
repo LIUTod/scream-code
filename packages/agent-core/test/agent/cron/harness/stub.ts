@@ -126,5 +126,8 @@ export function createClocks(initial: number = WALL_ANCHOR): ClockHarness {
 export function scrubCronOutput(out: string): string {
   return out
     .replaceAll(/\b[0-9a-f]{8}\b/g, '<id>')
-    .replaceAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<iso>');
+    // UTC (`…000Z`) or local with offset (`…+08:00`): both depend on the host.
+    .replaceAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})/g, '<iso>')
+    // The host's zone name and offset.
+    .replaceAll(/^timeZone: .+$/gm, 'timeZone: <tz>');
 }

@@ -99,6 +99,12 @@ describe('CronManager', () => {
       // Exactly one envelope — guards against an accidental double-wrap
       // (e.g. handleFire calling renderCronFireXml on already-rendered
       expect((text.match(/<cron-fire /g) ?? []).length).toBe(1);
+      // The envelope carries the delivery time from the manager's own clock,
+      // in local form: the model's other clock is the session-open stamp.
+      const firedAt = / firedAt="([^"]+)"/.exec(text)?.[1];
+      expect(firedAt).toBeDefined();
+      expect(Date.parse(firedAt!)).toBe(Math.floor(harness.now() / 1000) * 1000);
+      expect(firedAt).toMatch(/[+-]\d{2}:\d{2}$/);
     });
   });
 

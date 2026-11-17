@@ -5,7 +5,7 @@
  *
  * Tasks live in `SessionCronStore` and are mirrored to
  * `<sessionDir>/cron/<id>.json` via `CronManager.addTask`, so a
- * `scream resume` of the same session reloads them and the scheduler
+ * resuming the same session reloads them and the scheduler
  * picks up where it left off (fires that fell during downtime are
  * collapsed into a single delivery with `coalescedCount`). Tasks do
  * NOT carry over into a brand-new session.
@@ -30,8 +30,16 @@ import type { CronManager } from '../../agent/cron';
 import type { ToolExecution } from '../../loop/types';
 import { toInputJsonSchema } from '../support/input-schema';
 import { literalRulePattern } from '../support/rule-match';
+import { describeLocalTimeZone, formatLocalIso } from '../../utils/local-time';
 import { cronToHuman } from './cron-expr';
-import { MAX_PROMPT_BYTES, scheduleCronTask, validateCronSchedule } from './schedule';
+import {
+  MAX_PROMPT_BYTES,
+  scheduleCronTask,
+  validateCronSchedule,
+  type CronScheduleAccepted,
+  type CronScheduleInput,
+} from './schedule';
+import { resolveOneShotWhen } from './when';
 import CRON_CREATE_DESCRIPTION from './cron-create.md';
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -48,8 +56,21 @@ export { MAX_CRON_JOBS_PER_SESSION } from './schedule';
 export const CronCreateInputSchema = z.object({
   cron: z
     .string()
+    .optional()
     .describe(
-      '5-field cron expression in local time: "M H DoM Mon DoW" (e.g. "*/5 * * * *" = every 5 minutes, "30 14 28 2 *" = Feb 28, 2:30pm local, once).',
+      '5-field cron expression in local time: "M H DoM Mon DoW" (e.g. "*/5 * * * *" = every 5 minutes, "0 9 * * 1-5" = weekdays 9am local). Give exactly one of cron / in / at; for a one-off reminder prefer in or at.',
+    ),
+  in: z
+    .string()
+    .optional()
+    .describe(
+      'One-shot after a delay, counted from now by the tool (no clock arithmetic needed): "90s", "20m", "2h", "1h30m", "2d". Rounded up to the next minute. Use for "in 20 minutes" / "in 2 hours".',
+    ),
+  at: z
+    .string()
+    .optional()
+    .describe(
+      'One-shot at a local wall-clock time, 24-hour: "14:30" (the next 14:30 — today if still ahead, else tomorrow), "today 14:30", "tomorrow 09:00", or "2026-11-20 09:00". Use for "at 3pm" / "tomorrow at 9".',
     ),
   prompt: z
     .string()
@@ -61,7 +82,7 @@ export const CronCreateInputSchema = z.object({
     .optional()
     .default(true)
     .describe(
-      'true (default) = fire on every cron match until deleted or auto-expired after 7 days; false = fire once at the next match, then auto-delete (use for "remind me at X" with pinned minute/hour/dom/month).',
+      'true (default with cron) = fire on every cron match until deleted or auto-expired after 7 days; false = fire once at the next match, then auto-delete. "in" and "at" are always one-shot; leave this out or set false with them.',
     ),
   silent: z
     .boolean()
@@ -79,6 +100,13 @@ export const CronCreateInputSchema = z.object({
 
 export type CronCreateInput = z.Infer<typeof CronCreateInputSchema>;
 
+/**
+ * The arguments as they really arrive. `z.Infer` reflects `.default(true)` and
+ * calls `recurring` always present, but the args validator does not apply
+ * defaults, so it can be absent — and absent must mean "repeat".
+ */
+type CronCreateArgs = Omit<CronCreateInput, 'recurring'> & { readonly recurring?: boolean | undefined };
+
 // ── Output shape (internal) ─────────────────────────────────────────
 
 interface CronCreateOutput {
@@ -89,6 +117,29 @@ interface CronCreateOutput {
   readonly nextFireAt: number | null;
   readonly silent: boolean;
   readonly mute: boolean;
+  readonly nowMs: number;
+}
+
+/**
+ * The current local time and zone, appended to every result and refusal: the
+ * model's only other clock is the stamp taken when the session was opened, and
+ * it needs today's date and the zone to write or fix a cron.
+ */
+function clockLines(nowMs: number): string {
+  return `now: ${formatLocalIso(nowMs)}\ntimeZone: ${describeLocalTimeZone(nowMs)}`;
+}
+
+function refusal(error: string, nowMs: number): { isError: true; output: string } {
+  return { isError: true, output: `${error}\n${clockLines(nowMs)}` };
+}
+
+function blankToUndefined(value: string | undefined): string | undefined {
+  return value === undefined || value.trim() === '' ? undefined : value;
+}
+
+/** `2026-11-18 16:05` — the local minute a one-shot is pinned to, for the approval line. */
+function shortLocal(ms: number): string {
+  return formatLocalIso(ms).slice(0, 16).replace('T', ' ');
 }
 
 // ── Implementation ───────────────────────────────────────────────────
@@ -102,7 +153,32 @@ export class CronCreateTool implements BuiltinTool<CronCreateInput> {
 
   constructor(private readonly manager: CronManager) {}
 
-  resolveExecution(args: CronCreateInput): ToolExecution {
+  resolveExecution(received: CronCreateInput): ToolExecution {
+    // Some models fill every optional string with "" instead of leaving it
+    // out; an empty `cron` / `in` / `at` means "not given", or a plain cron
+    // request would be refused for "giving" three schedules.
+    const args: CronCreateArgs = {
+      ...received,
+      cron: blankToUndefined(received.cron),
+      in: blankToUndefined(received.in),
+      at: blankToUndefined(received.at),
+    };
+    const nowMs = this.manager.clocks.wallNow();
+    const given = [args.cron, args.in, args.at].filter((value) => value !== undefined).length;
+    if (given !== 1) {
+      return refusal(
+        'Give exactly one of "cron" (a schedule), "in" (a delay such as "2h") or "at" (a local time such as "14:30").',
+        nowMs,
+      );
+    }
+    const when = args.cron === undefined ? { in: args.in, at: args.at } : undefined;
+    if (when !== undefined && args.recurring === true) {
+      return refusal(
+        '"in" and "at" schedule a one-shot reminder; for a repeating task give "cron" with recurring: true.',
+        nowMs,
+      );
+    }
+
     // The schema declares `recurring` with `.default(true)`, but the args
     // validator is AJV without `useDefaults`, so an omitted field really does
     // arrive as `undefined`. Resolve it once, here at the boundary, so the
@@ -115,56 +191,85 @@ export class CronCreateTool implements BuiltinTool<CronCreateInput> {
     // guard and printed `recurring: undefined` to the model — while storing a
     // task that repeats. A repeating request could therefore be refused as a
     // mis-scheduled one-shot.
-    const input = { ...args, recurring: args.recurring !== false };
+    //
+    // `in` / `at` are turned into a pinned one-shot cron here, by code, against
+    // the real local clock — so the model never does date or timezone math.
+    let first: ReturnType<typeof resolveOneShotWhen> | undefined;
+    let input: CronScheduleInput & { readonly recurring: boolean };
+    if (when === undefined) {
+      input = { ...args, cron: args.cron!, recurring: args.recurring !== false };
+    } else {
+      first = resolveOneShotWhen(when, nowMs);
+      if (!first.ok) return refusal(first.error, nowMs);
+      input = { ...args, cron: first.cron, recurring: false, exact: true };
+    }
     // Killswitch, parse, 5-year window, session cap, byte budget and the
     // one-shot rollover guard all run in `validateCronSchedule`; the same
     // function backs the `/cron` command, so neither path can drift.
     const accepted = validateCronSchedule(this.manager, input);
-    if (!accepted.ok) {
-      return {
-        isError: true,
-        output: accepted.error,
-      };
-    }
+    if (!accepted.ok) return refusal(accepted.error, nowMs);
+    const firstFireAt = first?.ok === true ? first.fireAt : undefined;
 
     return {
-      description: accepted.recurring
-        ? `Scheduling cron ${accepted.normalizedCron}`
-        : `Scheduling one-shot ${accepted.normalizedCron}`,
+      description:
+        firstFireAt !== undefined
+          ? `Scheduling one-shot for ${shortLocal(firstFireAt)}`
+          : accepted.recurring
+            ? `Scheduling cron ${accepted.normalizedCron}`
+            : `Scheduling one-shot ${accepted.normalizedCron}`,
       // Scope `session` approval to this exact payload. Without the
       // payload in the rule, a single approved CronCreate would
       // authorize any future scheduled prompt for the rest of the
       // session — including ones the user never saw before approving.
       // Matches the Bash / Write / Edit convention of including the
-      // command / path in the literal rule pattern.
+      // command / path in the literal rule pattern. An `in` / `at` request
+      // is approved as the user asked it, not as the cron it resolved to.
       approvalRule: literalRulePattern(
         this.name,
-        JSON.stringify({
-          cron: accepted.normalizedCron,
-          prompt: input.prompt,
-          recurring: accepted.recurring,
-        }),
+        JSON.stringify(
+          when === undefined
+            ? { cron: accepted.normalizedCron, prompt: input.prompt, recurring: accepted.recurring }
+            : { ...(args.in === undefined ? { at: args.at } : { in: args.in }), prompt: input.prompt, recurring: false },
+        ),
       ),
       execute: async () => {
+        // A manual approval can take minutes. `in` counts from when the task is
+        // actually created, and an `at` time that went by during the wait is
+        // refused instead of quietly moving to tomorrow.
+        let finalAccepted: CronScheduleAccepted = accepted;
+        let finalInput = input;
+        if (when !== undefined) {
+          const execNowMs = this.manager.clocks.wallNow();
+          const again = resolveOneShotWhen(when, execNowMs);
+          if (!again.ok) return refusal(again.error, execNowMs);
+          if (args.at !== undefined && again.fireAt !== firstFireAt) {
+            return refusal(
+              `"at" ${JSON.stringify(args.at)} went by while waiting for approval; ask the user and create it again.`,
+              execNowMs,
+            );
+          }
+          if (again.cron !== input.cron) {
+            finalInput = { ...input, cron: again.cron };
+            const revalidated = validateCronSchedule(this.manager, finalInput);
+            if (!revalidated.ok) return refusal(revalidated.error, execNowMs);
+            finalAccepted = revalidated;
+          }
+        }
         // Cap re-check against the live store, insert, and the post-jitter
         // next-fire anchor all live in `scheduleCronTask`; it reads the clock
         // itself so an approval delay cannot backdate the schedule.
-        const created = scheduleCronTask(this.manager, accepted, input);
-        if (!created.ok) {
-          return {
-            isError: true,
-            output: created.error,
-          };
-        }
+        const created = scheduleCronTask(this.manager, finalAccepted, finalInput);
+        if (!created.ok) return refusal(created.error, this.manager.clocks.wallNow());
 
         const output: CronCreateOutput = {
           id: created.task.id,
           cron: created.normalizedCron,
-          humanSchedule: cronToHuman(accepted.parsed),
+          humanSchedule: cronToHuman(finalAccepted.parsed),
           recurring: created.recurring,
           nextFireAt: created.nextFireAt,
           silent: created.task.silent === true,
           mute: created.task.mute === true,
+          nowMs: this.manager.clocks.wallNow(),
         };
 
         return {
@@ -185,9 +290,9 @@ function formatOutput(o: CronCreateOutput): string {
     `recurring: ${String(o.recurring)}`,
     ...(o.silent ? ['silent: true'] : []),
     ...(o.mute ? ['mute: true'] : []),
-    `nextFireAt: ${
-      o.nextFireAt === null ? 'null' : new Date(o.nextFireAt).toISOString()
-    }`,
+    // Local, with the offset: the same clock the cron fields and the user use.
+    `nextFireAt: ${o.nextFireAt === null ? 'null' : formatLocalIso(o.nextFireAt)}`,
+    clockLines(o.nowMs),
   ];
   return lines.join('\n');
 }

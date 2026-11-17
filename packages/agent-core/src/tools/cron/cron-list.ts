@@ -14,7 +14,8 @@
  *   - `humanSchedule` — best-effort plain-English rendering via
  *                       `cronToHuman`; falls back to the raw `cron`
  *                       string if the expression can't be parsed.
- *   - `nextFireAt`    — post-jitter ISO timestamp, or the literal
+ *   - `nextFireAt`    — post-jitter local ISO timestamp with its UTC
+ *                       offset (`2026-11-18T09:03:00+08:00`), or the literal
  *                       string `null` when there is no fire in the
  *                       5-year window (or the expression is malformed).
  *                       This is the same jittered value `CronCreate`
@@ -47,6 +48,7 @@ import { z } from 'zod';
 import type { BuiltinTool } from '../../agent/tool';
 import type { CronManager } from '../../agent/cron';
 import type { ToolExecution } from '../../loop/types';
+import { describeLocalTimeZone, formatLocalIso } from '../../utils/local-time';
 import { toInputJsonSchema } from '../support/input-schema';
 import {
   cronToHuman,
@@ -108,7 +110,9 @@ export class CronListTool implements BuiltinTool<CronListInput> {
         const tasks = this.manager.store.list();
         const nowMs = this.manager.clocks.wallNow();
         const records = tasks.map((t) => this.renderRecord(t, nowMs));
-        const header = `cron_jobs: ${String(tasks.length)}`;
+        // The local clock rides along with the list: the model's only other
+        // clock is the stamp from when the session was opened.
+        const header = `cron_jobs: ${String(tasks.length)}\nnow: ${formatLocalIso(nowMs)}\ntimeZone: ${describeLocalTimeZone(nowMs)}`;
         if (records.length === 0) {
           return {
             output: `${header}\nNo cron jobs scheduled.`,
@@ -147,7 +151,7 @@ export class CronListTool implements BuiltinTool<CronListInput> {
       // slot in the current period.
       const nextFireMs = this.manager.getNextFireForTask(task.id);
       if (nextFireMs !== null) {
-        nextFireAtIso = new Date(nextFireMs).toISOString();
+        nextFireAtIso = formatLocalIso(nextFireMs);
       }
     } catch {
       // Malformed cron string — leave humanSchedule as the raw

@@ -515,7 +515,7 @@ The operating environment is not in a sandbox. Any actions you do will immediate
 
 ## Date and Time
 
-The current date and time in ISO format is `{{ SCREAM_NOW }}`. This is only a reference for you when searching the web, or checking file modification time, etc. If you need the exact time, use Bash tool with proper command.
+The local date and time when this session was opened (started or resumed) was `{{ SCREAM_NOW }}`. This is only a reference for you when searching the web, or checking file modification time, etc.; it does not advance during the session. If you need the exact time, use Bash tool with proper command.
 
 Your training data has a knowledge cutoff date. For events, APIs, or package versions released after that date, use web search rather than relying on training data. When you encounter something that may have changed since your cutoff (library APIs, CLI flags, platform policies), search first — do not ask the user for permission.
 

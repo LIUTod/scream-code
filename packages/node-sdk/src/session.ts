@@ -680,6 +680,17 @@ export class Session {
     return this.rpc.removeCronTasks({ sessionId: this.id, ids });
   }
 
+  /**
+   * Start firing scheduled tasks in a session opened with `scheduledTasks:
+   * false`. Open that way, subscribe with {@link onEvent}, then call this, so
+   * a task that fell due while the session was closed cannot fire before the
+   * host is listening. Returns true when firing was off. Idempotent.
+   */
+  async startScheduledTasks(): Promise<boolean> {
+    this.ensureOpen();
+    return this.rpc.startScheduledTasks({ sessionId: this.id });
+  }
+
   async setGoalBudget(value: number, unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours'): Promise<GoalSnapshotData> {
     this.ensureOpen();
     return this.rpc.setGoalBudget({ sessionId: this.id, value, unit });

@@ -264,6 +264,7 @@ export class SDKRpcClient {
       ...(input.permissionDenyRules === undefined
         ? {}
         : { permissionDenyRules: input.permissionDenyRules }),
+      ...(input.scheduledTasks === undefined ? {} : { scheduledTasks: input.scheduledTasks }),
     });
   }
 
@@ -274,6 +275,7 @@ export class SDKRpcClient {
       id: input.forkId,
       title: input.title,
       metadata: input.metadata,
+      ...(input.scheduledTasks === undefined ? {} : { scheduledTasks: input.scheduledTasks }),
     });
   }
 
@@ -477,6 +479,14 @@ export class SDKRpcClient {
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
       ids: input.ids,
+    });
+  }
+
+  async startScheduledTasks(input: SessionIdRpcInput): Promise<boolean> {
+    const rpc = await this.getRpc();
+    return rpc.startScheduledTasks({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
     });
   }
 

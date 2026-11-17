@@ -42,6 +42,7 @@ export function isValidCronTask(obj: unknown): obj is CronTask {
   if (o['recurring'] !== undefined && typeof o['recurring'] !== 'boolean') return false;
   if (o['silent'] !== undefined && typeof o['silent'] !== 'boolean') return false;
   if (o['mute'] !== undefined && typeof o['mute'] !== 'boolean') return false;
+  if (o['exact'] !== undefined && typeof o['exact'] !== 'boolean') return false;
   if (
     o['lastError'] !== undefined &&
     o['lastError'] !== null &&

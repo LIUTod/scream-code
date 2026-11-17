@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 
 import { resolveScreamHome } from '../config/path';
+import { describeLocalTimeZone, formatLocalIso } from '../utils/local-time';
 import { renderPrompt } from '../utils/render-prompt';
 import { buildSelfMap } from './self-map';
 import type {
@@ -180,10 +181,15 @@ function buildTemplateVars(
     typeof context.skills === 'string'
       ? context.skills
       : (context.skills?.getModelSkillListing() ?? '');
+  // Local time with its offset and zone, not UTC: the model schedules cron
+  // tasks (local fields) and reads "today" off this value, so a bare `…Z`
+  // string would hand it the wrong date and hour anywhere but UTC+0. A caller
+  // that passes a string (tests pinning the prompt) gets it verbatim.
+  const nowDate = context.now instanceof Date ? context.now : new Date();
   const now =
-    context.now instanceof Date
-      ? context.now.toISOString()
-      : (context.now ?? new Date().toISOString());
+    typeof context.now === 'string'
+      ? context.now
+      : `${formatLocalIso(nowDate.getTime())}, time zone ${describeLocalTimeZone(nowDate.getTime())}`;
 
   return {
     ...promptVars,

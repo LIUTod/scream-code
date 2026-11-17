@@ -25,6 +25,8 @@ import type { CronManager } from '../../agent/cron';
 
 import { computeNextCronRun, hasFireWithinYears, parseCronExpression, type ParsedCronExpression } from './cron-expr';
 import { jitteredNextCronRunMs, oneShotJitteredNextCronRunMs } from './jitter';
+import { formatLocalIso } from '../../utils/local-time';
+import { ONE_SHOT_MAX_FUTURE_MS } from './when';
 import type { CronTask } from './types';
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -56,7 +58,16 @@ export const MAX_PROMPT_BYTES = 8 * 1024;
  * better served by a natural-language date in the prompt body than by
  * stretching the cron field semantics.
  */
-const ONE_SHOT_MAX_FUTURE_MS = 350 * 24 * 60 * 60 * 1000;
+// `ONE_SHOT_MAX_FUTURE_MS` (350 days) lives in `./when`, which pins the same
+// bound for `in` / `at` one-shots.
+
+/**
+ * Refusal for a session whose host process ends with the current run (for
+ * example `scream -p`): a task created there could never fire, and saying so
+ * beats a confirmation the user would rely on.
+ */
+export const CRON_UNAVAILABLE_MESSAGE =
+  'Scheduled tasks are off in this session: it runs as a one-off command (such as `scream -p`) whose process exits when this run ends, so a task created now would never fire. Tell the user to create it from an interactive session (run `scream`), or to use the operating system\'s own scheduler to run the command at that time.';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -68,6 +79,8 @@ export type CronScheduleInput = {
   readonly silent?: boolean | undefined;
   /** Suppress notice and result alike — a maintenance run. */
   readonly mute?: boolean | undefined;
+  /** A one-shot at a time the user stated: no anti-herd pull-forward (see `CronTask.exact`). */
+  readonly exact?: boolean | undefined;
 };
 
 export type CronScheduleFailure = { readonly ok: false; readonly error: string };
@@ -114,6 +127,10 @@ export function validateCronSchedule(
       ok: false,
       error: 'Cron scheduling is disabled (SCREAM_DISABLE_CRON=1).',
     };
+  }
+  // 1b. The host said this process will not outlive the run.
+  if (!manager.firing) {
+    return { ok: false, error: CRON_UNAVAILABLE_MESSAGE };
   }
 
   // 2. Normalize whitespace BEFORE parsing so `parsed.raw` (which
@@ -199,23 +216,30 @@ export function validateCronSchedule(
   //    year out — for a 5-field cron this can only mean the pinned date
   //    already passed this year. Recurring tasks are unaffected.
   if (!recurring) {
-    const firstFire = computeNextCronRun(parsed, nowAtPrepare);
-    if (
-      firstFire !== null &&
-      firstFire - nowAtPrepare > ONE_SHOT_MAX_FUTURE_MS
-    ) {
-      return {
-        ok: false,
-        error: `One-shot cron ${JSON.stringify(
-          normalizedCron,
-        )} would not fire until ${new Date(
-          firstFire,
-        ).toISOString()} (more than a year out). If you meant "today" or a near date, the pinned day/month has already passed this year — pick a future date or use wildcards.`,
-      };
-    }
+    const rolled = oneShotRolloverError(normalizedCron, parsed, nowAtPrepare);
+    if (rolled !== undefined) return { ok: false, error: rolled };
   }
 
   return { ok: true, normalizedCron, recurring, parsed };
+}
+
+/**
+ * The "pinned date already passed, so it rolled to next year" check for a
+ * one-shot, at `nowMs`. Times are local, like the cron fields, so the model can
+ * compare them with what the user said.
+ */
+function oneShotRolloverError(
+  normalizedCron: string,
+  parsed: ParsedCronExpression,
+  nowMs: number,
+): string | undefined {
+  const firstFire = computeNextCronRun(parsed, nowMs);
+  if (firstFire === null || firstFire - nowMs <= ONE_SHOT_MAX_FUTURE_MS) return undefined;
+  return `One-shot cron ${JSON.stringify(normalizedCron)} would not fire until ${formatLocalIso(
+    firstFire,
+  )} (more than a year out; now ${formatLocalIso(
+    nowMs,
+  )}). If you meant "today" or a near date, the pinned day/month has already passed this year — pick a future date, or use "in" / "at" instead of a cron.`;
 }
 
 // ── Insert step ──────────────────────────────────────────────────────
@@ -248,6 +272,14 @@ export function scheduleCronTask(
     };
   }
 
+  // Re-check the one-shot rollover too: a manual approval that lands after the
+  // pinned minute would otherwise store a reminder for the same time next year,
+  // which the prepare-time check passed only because it ran before that minute.
+  if (!accepted.recurring) {
+    const rolled = oneShotRolloverError(accepted.normalizedCron, accepted.parsed, nowMs);
+    if (rolled !== undefined) return { ok: false, error: rolled };
+  }
+
   // `recurring` is stored as supplied so `undefined` keeps meaning "repeat by
   // default" everywhere downstream (`CronTask.recurring` is optional).
   const task = manager.addTask({
@@ -256,6 +288,7 @@ export function scheduleCronTask(
     recurring: input.recurring,
     ...(input.silent === true ? { silent: true } : {}),
     ...(input.mute === true ? { mute: true } : {}),
+    ...(input.exact === true && !accepted.recurring ? { exact: true } : {}),
   });
 
   // Post-jitter next-fire for the response. `computeNextCronRun` returns

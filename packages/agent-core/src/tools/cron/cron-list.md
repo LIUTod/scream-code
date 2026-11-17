@@ -7,6 +7,11 @@ work: it returns a stable id, the original cron expression, a human
 rendering, the next post-jitter fire time, the recurring flag, the
 task's age in days, and a stale indicator.
 
+The output opens with `cron_jobs: N`, then `now:` (the current local time
+with its UTC offset) and `timeZone:` (for example `Asia/Shanghai (UTC+08:00)`)
+— the live clock, unlike the time in the system prompt, which is from when the
+session was opened. Use it when you need today's date or the current hour.
+
 Each record carries:
 
 - `id` — the 8-hex task id. Pass this to `CronDelete` to remove the
@@ -19,7 +24,8 @@ Each record carries:
   `…(truncated)` if longer. Use this to recall what a task is for
   after a context compaction, and as the source for the
   `CronCreate` refresh ritual.
-- `nextFireAt` — ISO timestamp of the next fire **after jitter has
+- `nextFireAt` — local ISO timestamp with its UTC offset (for example
+  `2026-11-18T09:03:00+08:00`) of the next fire **after jitter has
   been applied**. The actual fire may land slightly before or after a
   round `:00` / `:30` minute mark due to herd-avoidance jitter; this
   is the value the scheduler will compare against, so it reflects
@@ -43,8 +49,9 @@ Guidelines:
 
 - This tool is read-only and never mutates state, so it is always
   safe to call (including in plan mode).
-- The empty case returns `cron_jobs: 0\nNo cron jobs scheduled.`. Cron
-  tasks survive a `scream resume` of the same session but do not bleed
+- The empty case returns `cron_jobs: 0`, the `now:` / `timeZone:` lines,
+  then `No cron jobs scheduled.`. Cron
+  tasks survive resuming the same session (`scream -C`, `scream -r <session id>`) but do not bleed
   into new sessions.
 - After a context compaction, or whenever you are unsure which cron
   jobs are live, call this tool to re-enumerate them rather than

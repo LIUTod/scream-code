@@ -20,7 +20,7 @@ import { createProgram } from './cli/commands';
 import type { CLIOptions } from './cli/options';
 import { OptionConflictError, validateOptions } from './cli/options';
 import { runLineCommand } from './cli/line-command';
-import { runPrompt } from './cli/run-prompt';
+import { PROMPT_TIMEOUT_EXIT_CODE, PromptTimeoutError, runPrompt } from './cli/run-prompt';
 import { runShell } from './cli/run-shell';
 import { runStreamJson } from './cli/run-stream-json';
 import { formatStartupError } from './cli/startup-error';
@@ -69,6 +69,11 @@ export function main(): void {
     version,
     (opts) => {
       void handleMainCommand(opts, version).catch(async (error: unknown) => {
+        // A run stopped by --max-time is not a crash: say so plainly, skip the log pointer.
+        if (error instanceof PromptTimeoutError) {
+          process.stderr.write(`${error.message}\n`);
+          process.exit(PROMPT_TIMEOUT_EXIT_CODE);
+        }
         const operation = opts.prompt !== undefined ? t('cli.op.run_prompt') : t('cli.op.start_shell');
         await logStartupFailure(operation, error);
         process.stderr.write(

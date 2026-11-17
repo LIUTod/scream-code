@@ -12,7 +12,7 @@
  *     or auto-expired"; false means "fire once then auto-delete".
  *   - `lastFiredAt` — wall-clock epoch ms of the last ideal occurrence
  *     whose jittered delivery has actually completed. Persisted so a
- *     `scream resume` does not replay already-delivered recurring fires:
+ *     a session resume does not replay already-delivered recurring fires:
  *     without it, the scheduler would fall back to `createdAt` and
  *     coalesce yesterday's already-fired 09:00 into today's tick. A
  *     value greater than the current wall clock is treated as corrupt
@@ -22,6 +22,10 @@
  *     itself every five minutes.
  *   - `mute` — suppress *everything*: notice and result. For maintenance
  *     runs whose value is the side effect, not the transcript.
+ *   - `exact` — a one-shot pinned to a time the user stated (`CronCreate`'s
+ *     `in` / `at`): it fires on that minute, without the anti-herd pull-forward
+ *     a one-shot on `:00` / `:30` otherwise gets — "remind me at 3pm" must not
+ *     ring at 14:58:31.
  *   - `lastError` — outcome of the most recent delivery, so a list command can
  *     answer "did it work?" without a log grep. Cleared by the next clean run;
  *     `lastFiredAt` already answers "when did it last run?".
@@ -35,5 +39,6 @@ export interface CronTask {
   readonly lastFiredAt?: number;
   readonly silent?: boolean;
   readonly mute?: boolean;
+  readonly exact?: boolean;
   readonly lastError?: string | null;
 }

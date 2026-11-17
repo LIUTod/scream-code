@@ -259,6 +259,7 @@ export interface MockSession {
   setModel: ReturnType<typeof vi.fn>;
   setPermission: ReturnType<typeof vi.fn>;
   setWolfpackMode: ReturnType<typeof vi.fn>;
+  startScheduledTasks: ReturnType<typeof vi.fn>;
   [key: string]: unknown;
 }
 
@@ -279,6 +280,7 @@ export function makeMockSession(
     setModel: vi.fn(async (): Promise<void> => {}),
     setPermission: vi.fn(async (): Promise<void> => {}),
     setWolfpackMode: vi.fn(async (): Promise<void> => {}),
+    startScheduledTasks: vi.fn(async () => true),
     ...options.overrides,
   };
   return session;

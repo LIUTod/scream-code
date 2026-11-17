@@ -89,4 +89,28 @@ describe('renderCronFireXml', () => {
     expect(out).toContain('stale="true"');
     expect(out).toContain('coalescedCount="5"');
   });
+
+  it('stamps the local delivery time when given, so a daily task knows the date', () => {
+    const original = process.env['TZ'];
+    process.env['TZ'] = 'Asia/Shanghai';
+    try {
+      const origin = {
+        kind: 'cron_job',
+        jobId: 'abcdef12',
+        cron: '0 9 * * *',
+        recurring: true,
+        coalescedCount: 1,
+        stale: false,
+      } as const;
+      const stamped = renderCronFireXml(origin, 'daily report', Date.UTC(2026, 10, 18, 1, 3));
+      expect(stamped.split('\n')[0]).toBe(
+        '<cron-fire jobId="abcdef12" cron="0 9 * * *" recurring="true" coalescedCount="1" stale="false" firedAt="2026-11-18T09:03:00+08:00">',
+      );
+      // Without a time the envelope is unchanged.
+      expect(renderCronFireXml(origin, 'x').split('\n')[0]).not.toContain('firedAt');
+    } finally {
+      if (original === undefined) delete process.env['TZ'];
+      else process.env['TZ'] = original;
+    }
+  });
 });

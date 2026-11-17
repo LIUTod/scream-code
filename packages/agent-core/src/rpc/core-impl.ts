@@ -397,6 +397,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       hooks: config.hooks,
       permissionRules: config.permission?.rules,
       sessionDenyPatterns: options.permissionDenyRules,
+      scheduledTasks: options.scheduledTasks,
       skills: this.resolveSessionSkillConfig(config),
       mcpConfig,
       pluginSessionStarts,
@@ -529,6 +530,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       hooks: config.hooks,
       permissionRules: config.permission?.rules,
       sessionDenyPatterns: input.permissionDenyRules,
+      scheduledTasks: input.scheduledTasks,
       skills: this.resolveSessionSkillConfig(config),
       mcpConfig,
       initializeMainAgent: false,
@@ -564,7 +566,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       title: input.title,
       metadata: input.metadata,
     });
-    return this.resumeSession({ sessionId: id });
+    return this.resumeSession({
+      sessionId: id,
+      ...(input.scheduledTasks === undefined ? {} : { scheduledTasks: input.scheduledTasks }),
+    });
   }
 
   async listSessions(input: ListSessionsPayload = {}): Promise<readonly SessionSummary[]> {
@@ -935,6 +940,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   removeCronTasks({ sessionId, ...payload }: SessionAgentPayload<RemoveCronTasksPayload>) {
     return this.sessionApi(sessionId).removeCronTasks(payload);
+  }
+
+  startScheduledTasks({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).startScheduledTasks(payload);
   }
 
   extractMemoriesOnExit({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {

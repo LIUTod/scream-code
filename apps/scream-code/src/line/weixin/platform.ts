@@ -288,10 +288,26 @@ export class WeixinPlatform {
    * cached from the last inbound message; without one there is nothing we can
    * legally address, so this reports `no-target` instead of failing a send.
    */
+  /**
+   * Who a session talks to. Live targets come from inbound messages; after a
+   * restart there are none yet, but the session key is a hash of the peer id
+   * and the peers' context tokens are on disk, so the peer is found by hashing
+   * each known peer. Without this a scheduled task resumed at boot could never
+   * report back until the user happened to write first.
+   */
+  private targetFor(sessionKey: string): { peerUserId: string; contextToken: string } | undefined {
+    const live = this.latestTargets.get(sessionKey);
+    if (live !== undefined) return live;
+    for (const [peer, token] of this.contextTokens) {
+      if (makeWeixinSessionKey(peer) === sessionKey) return { peerUserId: peer, contextToken: token };
+    }
+    return undefined;
+  }
+
   async sendProactive(sessionKey: string, text: string): Promise<ProactiveDelivery> {
     const body = text.trim();
     if (body === '') return 'no-target';
-    const target = this.latestTargets.get(sessionKey);
+    const target = this.targetFor(sessionKey);
     const peer = target?.peerUserId;
     if (peer === undefined) {
       log.warn('line-weixin: no peer recorded for proactive send', { sessionKey });
@@ -329,7 +345,7 @@ export class WeixinPlatform {
     kind: 'image' | 'file' | 'voice',
     path: string,
   ): Promise<string> {
-    const target = this.latestTargets.get(sessionKey);
+    const target = this.targetFor(sessionKey);
     if (target === undefined) {
       throw new Error(`line: no reply target recorded for session ${sessionKey}`);
     }

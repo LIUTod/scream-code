@@ -192,3 +192,17 @@ describe('i18n detectSystemLocale', () => {
     expect(mod.getLocale()).toBe(expected);
   });
 });
+
+describe('messages only name commands that exist', () => {
+  // Resuming a session is `scream -C`, `scream -r <id>` or /sessions. There is no
+  // `scream resume` subcommand, so a message that sends the user there is a dead end.
+  it.each([
+    ['en', en],
+    ['zh', zh],
+  ] as const)('%s never tells the user to run `scream resume`', (_name, messages) => {
+    const offenders = Object.entries(messages)
+      .filter(([, text]) => /scream resume/i.test(text))
+      .map(([key]) => key);
+    expect(offenders).toEqual([]);
+  });
+});

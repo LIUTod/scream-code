@@ -16,6 +16,7 @@ import { setLocale, t } from '@scream-code/config';
 import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
 import { formatTokenLimit } from '#/utils/usage/token-limit';
 import { formatTokenCount } from '#/utils/usage/usage-format';
+import { formatDurationMs } from './duration';
 import type { CLIOptions, PromptOutputFormat } from './options';
 import { createScreamCodeHostIdentity } from './version';
 
@@ -36,7 +37,27 @@ interface PromptProcess {
   exit(code?: number): never | void;
 }
 
+/** Exit status of a run stopped by `--max-time` — the conventional `timeout` command's status. */
+export const PROMPT_TIMEOUT_EXIT_CODE = 124;
+
+/** A prompt run stopped because `--max-time` ran out; the session is saved and resumable. */
+export class PromptTimeoutError extends Error {
+  readonly exitCode = PROMPT_TIMEOUT_EXIT_CODE;
+  constructor(limitMs: number) {
+    super(t('cli.prompt.max_time', { duration: formatDurationMs(limitMs) }));
+    this.name = 'PromptTimeoutError';
+  }
+}
+
 const PROMPT_UI_MODE = 'print';
+/**
+ * This process exits when the prompt is answered, so a scheduled task created
+ * here could never fire, and one already in a resumed session must not fire
+ * into this one-off run instead of the interactive session it belongs to.
+ * (`uiMode` cannot carry this: the IM channel daemon is also 'print' and its
+ * sessions do run scheduled tasks.)
+ */
+const PROMPT_SCHEDULED_TASKS = false;
 const PROMPT_MAIN_AGENT_ID = 'main';
 const PROMPT_BLOCK_BULLET = '• ';
 const PROMPT_BLOCK_INDENT = '  ';
@@ -105,6 +126,7 @@ export async function runPrompt(
     await cleanupPromise;
   };
   removeTerminationCleanup = installPromptTerminationCleanup(promptProcess, cleanupPromptRun);
+  let timedOut = false;
 
   try {
     await harness.ensureConfigFile();
@@ -122,10 +144,28 @@ export async function runPrompt(
     restorePromptSessionPermission = restorePermission;
 
     const outputFormat = opts.outputFormat ?? 'text';
-    await runPromptTurn(session, opts.prompt!, outputFormat, stdout, stderr);
+    try {
+      await runPromptTurn(session, opts.prompt!, outputFormat, stdout, stderr, opts.maxTimeMs);
+    } catch (error) {
+      // The work done so far is saved, so tell the caller how to carry on.
+      if (error instanceof PromptTimeoutError) {
+        timedOut = true;
+        writeResumeHint(session.id, outputFormat, stdout, stderr);
+      }
+      throw error;
+    }
     writeResumeHint(session.id, outputFormat, stdout, stderr);
   } finally {
-    await cleanupPromptRun();
+    if (timedOut) {
+      // The time limit is the verdict (exit 124) and callers script against it:
+      // a failure while winding down a run that was already stopped must not
+      // replace it with a generic error. It is still worth a log line.
+      await cleanupPromptRun().catch((error: unknown) => {
+        log.warn('prompt run cleanup failed after --max-time', { error: String(error) });
+      });
+    } else {
+      await cleanupPromptRun();
+    }
   }
 }
 
@@ -158,7 +198,10 @@ async function resolvePromptSession(
       );
       throw new Error(t('cli.prompt.session_other_dir', { id: opts.session }));
     }
-    const session = await harness.resumeSession({ id: opts.session });
+    const session = await harness.resumeSession({
+      id: opts.session,
+      scheduledTasks: PROMPT_SCHEDULED_TASKS,
+    });
     const status = await session.getStatus();
     const restorePermission = await forcePromptPermission(
       session,
@@ -180,7 +223,10 @@ async function resolvePromptSession(
     const sessions = await harness.listSessions({ workDir });
     const previous = sessions[0];
     if (previous !== undefined) {
-      const session = await harness.resumeSession({ id: previous.id });
+      const session = await harness.resumeSession({
+        id: previous.id,
+        scheduledTasks: PROMPT_SCHEDULED_TASKS,
+      });
       const status = await session.getStatus();
       const restorePermission = await forcePromptPermission(
         session,
@@ -201,7 +247,12 @@ async function resolvePromptSession(
   }
 
   const model = requireConfiguredModel(opts.model, defaultModel);
-  const session = await harness.createSession({ workDir, model, permission: 'auto' });
+  const session = await harness.createSession({
+    workDir,
+    model,
+    permission: 'auto',
+    scheduledTasks: PROMPT_SCHEDULED_TASKS,
+  });
   installHeadlessHandlers(session);
   return { session, resumed: false, restorePermission: async () => {} };
 }
@@ -283,6 +334,7 @@ function runPromptTurn(
   outputFormat: PromptOutputFormat,
   stdout: PromptOutput,
   stderr: PromptOutput,
+  maxTimeMs?: number | undefined,
 ): Promise<void> {
   let activeTurnId: number | undefined;
   let activeAgentId: string | undefined;
@@ -292,6 +344,7 @@ function runPromptTurn(
       : new PromptTranscriptWriter(stdout, stderr);
   let settled = false;
   let unsubscribe: (() => void) | undefined;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
 
   let resolve: () => void;
   let reject: (error: Error) => void;
@@ -303,6 +356,7 @@ function runPromptTurn(
   const finish = (error?: Error): void => {
     if (settled) return;
     settled = true;
+    if (deadline !== undefined) clearTimeout(deadline);
     unsubscribe?.();
     outputWriter.finish();
     if (error !== undefined) {
@@ -410,6 +464,15 @@ function runPromptTurn(
         return;
     }
   });
+
+  if (maxTimeMs !== undefined) {
+    deadline = setTimeout(() => {
+      // Stop the work, but do not wait for it to wind down: the limit is about
+      // when this process returns.
+      void session.cancel().catch(() => {});
+      finish(new PromptTimeoutError(maxTimeMs));
+    }, maxTimeMs);
+  }
 
   session.prompt(prompt).catch((error: unknown) => {
     finish(error instanceof Error ? error : new Error(String(error)));

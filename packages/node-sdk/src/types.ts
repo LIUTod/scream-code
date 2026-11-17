@@ -104,6 +104,12 @@ export interface CreateSessionOptions {
   readonly permission?: PermissionMode | undefined;
   /** Tool names to deny for the whole session (project-scope deny rules, every mode). */
   readonly permissionDenyRules?: readonly string[] | undefined;
+  /**
+   * False when this process exits as soon as the current run ends (a one-off
+   * prompt): the agent refuses to create scheduled tasks — they could never
+   * fire — and does not fire the session's existing ones. Defaults to true.
+   */
+  readonly scheduledTasks?: boolean | undefined;
   readonly planMode?: boolean;
   readonly metadata?: JsonObject | undefined;
   /**
@@ -124,6 +130,12 @@ export interface ResumeSessionInput {
   readonly id: string;
   /** Tool names to deny for the whole session (project-scope deny rules, every mode). */
   readonly permissionDenyRules?: readonly string[] | undefined;
+  /**
+   * False when this process exits as soon as the current run ends (a one-off
+   * prompt): the agent refuses to create scheduled tasks — they could never
+   * fire — and does not fire the session's existing ones. Defaults to true.
+   */
+  readonly scheduledTasks?: boolean | undefined;
 }
 
 export interface ForkSessionInput {
@@ -131,6 +143,8 @@ export interface ForkSessionInput {
   readonly forkId?: string;
   readonly title?: string;
   readonly metadata?: JsonObject;
+  /** As on resume: `false` opens the fork with scheduled tasks held (see `startScheduledTasks`). */
+  readonly scheduledTasks?: boolean | undefined;
 }
 
 export interface ExportSessionInput {

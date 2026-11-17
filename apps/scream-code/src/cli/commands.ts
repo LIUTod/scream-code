@@ -1,10 +1,11 @@
-import { Command, Option } from 'commander';
+import { Command, InvalidArgumentError, Option } from 'commander';
 import { t } from '@scream-code/config';
 
 import { CLI_COMMAND_NAME } from '#/constant/app';
 
 import type { CLIOptions } from './options';
 import { registerExportCommand } from './sub/export';
+import { parseDurationMs } from './duration';
 
 export type MainCommandHandler = (opts: CLIOptions) => void;
 export type PluginNodeRunnerHandler = (entry: string, args: readonly string[]) => void;
@@ -75,6 +76,13 @@ export function createProgram(
         '--output-format <format>',
         t('cli.opt.output_format'),
       ).choices(['text', 'stream-json']),
+    )
+    .addOption(
+      new Option('--max-time <duration>', t('cli.opt.max_time')).argParser((value: string) => {
+        const ms = parseDurationMs(value);
+        if (ms === undefined) throw new InvalidArgumentError(t('cli.err.max_time_invalid', { value }));
+        return ms;
+      }),
     )
     .addOption(
       new Option(
@@ -207,6 +215,7 @@ export function createProgram(
       outputFormat: raw['outputFormat'] as CLIOptions['outputFormat'],
       prompt: raw['prompt'] as string | undefined,
       skillsDirs: raw['skillsDir'] as string[],
+      maxTimeMs: raw['maxTime'] as number | undefined,
     };
 
     onMain(opts);

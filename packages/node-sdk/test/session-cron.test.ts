@@ -74,4 +74,72 @@ describe('Session cron tasks', () => {
       await harness.close();
     }
   });
+
+  it('honours scheduledTasks: false on create and on resume, and forgets it on a plain resume', async () => {
+    const homeDir = await makeTempDir(tempDirs, 'scream-sdk-cron-off-home-');
+    const workDir = await makeTempDir(tempDirs, 'scream-sdk-cron-off-work-');
+    const harness = new ScreamHarness({ homeDir, identity: TEST_IDENTITY });
+    const refused = /Scheduled tasks are off in this session/;
+
+    try {
+      const oneOff = await harness.createSession({ id: 'ses_cron_off', workDir, scheduledTasks: false });
+      await expect(oneOff.createCronTask({ cron: '0 9 * * *', prompt: 'x' })).rejects.toThrowError(refused);
+      await oneOff.close();
+
+      // The switch has to survive the SDK's resume wrapper, which used to pass
+      // only the id and drop every other option.
+      const again = await harness.resumeSession({ id: 'ses_cron_off', scheduledTasks: false });
+      await expect(again.createCronTask({ cron: '0 9 * * *', prompt: 'x' })).rejects.toThrowError(refused);
+      await again.close();
+
+      // Opened interactively, the same session schedules normally.
+      const interactive = await harness.resumeSession({ id: 'ses_cron_off' });
+      await expect(
+        interactive.createCronTask({ cron: '0 9 * * *', prompt: 'x' }),
+      ).resolves.toMatchObject({ cron: '0 9 * * *' });
+      await interactive.close();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('startScheduledTasks turns a held session on, once', async () => {
+    const homeDir = await makeTempDir(tempDirs, 'scream-sdk-cron-start-home-');
+    const workDir = await makeTempDir(tempDirs, 'scream-sdk-cron-start-work-');
+    const harness = new ScreamHarness({ homeDir, identity: TEST_IDENTITY });
+
+    try {
+      const held = await harness.createSession({ id: 'ses_cron_held', workDir, scheduledTasks: false });
+      await expect(held.createCronTask({ cron: '0 9 * * *', prompt: 'x' })).rejects.toThrowError(
+        /Scheduled tasks are off in this session/,
+      );
+      await expect(held.startScheduledTasks()).resolves.toBe(true);
+      await expect(held.startScheduledTasks()).resolves.toBe(false);
+      await expect(held.createCronTask({ cron: '0 9 * * *', prompt: 'x' })).resolves.toMatchObject({
+        cron: '0 9 * * *',
+      });
+      await held.close();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('forkSession passes scheduledTasks: false through to the fork', async () => {
+    const homeDir = await makeTempDir(tempDirs, 'scream-sdk-cron-fork-home-');
+    const workDir = await makeTempDir(tempDirs, 'scream-sdk-cron-fork-work-');
+    const harness = new ScreamHarness({ homeDir, identity: TEST_IDENTITY });
+    try {
+      const source = await harness.createSession({ id: 'ses_cron_src', workDir });
+      const fork = await harness.forkSession({ id: source.id, scheduledTasks: false });
+      await expect(fork.createCronTask({ cron: '0 9 * * *', prompt: 'x' })).rejects.toThrowError(
+        /Scheduled tasks are off in this session/,
+      );
+      await expect(fork.startScheduledTasks()).resolves.toBe(true);
+      await fork.close();
+      await source.close();
+    } finally {
+      await harness.close();
+    }
+  });
 });
+

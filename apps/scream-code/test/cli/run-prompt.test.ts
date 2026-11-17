@@ -1,7 +1,7 @@
 import type { createScreamDeviceId as createScreamDeviceIdFn } from '@scream-code/config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { runPrompt } from '#/cli/run-prompt';
+import { PROMPT_TIMEOUT_EXIT_CODE, PromptTimeoutError, runPrompt } from '#/cli/run-prompt';
 
 type CreateScreamDeviceId = typeof createScreamDeviceIdFn;
 
@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
     setPermission: vi.fn(),
     setApprovalHandler: vi.fn(),
     setQuestionHandler: vi.fn(),
+    cancel: vi.fn(async (): Promise<void> => undefined),
     getStatus: vi.fn(
       async (): Promise<{ readonly permission: string; readonly model?: string }> => ({
         permission: 'manual',
@@ -207,6 +208,8 @@ describe('runPrompt', () => {
       workDir: process.cwd(),
       model: 'k2',
       permission: 'auto',
+      // One-off run: the process exits with the prompt, so nothing scheduled could fire.
+      scheduledTasks: false,
     });
     expect(mocks.session.setPermission).not.toHaveBeenCalled();
     expect(mocks.session.setApprovalHandler).toHaveBeenCalledWith(expect.any(Function));
@@ -227,6 +230,8 @@ describe('runPrompt', () => {
       workDir: process.cwd(),
       model: 'scream-code/k2.5',
       permission: 'auto',
+      // One-off run: the process exits with the prompt, so nothing scheduled could fire.
+      scheduledTasks: false,
     });
   });
 
@@ -387,7 +392,7 @@ describe('runPrompt', () => {
       stderr: { write: vi.fn(() => true) },
     });
 
-    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_existing' });
+    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_existing', scheduledTasks: false });
     expect(mocks.session.getStatus).toHaveBeenCalled();
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(1, 'auto');
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'yolo');
@@ -399,7 +404,7 @@ describe('runPrompt', () => {
       stderr: { write: vi.fn(() => true) },
     });
 
-    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_existing' });
+    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_existing', scheduledTasks: false });
     expect(mocks.session.setModel).toHaveBeenCalledWith('scream-code/k2.5');
   });
 
@@ -472,7 +477,7 @@ describe('runPrompt', () => {
       stderr: { write: vi.fn(() => true) },
     });
 
-    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_existing' });
+    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_existing', scheduledTasks: false });
     expect(mocks.harnessCreateSession).not.toHaveBeenCalled();
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(1, 'auto');
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'yolo');
@@ -486,7 +491,7 @@ describe('runPrompt', () => {
     });
 
     expect(mocks.harnessListSessions).toHaveBeenCalledWith({ workDir: process.cwd() });
-    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_previous' });
+    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_previous', scheduledTasks: false });
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(1, 'auto');
     expect(mocks.session.setPermission).toHaveBeenNthCalledWith(2, 'yolo');
   });
@@ -501,7 +506,7 @@ describe('runPrompt', () => {
     });
 
     expect(mocks.harnessListSessions).toHaveBeenCalledWith({ workDir: process.cwd() });
-    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_previous' });
+    expect(mocks.harnessResumeSession).toHaveBeenCalledWith({ id: 'ses_previous', scheduledTasks: false });
     expect(mocks.harnessCreateSession).not.toHaveBeenCalled();
   });
 
@@ -732,6 +737,146 @@ describe('runPrompt', () => {
 
     const handler = mocks.session.setQuestionHandler.mock.calls[0]![0] as () => unknown;
     expect(handler()).toBeNull();
+  });
+
+  describe('--max-time', () => {
+    /** A turn that starts and then never finishes. */
+    function stuckTurn(): void {
+      mocks.session.prompt.mockImplementationOnce(async () => {
+        for (const handler of mocks.eventHandlers) {
+          handler(mocks.mainEvent({ type: 'turn.started', turnId: 9, origin: { kind: 'user' } }));
+          handler(mocks.mainEvent({ type: 'assistant.delta', turnId: 9, delta: 'working' }));
+        }
+        await new Promise<void>(() => {});
+      });
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('stops a run that outlasts the limit: cancels the turn, closes up, and exits with 124', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      stuckTurn();
+      const stdout = writer();
+      const stderr = writer();
+
+      const run = runPrompt(opts({ maxTimeMs: 5000 }), '1.2.3-test', { stdout, stderr });
+      const outcome = run.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(mocks.session.cancel).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+
+      const error = await outcome;
+      expect(error).toBeInstanceOf(PromptTimeoutError);
+      expect((error as PromptTimeoutError).exitCode).toBe(PROMPT_TIMEOUT_EXIT_CODE);
+      expect(PROMPT_TIMEOUT_EXIT_CODE).toBe(124);
+      expect((error as Error).message).toContain('5s');
+      expect(mocks.session.cancel).toHaveBeenCalledTimes(1);
+      expect(mocks.harnessClose).toHaveBeenCalled();
+      // The work is saved, so the caller is told how to pick it up again.
+      expect(stdout.text() + stderr.text()).toContain('ses_prompt');
+    });
+
+    it('does not start any timer without --max-time', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      await runPrompt(opts(), '1.2.3-test', { stdout: writer(), stderr: writer() });
+      expect(vi.getTimerCount()).toBe(0);
+      expect(mocks.session.cancel).not.toHaveBeenCalled();
+    });
+
+    it('lets a run that finishes in time succeed and leaves no timer behind', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const stdout = writer();
+      await runPrompt(opts({ maxTimeMs: 60_000 }), '1.2.3-test', { stdout, stderr: writer() });
+      expect(stdout.text()).toContain('hello world');
+      expect(vi.getTimerCount()).toBe(0);
+      expect(mocks.session.cancel).not.toHaveBeenCalled();
+    });
+
+    it('still reports the timeout when cancelling the turn itself fails', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      stuckTurn();
+      mocks.session.cancel.mockRejectedValueOnce(new Error('rpc gone'));
+
+      const run = runPrompt(opts({ maxTimeMs: 1000 }), '1.2.3-test', {
+        stdout: writer(),
+        stderr: writer(),
+      });
+      const outcome = run.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(await outcome).toBeInstanceOf(PromptTimeoutError);
+    });
+
+    it('keeps the timeout verdict when winding down fails afterwards', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      stuckTurn();
+      // Resuming a session switches its permission mode and puts it back on the
+      // way out; here the put-back fails, as it can when the connection is gone.
+      mocks.session.setPermission
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('rpc gone while cancelling'));
+
+      const run = runPrompt(opts({ session: 'ses_prompt', maxTimeMs: 1000 }), '1.2.3-test', {
+        stdout: writer(),
+        stderr: writer(),
+      });
+      const outcome = run.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+
+      // Callers script against exit 124, so a cleanup error must not replace it,
+      // and the harness is still closed.
+      expect(await outcome).toBeInstanceOf(PromptTimeoutError);
+      expect(mocks.session.setPermission).toHaveBeenCalledTimes(2);
+      expect(mocks.harnessClose).toHaveBeenCalled();
+    });
+
+    it('still surfaces a wind-down failure on a run that did not time out', async () => {
+      mocks.session.setPermission
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('rpc gone while cancelling'));
+
+      await expect(
+        runPrompt(opts({ session: 'ses_prompt', maxTimeMs: 60_000 }), '1.2.3-test', {
+          stdout: writer(),
+          stderr: writer(),
+        }),
+      ).rejects.toThrow('rpc gone while cancelling');
+    });
+
+    it('reports a real failure as a failure, not as a timeout', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      mocks.session.prompt.mockImplementationOnce(async () => {
+        for (const handler of mocks.eventHandlers) {
+          handler(mocks.mainEvent({ type: 'turn.started', turnId: 3, origin: { kind: 'user' } }));
+          handler(
+            mocks.mainEvent({
+              type: 'turn.ended',
+              turnId: 3,
+              reason: 'failed',
+              error: { code: 'provider.error', message: 'model failed' },
+            }),
+          );
+        }
+      });
+
+      const run = runPrompt(opts({ maxTimeMs: 60_000 }), '1.2.3-test', {
+        stdout: writer(),
+        stderr: writer(),
+      });
+      await expect(run).rejects.toThrow('provider.error: model failed');
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 
   it('does not delete the session for a normal prompt run', async () => {

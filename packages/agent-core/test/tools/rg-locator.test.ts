@@ -32,7 +32,9 @@ import {
   extractRgFromZip,
   findExistingRg,
   pinnedRgArchive,
+  resetRgBootstrapState,
   resolveRgArchive,
+  rgDownloadBaseUrl,
   rgUnavailableMessage,
   verifyArchiveChecksum,
   type LinuxLibc,
@@ -306,6 +308,12 @@ describe('rgUnavailableMessage', () => {
     expect(msg).toContain('https://github.com/BurntSushi/ripgrep');
   });
 
+  it('names the mirror override for networks that cannot reach GitHub', () => {
+    const msg = rgUnavailableMessage(new Error('fetch failed'));
+    expect(msg).toContain('SCREAM_RG_DOWNLOAD_BASE_URL');
+    expect(msg).toContain('SHA-256');
+  });
+
   it('handles non-Error causes (string, unknown)', () => {
     const a = rgUnavailableMessage('boom');
     expect(a).toContain('boom');
@@ -358,8 +366,10 @@ describe('ensureRgPath download branch', () => {
     savedPath = process.env['PATH'];
     process.env['PATH'] = ''; // force the locator past `whichRg`
     savedFetch = globalThis.fetch;
+    resetRgBootstrapState(); // a failed bootstrap is remembered; each test starts clean
   });
   afterEach(() => {
+    resetRgBootstrapState();
     rmSync(fakeShare, { recursive: true, force: true });
     if (savedPath === undefined) delete process.env['PATH'];
     else process.env['PATH'] = savedPath;
@@ -570,12 +580,14 @@ describe('ensureRgPath Windows download branch', () => {
     savedFetch = globalThis.fetch;
     savedArch = process.arch;
     savedPlatform = process.platform;
+    resetRgBootstrapState(); // a failed bootstrap is remembered; each test starts clean
     // Simulate a Windows host end-to-end — `rgBinaryName()`, `whichRg()`
     // (PATH sep), and `detectTarget()` all key off these two values.
     Object.defineProperty(process, 'arch', { value: 'x64' });
     Object.defineProperty(process, 'platform', { value: 'win32' });
   });
   afterEach(() => {
+    resetRgBootstrapState();
     rmSync(fakeShare, { recursive: true, force: true });
     if (savedPath === undefined) delete process.env['PATH'];
     else process.env['PATH'] = savedPath;
@@ -650,5 +662,221 @@ describe('ensureRgPath Windows download branch', () => {
       body: null,
     }) as unknown as typeof fetch;
     await expect(ensureRgPath({ shareDir: fakeShare })).rejects.toThrow(/HTTP 502 Bad Gateway/);
+  });
+});
+
+
+describe('rgDownloadBaseUrl', () => {
+  it('defaults to the upstream release directory', () => {
+    expect(rgDownloadBaseUrl({})).toBe(
+      'https://github.com/BurntSushi/ripgrep/releases/download/15.0.0',
+    );
+    expect(rgDownloadBaseUrl({ SCREAM_RG_DOWNLOAD_BASE_URL: '   ' })).toBe(
+      rgDownloadBaseUrl({}),
+    );
+  });
+
+  it('uses the mirror from SCREAM_RG_DOWNLOAD_BASE_URL, ignoring spaces and trailing slashes', () => {
+    expect(
+      rgDownloadBaseUrl({ SCREAM_RG_DOWNLOAD_BASE_URL: ' https://mirror.example.com/rg/15.0.0/// ' }),
+    ).toBe('https://mirror.example.com/rg/15.0.0');
+  });
+
+  it('refuses a value that is not an http(s) URL instead of silently using the default', () => {
+    expect(() => rgDownloadBaseUrl({ SCREAM_RG_DOWNLOAD_BASE_URL: 'ftp://mirror/rg' })).toThrow(
+      /must start with http/,
+    );
+    expect(() => rgDownloadBaseUrl({ SCREAM_RG_DOWNLOAD_BASE_URL: 'mirror.example.com' })).toThrow(
+      /must start with http/,
+    );
+  });
+
+  it('feeds the pinned archive URL, keeping the pinned digest', () => {
+    const saved = process.env['SCREAM_RG_DOWNLOAD_BASE_URL'];
+    process.env['SCREAM_RG_DOWNLOAD_BASE_URL'] = 'https://mirror.example.com/rg/15.0.0/';
+    try {
+      const archive = pinnedRgArchive('aarch64-apple-darwin');
+      expect(archive.url).toBe(
+        'https://mirror.example.com/rg/15.0.0/ripgrep-15.0.0-aarch64-apple-darwin.tar.gz',
+      );
+      expect(archive.sha256).toBe(
+        '98bb2e61e7277ba0ea72d2ae2592497fd8d2940934a16b122448d302a6637e3b',
+      );
+    } finally {
+      if (saved === undefined) delete process.env['SCREAM_RG_DOWNLOAD_BASE_URL'];
+      else process.env['SCREAM_RG_DOWNLOAD_BASE_URL'] = saved;
+    }
+  });
+});
+
+describe('ripgrep bootstrap: bounded download, cool-down, mirror integrity', () => {
+  let fakeShare: string;
+  let savedPath: string | undefined;
+  let savedFetch: typeof globalThis.fetch | undefined;
+  let savedMirror: string | undefined;
+
+  /** Let queued fs / stream callbacks run; fake timers do not fake setImmediate. */
+  const flush = async (rounds = 25): Promise<void> => {
+    for (let i = 0; i < rounds; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  beforeEach(() => {
+    fakeShare = join(
+      tmpdir(),
+      `scream-rg-bounded-${String(Date.now())}-${String(Math.random()).slice(2)}`,
+    );
+    mkdirSync(join(fakeShare, 'bin'), { recursive: true });
+    savedPath = process.env['PATH'];
+    process.env['PATH'] = '';
+    savedFetch = globalThis.fetch;
+    savedMirror = process.env['SCREAM_RG_DOWNLOAD_BASE_URL'];
+    delete process.env['SCREAM_RG_DOWNLOAD_BASE_URL'];
+    resetRgBootstrapState();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    resetRgBootstrapState();
+    rmSync(fakeShare, { recursive: true, force: true });
+    if (savedPath === undefined) delete process.env['PATH'];
+    else process.env['PATH'] = savedPath;
+    if (savedMirror === undefined) delete process.env['SCREAM_RG_DOWNLOAD_BASE_URL'];
+    else process.env['SCREAM_RG_DOWNLOAD_BASE_URL'] = savedMirror;
+    if (savedFetch !== undefined) globalThis.fetch = savedFetch;
+    vi.restoreAllMocks();
+  });
+
+  /** A fetch that answers with a body the test feeds by hand and never closes. */
+  function hangingBodyFetch(): {
+    fetchMock: ReturnType<typeof vi.fn>;
+    push: (bytes: number) => void;
+  } {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        controller = c;
+      },
+    });
+    const fetchMock = vi.fn(async () => new Response(body));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    return {
+      fetchMock,
+      push: (bytes) => {
+        controller.enqueue(new Uint8Array(bytes));
+      },
+    };
+  }
+
+  it('gives up when the server never answers, and says so', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('This operation was aborted', 'AbortError'));
+          });
+        }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const run = ensureRgPath({ shareDir: fakeShare });
+    const outcome = expect(run).rejects.toThrow(/no response from github\.com within 30s/);
+    while (fetchMock.mock.calls.length === 0) await flush(1);
+    await vi.advanceTimersByTimeAsync(29_000);
+    await flush();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await outcome;
+  });
+
+  it('gives up when the body stalls mid-download — the old guard stopped at the headers', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const { fetchMock, push } = hangingBodyFetch();
+
+    const run = ensureRgPath({ shareDir: fakeShare });
+    const outcome = expect(run).rejects.toThrow(/stalled: no data for 30s/);
+    while (fetchMock.mock.calls.length === 0) await flush(1);
+    push(1024);
+    await flush();
+    await vi.advanceTimersByTimeAsync(31_000);
+    await outcome;
+  });
+
+  it('keeps going while bytes keep arriving, however long the whole download takes', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const { fetchMock, push } = hangingBodyFetch();
+
+    let settled = false;
+    const run = ensureRgPath({ shareDir: fakeShare });
+    const outcome = run.then(
+      () => {
+        settled = true;
+      },
+      (error: unknown) => {
+        settled = true;
+        throw error;
+      },
+    );
+    void outcome.catch(() => {});
+    while (fetchMock.mock.calls.length === 0) await flush(1);
+
+    // 100 s of wall time in total, but never 30 s between two chunks.
+    for (let i = 0; i < 5; i += 1) {
+      push(512);
+      await flush();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await flush();
+      expect(settled, `after ${String((i + 1) * 20)}s`).toBe(false);
+    }
+
+    await vi.advanceTimersByTimeAsync(31_000);
+    await expect(outcome).rejects.toThrow(/stalled: no data for 30s/);
+  });
+
+  it('remembers a failed bootstrap, so later Grep calls fail at once instead of waiting again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network unreachable'));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(ensureRgPath({ shareDir: fakeShare })).rejects.toThrow(/network unreachable/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    for (let i = 0; i < 5; i += 1) {
+      await expect(ensureRgPath({ shareDir: fakeShare })).rejects.toThrow(
+        /network unreachable.*trying again in \d+s/,
+      );
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The cool-down is finite: after it, the next call really tries again.
+    vi.setSystemTime(Date.now() + 121_000);
+    const retry = expect(ensureRgPath({ shareDir: fakeShare })).rejects.toThrow(/network unreachable/);
+    await retry;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('still finds an rg installed by hand during the cool-down', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network unreachable')) as typeof fetch;
+    await expect(ensureRgPath({ shareDir: fakeShare })).rejects.toThrow(/network unreachable/);
+
+    const binName = process.platform === 'win32' ? 'rg.exe' : 'rg';
+    writeFileSync(join(fakeShare, 'bin', binName), '#!/bin/sh\n');
+    chmodSync(join(fakeShare, 'bin', binName), 0o755);
+
+    await expect(ensureRgPath({ shareDir: fakeShare })).resolves.toMatchObject({
+      source: 'share-bin-cached',
+    });
+  });
+
+  it('fetches from the mirror when one is configured — and still refuses bytes that do not match the pin', async () => {
+    process.env['SCREAM_RG_DOWNLOAD_BASE_URL'] = 'https://mirror.example.com/rg/15.0.0';
+    const fetchMock = vi.fn(async () => new Response(new TextEncoder().encode('not a ripgrep archive')));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(ensureRgPath({ shareDir: fakeShare })).rejects.toThrow(/checksum mismatch/);
+
+    const requested = (fetchMock.mock.calls[0] as unknown as [string])[0];
+    expect(requested.startsWith('https://mirror.example.com/rg/15.0.0/ripgrep-15.0.0-')).toBe(true);
+    // Nothing unverified was installed.
+    expect(existsSync(join(fakeShare, 'bin', process.platform === 'win32' ? 'rg.exe' : 'rg'))).toBe(false);
   });
 });

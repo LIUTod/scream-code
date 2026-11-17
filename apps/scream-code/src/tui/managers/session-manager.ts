@@ -6,7 +6,7 @@ import type {
   Session,
   SessionSummary,
 } from '@scream-code/scream-code-sdk';
-import { normalizeWorkDir } from '@scream-code/scream-code-sdk';
+import { log, normalizeWorkDir } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import { getLlmNotSetMessage, MAIN_AGENT_ID, getNoActiveSessionMessage } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
@@ -154,13 +154,15 @@ export class SessionManager {
             t('session.wrong_dir', { sessionId: startup.sessionFlag, workDir: target.workDir }),
           );
         }
-        session = await this.host.harness.resumeSession({ id: startup.sessionFlag });
+        // Held: see startScheduledTasks.
+        session = await this.host.harness.resumeSession({ id: startup.sessionFlag, scheduledTasks: false });
         shouldReplayHistory = true;
       } else {
         const sessions = await this.host.harness.listSessions({ workDir });
         const target = sessions[0];
         if (target !== undefined) {
-          session = await this.host.harness.resumeSession({ id: target.id });
+          // Held: see startScheduledTasks.
+          session = await this.host.harness.resumeSession({ id: target.id, scheduledTasks: false });
           shouldReplayHistory = true;
         } else {
           session = await this.host.harness.createSession(createSessionOptions);
@@ -438,7 +440,8 @@ export class SessionManager {
 
     let session: Session;
     try {
-      session = await this.host.harness.resumeSession({ id: targetSessionId });
+      // Held: see startScheduledTasks.
+      session = await this.host.harness.resumeSession({ id: targetSessionId, scheduledTasks: false });
     } catch (error) {
       const msg = formatErrorMessage(error);
       this.host.showError(t('session.resume_failed', { sessionId: targetSessionId, msg }));
@@ -447,6 +450,23 @@ export class SessionManager {
 
     await this.switchToSession(session, t('session.resumed', { sessionId: session.id }));
     return { switched: true };
+  }
+
+  /**
+   * Let a resumed session's scheduled tasks fire. Sessions are reopened with
+   * them held (`scheduledTasks: false`): a task that fell due while the session
+   * was closed fires on the first tick after the reload, and the core does not
+   * replay events — fired before the TUI subscribed (and before the history was
+   * replayed), its turn would run unseen or interleave with the replay. Called
+   * once the subscription is live and the history is on screen; idempotent, so
+   * a session that was never held is unaffected.
+   */
+  async startScheduledTasks(session: Session): Promise<void> {
+    try {
+      await session.startScheduledTasks();
+    } catch (error) {
+      log.warn('tui: could not start scheduled tasks', { sessionId: session.id, error: String(error) });
+    }
   }
 
   async switchToSession(session: Session, statusMessage: string): Promise<void> {
@@ -473,6 +493,7 @@ export class SessionManager {
       } finally {
         this.host.sessionEventHandler.startSubscription();
       }
+      await this.startScheduledTasks(session);
       const resumeState = session.getResumeState();
       if (resumeState?.warning !== undefined) {
         this.host.showStatus(t('session.resume_warning', { warning: resumeState.warning }), this.host.state.theme.colors.warning);

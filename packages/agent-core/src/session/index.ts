@@ -69,6 +69,11 @@ export interface SessionOptions {
    * the main agent, so they fire in every permission mode.
    */
   readonly sessionDenyPatterns?: readonly string[] | undefined;
+  /**
+   * False when the host process ends with the current run (a one-off
+   * `scream -p`): the main agent refuses new scheduled tasks and fires none.
+   */
+  readonly scheduledTasks?: boolean | undefined;
   readonly skills?: SessionSkillConfig;
   readonly mcpConfig?: SessionMcpConfig;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
@@ -1034,6 +1039,7 @@ export class Session {
       permission: this.permissionOptions(parentAgentId, config.permission),
       log: this.log.createChild({ agentId: id }),
       pluginSessionStarts: type === 'main' ? this.options.pluginSessionStarts : undefined,
+      scheduledTasks: type === 'main' ? this.options.scheduledTasks : undefined,
       resolveRuntimeSystemPrompt: (basePrompt) => this.effectiveSystemPrompt(basePrompt),
     });
     // Registered at construction, before any caller can run or evict the

@@ -119,7 +119,9 @@ describe('CronCreateTool', () => {
       cron: */5 * * * *
       humanSchedule: every 5 minutes
       recurring: true
-      nextFireAt: <iso>"
+      nextFireAt: <iso>
+      now: <iso>
+      timeZone: <tz>"
     `);
 
     expect(manager.store.list()).toHaveLength(1);
@@ -138,7 +140,9 @@ describe('CronCreateTool', () => {
       cron: 0 12 * * *
       humanSchedule: at 12:00 every day
       recurring: false
-      nextFireAt: <iso>"
+      nextFireAt: <iso>
+      now: <iso>
+      timeZone: <tz>"
     `);
 
     const tasks = manager.store.list();
@@ -155,8 +159,12 @@ describe('CronCreateTool', () => {
         recurring: true,
       }),
     );
-    expect(msg).toMatchInlineSnapshot(
-      `"Invalid cron expression: cron expression must have exactly 5 fields (minute hour day-of-month month day-of-week); got 3"`,
+    expect(scrubCronOutput(msg)).toMatchInlineSnapshot(
+      `
+      "Invalid cron expression: cron expression must have exactly 5 fields (minute hour day-of-month month day-of-week); got 3
+      now: <iso>
+      timeZone: <tz>"
+    `,
     );
 
     expect(manager.store.list()).toHaveLength(0);
@@ -172,8 +180,12 @@ describe('CronCreateTool', () => {
         recurring: false,
       }),
     );
-    expect(msg).toMatchInlineSnapshot(
-      `"Cron expression "0 0 31 2 *" has no fire within 5 years; refusing to schedule."`,
+    expect(scrubCronOutput(msg)).toMatchInlineSnapshot(
+      `
+      "Cron expression "0 0 31 2 *" has no fire within 5 years; refusing to schedule.
+      now: <iso>
+      timeZone: <tz>"
+    `,
     );
 
     expect(manager.store.list()).toHaveLength(0);
@@ -189,8 +201,12 @@ describe('CronCreateTool', () => {
         recurring: true,
       }),
     );
-    expect(msg).toMatchInlineSnapshot(
-      `"Cron scheduling is disabled (SCREAM_DISABLE_CRON=1)."`,
+    expect(scrubCronOutput(msg)).toMatchInlineSnapshot(
+      `
+      "Cron scheduling is disabled (SCREAM_DISABLE_CRON=1).
+      now: <iso>
+      timeZone: <tz>"
+    `,
     );
 
     expect(manager.store.list()).toHaveLength(0);
@@ -216,8 +232,12 @@ describe('CronCreateTool', () => {
         recurring: true,
       }),
     );
-    expect(msg).toMatchInlineSnapshot(
-      `"Cron job cap reached (max 50 per session)."`,
+    expect(scrubCronOutput(msg)).toMatchInlineSnapshot(
+      `
+      "Cron job cap reached (max 50 per session).
+      now: <iso>
+      timeZone: <tz>"
+    `,
     );
 
     expect(manager.store.list()).toHaveLength(MAX_CRON_JOBS_PER_SESSION);
@@ -236,8 +256,12 @@ describe('CronCreateTool', () => {
         recurring: true,
       }),
     );
-    expect(msg).toMatchInlineSnapshot(
-      `"Prompt exceeds 8192 bytes (got 9000)."`,
+    expect(scrubCronOutput(msg)).toMatchInlineSnapshot(
+      `
+      "Prompt exceeds 8192 bytes (got 9000).
+      now: <iso>
+      timeZone: <tz>"
+    `,
     );
 
     expect(manager.store.list()).toHaveLength(0);
@@ -557,8 +581,12 @@ describe('CronCreateTool', () => {
 
       expect(firstResult.isError ?? false).toBe(false);
       expect(secondResult.isError).toBe(true);
-      expect(secondResult.output).toMatchInlineSnapshot(
-        `"Cron job cap reached (max 50 per session)."`,
+      expect(scrubCronOutput(secondResult.output as string)).toMatchInlineSnapshot(
+        `
+        "Cron job cap reached (max 50 per session).
+        now: <iso>
+        timeZone: <tz>"
+      `,
       );
       expect(manager.store.list()).toHaveLength(MAX_CRON_JOBS_PER_SESSION);
     });

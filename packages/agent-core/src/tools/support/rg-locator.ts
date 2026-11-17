@@ -10,6 +10,13 @@
  * If steps 1-4 all fail, callers receive a structured error they can
  * turn into a user-facing "install ripgrep" hint instead of the naked
  * `spawn rg ENOENT`.
+ *
+ * The download is bounded end to end (no response, no data for a while, or
+ * too long overall all abort it), and a failed attempt is remembered for a
+ * short cool-down: a blocked network must cost one wait, not one wait per Grep
+ * call. `SCREAM_RG_DOWNLOAD_BASE_URL` points the download at a mirror of the
+ * release directory; every archive is still checked against its pinned SHA-256,
+ * so a mirror cannot substitute different bytes.
  */
 
 import { createHash } from 'node:crypto';
@@ -17,7 +24,7 @@ import { createWriteStream, existsSync } from 'node:fs';
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'pathe';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 import { extract as extractTar } from 'tar';
@@ -27,8 +34,15 @@ import { resolveScreamHome } from '../../config/path';
 import { abortable } from '../../utils/abort';
 
 const RG_VERSION = '15.0.0';
-const RG_BASE_URL = `https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}`;
+const DEFAULT_RG_BASE_URL = `https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}`;
+/** Ceiling for the whole download, headers and body together. */
 const DOWNLOAD_TIMEOUT_MS = 600_000;
+/** How long the server may take to start answering before the attempt is abandoned. */
+const RG_RESPONSE_TIMEOUT_MS = 30_000;
+/** How long the body may go without a single byte before the attempt is abandoned. */
+const RG_STALL_TIMEOUT_MS = 30_000;
+/** After a failed bootstrap, later callers get the same failure for this long instead of re-downloading. */
+const BOOTSTRAP_RETRY_COOLDOWN_MS = 120_000;
 const RG_ARCHIVE_SHA256: Record<string, string> = {
   'ripgrep-15.0.0-aarch64-apple-darwin.tar.gz':
     '98bb2e61e7277ba0ea72d2ae2592497fd8d2940934a16b122448d302a6637e3b',
@@ -43,6 +57,22 @@ const RG_ARCHIVE_SHA256: Record<string, string> = {
   'ripgrep-15.0.0-x86_64-unknown-linux-musl.tar.gz':
     '253ad0fd5fef0d64cba56c70dccdacc1916d4ed70ad057cc525fcdb0c3bbd2a7',
 };
+
+/**
+ * Directory the archives are fetched from: upstream's release directory, or the
+ * mirror named by `SCREAM_RG_DOWNLOAD_BASE_URL` (same file names as upstream,
+ * trailing slashes ignored).
+ */
+export function rgDownloadBaseUrl(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const raw = env['SCREAM_RG_DOWNLOAD_BASE_URL']?.trim();
+  if (raw === undefined || raw === '') return DEFAULT_RG_BASE_URL;
+  if (!/^https?:\/\//i.test(raw)) {
+    throw new Error('SCREAM_RG_DOWNLOAD_BASE_URL must start with http:// or https://.');
+  }
+  return raw.replace(/\/+$/, '');
+}
 
 export type RgResolutionSource =
   | 'system-path'
@@ -106,14 +136,42 @@ export async function findExistingRg(shareDir: string): Promise<RgResolution | u
 }
 
 let downloadPromise: Promise<RgResolution> | undefined;
+let lastBootstrapFailure: { readonly message: string; readonly at: number } | undefined;
+
+/** The remembered failure, worded for a caller who arrives during the cool-down. */
+function bootstrapCooldownError(): Error | undefined {
+  if (lastBootstrapFailure === undefined) return undefined;
+  const remainingMs = BOOTSTRAP_RETRY_COOLDOWN_MS - (Date.now() - lastBootstrapFailure.at);
+  if (remainingMs <= 0) return undefined;
+  return new Error(
+    `${lastBootstrapFailure.message} (the last attempt failed moments ago; trying again in ` +
+      `${String(Math.ceil(remainingMs / 1000))}s)`,
+  );
+}
+
+/** @internal for tests — forget a remembered bootstrap failure. */
+export function resetRgBootstrapState(): void {
+  lastBootstrapFailure = undefined;
+  downloadPromise = undefined;
+}
+
 async function downloadRgWithLock(shareDir: string): Promise<RgResolution> {
   if (downloadPromise !== undefined) return downloadPromise;
+  const cooling = bootstrapCooldownError();
+  if (cooling !== undefined) throw cooling;
   downloadPromise = (async () => {
     try {
       const existing = await findExistingRg(shareDir);
       if (existing) return existing;
       const binPath = await downloadAndInstallRg(shareDir);
-      return { path: binPath, source: 'share-bin-downloaded' };
+      lastBootstrapFailure = undefined;
+      return { path: binPath, source: 'share-bin-downloaded' } as const;
+    } catch (error) {
+      lastBootstrapFailure = {
+        message: error instanceof Error ? error.message : String(error),
+        at: Date.now(),
+      };
+      throw error;
     } finally {
       downloadPromise = undefined;
     }
@@ -308,7 +366,7 @@ export function pinnedRgArchive(target: string): RgArchive {
         'downloaded. Install ripgrep with your package manager and re-run.',
     );
   }
-  return { target, name, url: `${RG_BASE_URL}/${name}`, sha256, isWindows };
+  return { target, name, url: `${rgDownloadBaseUrl()}/${name}`, sha256, isWindows };
 }
 
 /**
@@ -348,23 +406,7 @@ async function downloadAndInstallRg(shareDir: string): Promise<string> {
   try {
     const archivePath = join(tmp, archiveName);
 
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => {
-      controller.abort();
-    }, DOWNLOAD_TIMEOUT_MS);
-    let resp: Response;
-    try {
-      resp = await fetch(url, { signal: controller.signal });
-    } finally {
-      clearTimeout(timeoutHandle);
-    }
-    if (!resp.ok || resp.body === null) {
-      throw new Error(`Failed to download ripgrep: HTTP ${String(resp.status)} ${resp.statusText}`);
-    }
-    const write = createWriteStream(archivePath);
-    // Readable.fromWeb is typed as accepting a web ReadableStream; the
-    // undici/fetch body matches that shape at runtime.
-    await pipeline(Readable.fromWeb(resp.body as never), write);
+    await downloadArchive(url, archivePath);
     await verifyArchiveChecksum(archivePath, archiveName, expectedSha256);
 
     if (isWindows) {
@@ -403,6 +445,76 @@ async function downloadAndInstallRg(shareDir: string): Promise<string> {
     return destination;
   } finally {
     await rm(tmp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Fetch `url` into `archivePath`, bounded end to end: the server must start
+ * answering within {@link RG_RESPONSE_TIMEOUT_MS}, the body may not go
+ * {@link RG_STALL_TIMEOUT_MS} without a byte, and the whole thing may not exceed
+ * {@link DOWNLOAD_TIMEOUT_MS}. (The old guard was cleared as soon as headers
+ * arrived, so a body that stalled mid-stream waited on the socket's own limits.)
+ */
+async function downloadArchive(url: string, archivePath: string): Promise<void> {
+  let host: string;
+  try {
+    host = new URL(url).host;
+  } catch {
+    host = url;
+  }
+  const controller = new AbortController();
+  let abortReason: string | undefined;
+  const abortWith = (why: string): void => {
+    abortReason = why;
+    controller.abort();
+  };
+  const overall = setTimeout(() => {
+    abortWith(
+      `ripgrep download from ${host} did not finish within ${String(DOWNLOAD_TIMEOUT_MS / 1000)}s`,
+    );
+  }, DOWNLOAD_TIMEOUT_MS);
+  let stall: ReturnType<typeof setTimeout> | undefined;
+  const armStall = (ms: number, why: string): void => {
+    if (stall !== undefined) clearTimeout(stall);
+    stall = setTimeout(() => {
+      abortWith(why);
+    }, ms);
+  };
+  try {
+    armStall(
+      RG_RESPONSE_TIMEOUT_MS,
+      `no response from ${host} within ${String(RG_RESPONSE_TIMEOUT_MS / 1000)}s while downloading ripgrep`,
+    );
+    const resp = await fetch(url, { signal: controller.signal });
+    if (!resp.ok || resp.body === null) {
+      throw new Error(`Failed to download ripgrep: HTTP ${String(resp.status)} ${resp.statusText}`);
+    }
+    const stalledMessage =
+      `ripgrep download from ${host} stalled: no data for ${String(RG_STALL_TIMEOUT_MS / 1000)}s`;
+    armStall(RG_STALL_TIMEOUT_MS, stalledMessage);
+    // Every chunk proves the connection is alive, so it pushes the stall deadline back.
+    const heartbeat = new Transform({
+      transform(chunk, _encoding, done) {
+        armStall(RG_STALL_TIMEOUT_MS, stalledMessage);
+        done(null, chunk);
+      },
+    });
+    // Readable.fromWeb is typed as accepting a web ReadableStream; the
+    // undici/fetch body matches that shape at runtime.
+    await pipeline(
+      Readable.fromWeb(resp.body as never),
+      heartbeat,
+      createWriteStream(archivePath),
+      { signal: controller.signal },
+    );
+  } catch (error) {
+    // An abort from one of our own deadlines surfaces as a bare AbortError;
+    // say which deadline it was instead.
+    if (abortReason !== undefined) throw new Error(abortReason, { cause: error });
+    throw error;
+  } finally {
+    clearTimeout(overall);
+    if (stall !== undefined) clearTimeout(stall);
   }
 }
 
@@ -512,6 +624,8 @@ export function rgUnavailableMessage(cause: unknown): string {
     `  Ubuntu:  sudo apt-get install ripgrep\n` +
     `  Other:   https://github.com/BurntSushi/ripgrep#installation\n` +
     `\n` +
-    `Alternatively, drop a static rg binary at ${shareBin}`
+    `Without access to GitHub: set SCREAM_RG_DOWNLOAD_BASE_URL to a mirror of\n` +
+    `  ${DEFAULT_RG_BASE_URL}\n` +
+    `(archives are still verified against pinned SHA-256 digests), or drop a static rg binary at ${shareBin}`
   );
 }

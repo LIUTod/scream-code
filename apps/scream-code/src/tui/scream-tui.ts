@@ -431,6 +431,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     if (shouldReplayHistory) {
       await this.sessionReplay.hydrateFromReplay(this.requireSession());
     }
+    // The startup session subscribed at the end of init; with the history now
+    // on screen its held scheduled tasks may fire (see startScheduledTasks).
+    if (this.session !== undefined) await this.sessionManager.startScheduledTasks(this.session);
     const resumeState = this.session?.getResumeState();
     if (resumeState?.warning !== undefined) {
       this.showStatus(t('tui.resume_warning', { warning: resumeState.warning }), this.state.theme.colors.warning);

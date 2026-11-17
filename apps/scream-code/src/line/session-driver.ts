@@ -10,8 +10,8 @@
  */
 
 import { execFile } from 'node:child_process';
-import { realpath, rm, stat } from 'node:fs/promises';
-import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
+import { readdir, realpath, rm, stat } from 'node:fs/promises';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
@@ -412,6 +412,61 @@ export class LineSessionDriver {
     return `本轮执行超时（${this.turnTimeoutMinutes} 分钟），已取消。请重试或拆分任务。`;
   }
 
+  /**
+   * Re-opens, after a daemon start, every chat session that still has
+   * scheduled tasks on disk, for the platforms in `keyPrefixes`
+   * (`line-feishu-`, `line-weixin-`).
+   *
+   * Sessions are otherwise opened by the chat's next message, so a restart —
+   * a reboot, a crash, an update — silently stopped every scheduled task until
+   * the user happened to write. Opening the session reloads its tasks and
+   * attaches the forwarder that posts their results to the chat; a fire missed
+   * while the daemon was down arrives once (recurring tasks report how many
+   * were missed). Call it after the platforms are up and the proactive sender
+   * is wired, so an overdue task can deliver immediately. Returns the session
+   * keys it opened; a session that fails to open is logged and skipped.
+   */
+  async resumeScheduledSessions(keyPrefixes: readonly string[]): Promise<readonly string[]> {
+    const harness = this.harness;
+    if (harness === undefined || this.closed || keyPrefixes.length === 0) return [];
+    // Every session, not just the current work directory's: a chat's next
+    // message finds its session by id wherever it lives (the work directory may
+    // have changed in the config, or gained a `.git` that moved its project
+    // root), so the wake-up must reach the same sessions. Chat session ids are
+    // per-chat hashes, so the prefix alone identifies them.
+    let summaries: Awaited<ReturnType<ScreamHarness['listSessions']>>;
+    try {
+      summaries = await harness.listSessions();
+    } catch (error) {
+      log.warn('line: could not list sessions to resume scheduled tasks', { error: String(error) });
+      return [];
+    }
+    const opened: string[] = [];
+    for (const summary of summaries) {
+      if (this.closed) break;
+      const sessionKey = summary.id;
+      if (!keyPrefixes.some((prefix) => sessionKey.startsWith(prefix))) continue;
+      if (this.sessions.has(sessionKey)) continue;
+      if (!(await hasScheduledTasks(summary.sessionDir))) continue;
+      try {
+        const session = await this.resolveSession(sessionKey, { repair: false });
+        if (this.closed) {
+          // Shutdown began while it was opening; close() has already swept.
+          await session.close().catch(() => {});
+          break;
+        }
+        opened.push(sessionKey);
+        log.info('line: resumed a session with scheduled tasks', { sessionKey });
+      } catch (error) {
+        log.warn('line: could not resume a session with scheduled tasks', {
+          sessionKey,
+          error: String(error),
+        });
+      }
+    }
+    return opened;
+  }
+
   /** Close all sessions and the harness (daemon shutdown). */
   async close(): Promise<void> {
     this.closed = true;
@@ -762,16 +817,22 @@ export class LineSessionDriver {
    * arrive while the first turn is still creating the session: both paths share
    * one in-flight promise instead of racing into two Session objects.
    */
-  private async resolveSession(sessionKey: string): Promise<Session> {
+  private async resolveSession(
+    sessionKey: string,
+    options: { readonly repair?: boolean } = {},
+  ): Promise<Session> {
     const existing = this.sessions.get(sessionKey);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      // The common case stays synchronous (no extra await on every message).
+      return this.promptedSessions.has(existing) ? existing : this.withChannelPrompt(sessionKey, existing);
+    }
     const pending = this.sessionCreations.get(sessionKey);
     if (pending !== undefined) return pending;
     return this.withLifecycleLock(sessionKey, async () => {
       // Re-check inside the lock: a reset may have run while we waited.
       const inside = this.sessions.get(sessionKey);
-      if (inside !== undefined) return inside;
-      const creation = this.createSessionFor(sessionKey).finally(() => {
+      if (inside !== undefined) return this.withChannelPrompt(sessionKey, inside);
+      const creation = this.createSessionFor(sessionKey, options).finally(() => {
         this.sessionCreations.delete(sessionKey);
       });
       this.sessionCreations.set(sessionKey, creation);
@@ -803,17 +864,43 @@ export class LineSessionDriver {
     }
   }
 
-  private async createSessionFor(sessionKey: string): Promise<Session> {
+  private async createSessionFor(
+    sessionKey: string,
+    options: { readonly repair?: boolean } = {},
+  ): Promise<Session> {
     const harness = this.harness;
     if (!harness) throw new Error('LineSessionDriver 未初始化');
     const workDir = this.options.workDir ?? process.cwd();
     const { permission, planMode } = mapStreamJsonMode(this.options.permissionMode);
-    const session = await this.getOrCreateSession(harness, sessionKey, workDir, permission, planMode);
+    const session = await this.getOrCreateSession(harness, sessionKey, workDir, permission, planMode, options);
     this.sessions.set(sessionKey, session);
     this.sessionKeyBySessionId.set(session.id, sessionKey);
     this.attachCronForwarder(sessionKey, session);
-    await this.applyChannelPrompt(session);
+    try {
+      await this.applyChannelPrompt(session);
+    } finally {
+      // Only now may tasks fire. The session was opened with scheduling held:
+      // a task that fell due while the chat's session was closed (the daemon
+      // was down, or `/stop` closed it) fires on the first scheduler tick, and
+      // the core does not replay events — fired before the forwarder
+      // subscribed, its result would never reach the chat. Started after the
+      // channel prompt so a fired turn runs with it, and in `finally` so a
+      // failed prompt (the session is already cached and reused) cannot leave
+      // the chat's tasks held for good.
+      await this.startScheduledTasks(sessionKey, session);
+    }
     return session;
+  }
+
+  private async startScheduledTasks(sessionKey: string, session: Session): Promise<void> {
+    try {
+      await session.startScheduledTasks();
+    } catch (error) {
+      log.error('line: could not start scheduled tasks for a chat session', {
+        sessionKey,
+        error: String(error),
+      });
+    }
   }
 
   /** Drops the chat's session so the next message starts a fresh one. */
@@ -860,6 +947,22 @@ export class LineSessionDriver {
   }
 
   /** Tells the model which channel it is on and registers the media tool. */
+  /**
+   * A cached session whose channel prompt failed to land when it was opened
+   * gets another try on each use (`applyChannelPrompt` only marks a session
+   * once the prompt landed). A repeat failure is logged, and the chat carries
+   * on without it — exactly what a cached session did before.
+   */
+  private async withChannelPrompt(sessionKey: string, session: Session): Promise<Session> {
+    if (this.promptedSessions.has(session)) return session;
+    try {
+      await this.applyChannelPrompt(session);
+    } catch (error) {
+      log.warn('line: channel prompt still not applied', { sessionKey, error: String(error) });
+    }
+    return session;
+  }
+
   private async applyChannelPrompt(session: Session): Promise<void> {
     if (this.promptedSessions.has(session)) return;
     await session.setRuntimeSystemPrompt({ append: buildChannelPrompt(this.options.platform) });
@@ -963,14 +1066,26 @@ export class LineSessionDriver {
     workDir: string,
     permission: MappedMode['permission'],
     planMode: MappedMode['planMode'],
+    options: { readonly repair?: boolean } = {},
   ): Promise<Session> {
+    // `repair: false` (opening a chat at daemon start, with nobody asking):
+    // never delete or replace anything. The repair below wipes the session
+    // directory — history and scheduled tasks — which is a fair trade when the
+    // user just wrote and needs an answer, but not for a background open that
+    // may have failed for a passing reason; the next message still repairs.
+    const repair = options.repair !== false;
     const existing = await harness.listSessions({ sessionId: sessionKey, workDir });
+    if (existing.length === 0 && !repair) {
+      throw new Error(`session ${sessionKey} no longer exists`);
+    }
     if (existing.length > 0) {
       try {
-        const session = await harness.resumeSession({ id: sessionKey });
+        // Held until the forwarder listens; `createSessionFor` starts it.
+        const session = await harness.resumeSession({ id: sessionKey, scheduledTasks: false });
         log.info('line: resumed session', { sessionKey, sessionId: session.id });
         return session;
       } catch (error) {
+        if (!repair) throw error;
         // Inconsistent state: directory without index entry, or a stale index
         // entry pointing to a missing directory. Clean up BOTH before
         // createSession (port of run-stream-json L676-712).
@@ -1022,6 +1137,8 @@ export class LineSessionDriver {
       permission,
       planMode,
       metadata: { source: 'line', agentType: 'scream-code', platform: this.options.platform },
+      // Held until the forwarder listens; `createSessionFor` starts it.
+      scheduledTasks: false,
     });
     log.info('line: created session', { sessionKey, sessionId: session.id });
     return session;
@@ -1121,4 +1238,21 @@ function toSenderKind(
 function describeToolError(error: unknown): string {
   if (error instanceof Error && error.message.length > 0) return error.message;
   return String(error);
+}
+
+/**
+ * Scheduled tasks belong to the session's main agent, whose own directory is
+ * `<sessionDir>/agents/main`; the core keeps each task there as
+ * `cron/<8-hex id>.json` (only the main agent schedules — subagents have no cron).
+ */
+const CRON_TASK_FILE = /^[0-9a-f]{8}\.json$/;
+
+/** True when the session's main agent holds at least one persisted scheduled task. */
+async function hasScheduledTasks(sessionDir: string): Promise<boolean> {
+  try {
+    const entries = await readdir(join(sessionDir, 'agents', 'main', 'cron'));
+    return entries.some((entry) => CRON_TASK_FILE.test(entry));
+  } catch {
+    return false;
+  }
 }

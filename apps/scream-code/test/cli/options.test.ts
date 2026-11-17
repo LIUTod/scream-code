@@ -289,3 +289,21 @@ describe('CLI options parsing', () => {
     });
   });
 });
+
+describe('--max-time', () => {
+  it('is parsed into milliseconds', () => {
+    expect(parse(['-p', 'hi', '--max-time', '10m']).maxTimeMs).toBe(600_000);
+    expect(parse(['-p', 'hi', '--max-time', '90']).maxTimeMs).toBe(90_000);
+    expect(parse(['-p', 'hi']).maxTimeMs).toBeUndefined();
+  });
+
+  it('rejects a value that is not a duration, naming the value', () => {
+    expect(() => parse(['-p', 'hi', '--max-time', 'soon'])).toThrow(/soon/);
+    expect(() => parse(['-p', 'hi', '--max-time', '0'])).toThrow(/--max-time/);
+  });
+
+  it('only makes sense in prompt mode', () => {
+    expect(() => validateOptions(parse(['--max-time', '10m']))).toThrow(OptionConflictError);
+    expect(validateOptions(parse(['-p', 'hi', '--max-time', '10m'])).uiMode).toBe('print');
+  });
+});

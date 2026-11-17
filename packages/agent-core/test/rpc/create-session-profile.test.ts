@@ -87,8 +87,8 @@ function sorted(names: readonly string[]): string[] {
  * differ by the milliseconds between render and assertion.
  */
 async function expectedBasePrompt(agent: Agent): Promise<string> {
-  const now = /ISO format is `([^`]+)`/.exec(agent.config.systemPrompt)?.[1];
-  if (now === undefined) throw new Error('system prompt is missing the ISO timestamp');
+  const now = /session was opened \(started or resumed\) was `([^`]+)`/.exec(agent.config.systemPrompt)?.[1];
+  if (now === undefined) throw new Error('system prompt is missing the session-open timestamp');
   const context = await prepareSystemPromptContext(agent.jian);
   const base = DEFAULT_AGENT_PROFILES['agent'];
   if (base === undefined) throw new Error('default agent profile is missing');
@@ -309,6 +309,53 @@ describe('createSession permission deny rules', () => {
     } finally {
       await core.sessions.get(createdId)?.close();
     }
+  });
+
+  it('turns scheduled tasks off for a host that exits with the run, on create and on resume', async () => {
+    const homeDir = await makeTempDir('scream-sched-home-');
+    await writeFile(join(homeDir, 'config.toml'), TEST_CONFIG, 'utf-8');
+    const workDir = await makeTempDir('scream-sched-work-');
+    const { core, rpc } = await createCore(homeDir);
+
+    // The default keeps scheduling on: interactive hosts and the IM daemon rely on it.
+    const normal = await rpc.createSession({ workDir });
+    expect(mainAgentOf(core, normal.id).cron?.firing).toBe(true);
+    await rpc.closeSession({ sessionId: normal.id });
+
+    const oneOff = await rpc.createSession({ workDir, scheduledTasks: false });
+    expect(mainAgentOf(core, oneOff.id).cron?.firing).toBe(false);
+    await rpc.closeSession({ sessionId: oneOff.id });
+
+    // Closed through the RPC, as hosts do: that drops the instance, so the
+    // resume below really rebuilds it. A resumed session is rebuilt, so the
+    // switch is per open, not per session:
+    // resuming a one-off session interactively schedules again, and the reverse.
+    const resumedOn = await rpc.resumeSession({ sessionId: oneOff.id });
+    expect(mainAgentOf(core, resumedOn.id).cron?.firing).toBe(true);
+    await rpc.closeSession({ sessionId: resumedOn.id });
+
+    const resumedOff = await rpc.resumeSession({ sessionId: normal.id, scheduledTasks: false });
+    expect(mainAgentOf(core, resumedOff.id).cron?.firing).toBe(false);
+    await rpc.closeSession({ sessionId: resumedOff.id });
+  });
+
+  it('holds a fork too, and startScheduledTasks turns a held session on once', async () => {
+    const homeDir = await makeTempDir('scream-sched-fork-home-');
+    await writeFile(join(homeDir, 'config.toml'), TEST_CONFIG, 'utf-8');
+    const workDir = await makeTempDir('scream-sched-fork-work-');
+    const { core, rpc } = await createCore(homeDir);
+
+    const source = await rpc.createSession({ workDir });
+    const fork = await rpc.forkSession({ sessionId: source.id, scheduledTasks: false });
+    expect(mainAgentOf(core, fork.id).cron?.firing).toBe(false);
+    expect(await rpc.startScheduledTasks({ sessionId: fork.id, agentId: 'main' })).toBe(true);
+    expect(mainAgentOf(core, fork.id).cron?.firing).toBe(true);
+    expect(await rpc.startScheduledTasks({ sessionId: fork.id, agentId: 'main' })).toBe(false);
+
+    // Without the option a fork schedules as before.
+    const plain = await rpc.forkSession({ sessionId: source.id });
+    expect(mainAgentOf(core, plain.id).cron?.firing).toBe(true);
+    for (const id of [source.id, fork.id, plain.id]) await rpc.closeSession({ sessionId: id });
   });
 
   it('reapplies host deny rules on resume', async () => {

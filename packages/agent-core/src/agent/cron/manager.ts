@@ -13,7 +13,7 @@
  *   - translate a fired `CronTask` into a `steer(...)` call carrying a
  *     `CronJobOrigin` and emitting a `cron.fired` event;
  *   - mirror every store mutation to `<sessionDir>/cron/<id>.json`
- *     (via {@link addTask} / {@link removeTasks}) so that `scream resume`
+ *     (via {@link addTask} / {@link removeTasks}) so that a session resume
  *     can call {@link loadFromDisk} to rehydrate previously-scheduled
  *     tasks. When no `sessionDir` is supplied (subagents, tests,
  *     ephemeral sessions) the manager stays purely in-memory.
@@ -85,6 +85,21 @@ export interface CronManagerOptions {
    * means "no automatic timer — caller drives `tick()` manually".
    */
   readonly pollIntervalMs?: number | null;
+
+  /**
+   * False when the host process ends with the current run (`scream -p`): no
+   * task could ever fire, so new ones are refused with an explanation and the
+   * scheduler is never started — a resumed session's own tasks must not fire
+   * into a one-off command either (they would be spent there, unseen, instead
+   * of in the interactive session that owns them). Stored tasks stay on disk
+   * and remain listable and deletable. Defaults to true.
+   *
+   * A host can also open with it off and call {@link CronManager.enableFiring}
+   * once it is listening for events: a task that fell due while the session
+   * was closed fires on the first tick after the reload, and a host that only
+   * subscribes when the open returns would otherwise miss that fire.
+   */
+  readonly firing?: boolean;
 }
 
 export class CronManager {
@@ -97,6 +112,13 @@ export class CronManager {
    * scheduler so the entire stack shares one notion of "now".
    */
   readonly clocks: ClockSources;
+
+  /** See {@link CronManagerOptions.firing}. Read live by the create gate. */
+  get firing(): boolean {
+    return this.firingEnabled;
+  }
+
+  private firingEnabled: boolean;
 
   private readonly scheduler: CronScheduler;
   private readonly agent: Agent;
@@ -121,7 +143,7 @@ export class CronManager {
    * `sessionDir` was supplied — the manager then behaves as pure
    * in-memory, matching pre-persistence semantics. When defined,
    * `addTask` / `removeTasks` schedule fire-and-forget writes so a
-   * later `scream resume` can reload via {@link loadFromDisk}.
+   * later session resume can reload via {@link loadFromDisk}.
    */
   private readonly persistStore: PerIdJsonStore<CronTask> | undefined;
 
@@ -137,6 +159,7 @@ export class CronManager {
   constructor(agent: Agent, opts: CronManagerOptions = {}) {
     this.agent = agent;
     this.store = new SessionCronStore();
+    this.firingEnabled = opts.firing !== false;
     this.clocks =
       opts.clocks ??
       resolveClockSources(process.env['SCREAM_CRON_CLOCK']) ??
@@ -217,7 +240,7 @@ export class CronManager {
 
   /**
    * Persist the scheduler's `lastFiredAt` cursor for a recurring task
-   * so a `scream resume` does not coalesce-replay an already-delivered
+   * so a session resume does not coalesce-replay an already-delivered
    * fire. Called by the scheduler's `onAdvanceCursor` callback after a
    * successful recurring fire.
    *
@@ -258,7 +281,7 @@ export class CronManager {
 
   /**
    * Rehydrate the in-memory store from `<sessionDir>/cron/` after
-   * `scream resume`. No-op when persistence is not attached. Idempotent:
+   * a session resume. No-op when persistence is not attached. Idempotent:
    * clears the in-memory map and re-inserts every record on disk.
    *
    * Tasks are inserted via {@link SessionCronStore.adopt} so the
@@ -324,6 +347,7 @@ export class CronManager {
    */
   start(): void {
     if (this.started) return;
+    if (!this.firing) return;
     this.started = true;
     this.scheduler.start();
     this.bindSigusr1();
@@ -346,6 +370,17 @@ export class CronManager {
     await this.scheduler.stop();
     await this.flushPersist();
     this.started = false;
+  }
+
+  /**
+   * Turn firing on for a manager opened with `firing: false` and start the
+   * scheduler. Returns true when it was off. Idempotent.
+   */
+  enableFiring(): boolean {
+    if (this.firingEnabled) return false;
+    this.firingEnabled = true;
+    this.start();
+    return true;
   }
 
   /** Drive one scheduler tick synchronously. Used by tests + P1.8 SIGUSR1. */
@@ -439,7 +474,7 @@ export class CronManager {
     const content: ContentPart[] = [
       {
         type: 'text',
-        text: renderCronFireXml(origin, task.prompt),
+        text: renderCronFireXml(origin, task.prompt, this.clocks.wallNow()),
       },
     ];
     const turnId = this.agent.turn.steer(content, origin);

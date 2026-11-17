@@ -61,6 +61,12 @@ export interface CreateSessionPayload {
    * mode, unlike the approval handler, which no longer sees tool calls.
    */
   readonly permissionDenyRules?: readonly string[] | undefined;
+  /**
+   * False when the host process ends with this run (a one-off `scream -p`):
+   * scheduled tasks are refused and none fire. A resumed session is rebuilt,
+   * so the host sends it again on every resume. Defaults to true.
+   */
+  readonly scheduledTasks?: boolean | undefined;
   readonly metadata?: JsonObject | undefined;
   /** Session-scoped agent profile (name / system prompt / tool subset). Omitted ⇒ default agent profile. */
   readonly profile?: SessionAgentProfile | undefined;
@@ -87,6 +93,12 @@ export interface ResumeSessionPayload {
    * enforces a CLI-compat deny list must send it again on every resume.
    */
   readonly permissionDenyRules?: readonly string[] | undefined;
+  /**
+   * False when the host process ends with this run (a one-off `scream -p`):
+   * scheduled tasks are refused and none fire. A resumed session is rebuilt,
+   * so the host sends it again on every resume. Defaults to true.
+   */
+  readonly scheduledTasks?: boolean | undefined;
 }
 
 export interface ForkSessionPayload {
@@ -94,6 +106,8 @@ export interface ForkSessionPayload {
   readonly id?: string;
   readonly title?: string;
   readonly metadata?: JsonObject;
+  /** As on resume: `false` opens the fork with scheduled tasks held (see `startScheduledTasks`). */
+  readonly scheduledTasks?: boolean | undefined;
 }
 
 export interface ShellEnvironment {
@@ -516,6 +530,14 @@ export interface AgentAPI {
   createCronTask: (payload: CreateCronTaskPayload) => CronTaskInfo;
   /** Returns the ids that were actually present, matching `CronManager.removeTasks`. */
   removeCronTasks: (payload: RemoveCronTasksPayload) => readonly string[];
+  /**
+   * Start firing scheduled tasks for an agent opened with `scheduledTasks:
+   * false`. A host that must see every fire (the IM daemon relays them to a
+   * chat) opens that way, subscribes to events, then calls this — an overdue
+   * task fires on the first tick and would otherwise land before anyone
+   * listens. Returns true when firing was off. Idempotent.
+   */
+  startScheduledTasks: (payload: EmptyPayload) => boolean;
   extractMemoriesOnExit: (payload: EmptyPayload) => Promise<number>;
   sideQuestion: (payload: SideQuestionPayload) => Promise<SideQuestionResult>;
   generateText: (payload: GenerateTextPayload) => Promise<GenerateTextResult>;

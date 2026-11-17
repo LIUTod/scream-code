@@ -240,6 +240,41 @@ describe('/cron add wizard', () => {
     });
   });
 
+  it('tells the user the task only fires while this session is open, once it is created', async () => {
+    const { host, mounted } = makeHost([]);
+    const run = handleCronCommand(host, 'add');
+    await tick();
+    (mounted[0] as PickerHandle).opts.onSelect('0 9 * * *');
+    await tick();
+    (mounted[1] as InputHandle).onDone({ kind: 'ok', value: 'daily check' });
+    await tick();
+    (mounted[2] as PickerHandle).opts.onSelect('recurring');
+    await run;
+
+    expect(host.showStatus).toHaveBeenCalledWith(t('cron.session_only'), darkColors.textDim);
+    // The note names the way back in, and only with commands that exist: there
+    // is no `scream resume` subcommand (resuming is `scream -C`, `-r <id>` or /sessions).
+    expect(t('cron.session_only')).toMatch(/scream -C/);
+    expect(t('cron.session_only')).not.toMatch(/scream resume/);
+  });
+
+  it('describes a repeating task as expiring after 7 days, not "until deleted"', async () => {
+    const { host, mounted } = makeHost([]);
+    const run = handleCronCommand(host, 'add');
+    await tick();
+    (mounted[0] as PickerHandle).opts.onSelect('0 9 * * *');
+    await tick();
+    (mounted[1] as InputHandle).onDone({ kind: 'ok', value: 'daily check' });
+    await tick();
+
+    const kindStep = panelText(mounted, 2);
+    expect(kindStep).toContain(t('cron.kind_recurring_hint'));
+    expect(t('cron.kind_recurring_hint')).toContain('7');
+
+    (mounted[2] as PickerHandle).opts.onSelect('recurring');
+    await run;
+  });
+
   it('accepts a hand-written expression when the custom row is picked', async () => {
     const { host, mounted, createCronTask } = makeHost([]);
     const run = handleCronCommand(host, 'add');
@@ -303,6 +338,8 @@ describe('/cron add wizard', () => {
     await run;
 
     expect(errors.at(-1)).toContain('Invalid cron expression: bad');
+    // Nothing was created, so there is nothing to say about when it fires.
+    expect(host.showStatus).not.toHaveBeenCalledWith(t('cron.session_only'), darkColors.textDim);
   });
 });
 

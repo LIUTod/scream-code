@@ -30,9 +30,9 @@ import {
 import { buildReplyContent, buildTextJSON, truncateForLine } from './format';
 import type { ProactiveDelivery } from '../proactive';
 import { MessageDedup } from '../dedup';
-import type { FeishuRuntimeOptions } from '../config';
+import { getFeishuChatsFile, getFeishuStateDir, type FeishuRuntimeOptions } from '../config';
 import { basename } from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 import {
   MAX_IMAGES_PER_TURN,
@@ -246,14 +246,57 @@ export class FeishuPlatform {
   private readonly receipts = new Map<string, string>();
   /** Sessions with an open image batch, keyed by sessionKey. */
   private readonly pendingImages = new Map<string, PendingImageBatch>();
-  /** sessionKey → chat id, so outbound media can be addressed after the fact. */
+  /** sessionKey → chat id, so outbound media and scheduled-task results can be
+   *  addressed after the fact. Persisted: the key is a hash, so without the
+   *  file a restarted daemon could not tell which chat a task belongs to. */
   private readonly chatBySession = new Map<string, string>();
+  /** Serializes writes of {@link chatBySession}, so an older snapshot never lands last. */
+  private persistChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly client: FeishuClient,
     private readonly options: FeishuRuntimeOptions,
     private readonly dispatch: (message: LineDispatch) => Promise<void> | void,
   ) {}
+
+  /**
+   * Restore the chat of every session seen before a restart. Entries already
+   * set (a message that arrived first) win; a missing or corrupt file just
+   * means the next message from each chat rebuilds its entry.
+   */
+  async loadChats(): Promise<void> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(getFeishuChatsFile(), 'utf-8'));
+    } catch {
+      return;
+    }
+    if (typeof parsed !== 'object' || parsed === null) return;
+    for (const [sessionKey, chatId] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!sessionKey.startsWith('line-feishu-') || typeof chatId !== 'string' || chatId === '') continue;
+      if (!this.chatBySession.has(sessionKey)) this.chatBySession.set(sessionKey, chatId);
+    }
+  }
+
+  /** Record a chat for a session, writing the file only when it changed. */
+  private rememberChat(sessionKey: string, chatId: string): void {
+    if (this.chatBySession.get(sessionKey) === chatId) return;
+    this.chatBySession.set(sessionKey, chatId);
+    const snapshot = JSON.stringify(Object.fromEntries(this.chatBySession), null, 2) + '\n';
+    this.persistChain = this.persistChain.then(async () => {
+      try {
+        await mkdir(getFeishuStateDir(), { recursive: true });
+        await writeFile(getFeishuChatsFile(), snapshot, { encoding: 'utf-8', mode: 0o600 });
+      } catch (error) {
+        log.warn('line-feishu: save chat map failed', { error: String(error) });
+      }
+    });
+  }
+
+  /** @internal for tests — settle pending writes of the chat map. */
+  async flushChats(): Promise<void> {
+    await this.persistChain;
+  }
 
   /** Inbound message entry point (wired to the WS event dispatcher). */
   async handleEvent(event: FeishuEventMessage): Promise<void> {
@@ -309,7 +352,7 @@ export class FeishuPlatform {
     // Only text, images, rich-text posts and files are understood; anything
     // else (stickers, cards, merge-forward) is logged and dropped.
     const sessionKey = makeSessionKey(event, this.options.shareSessionInChannel);
-    this.chatBySession.set(sessionKey, event.chatId);
+    this.rememberChat(sessionKey, event.chatId);
     // Flush any open image batch first: a text message must not be reordered
     // after the photos that preceded it.
     if (event.msgType !== 'image') await this.flushImageBatch(sessionKey);

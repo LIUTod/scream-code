@@ -127,7 +127,8 @@ describe('validateCronSchedule', () => {
 
     expect(oneShot.ok).toBe(false);
     expect(oneShot.ok ? '' : oneShot.error).toMatch(
-      /^One-shot cron "0 0 1 11 \*" would not fire until \d{4}-\d{2}-\d{2}T.* \(more than a year out\)\./,
+      // Both instants local with their offset, like the cron fields themselves.
+      /^One-shot cron "0 0 1 11 \*" would not fire until \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} \(more than a year out; now \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\)\./,
     );
     // The very same expression is fine as a repeating task.
     expect(validateCronSchedule(manager, { cron: '0 0 1 11 *', prompt: 'x' })).toMatchObject({ ok: true });
@@ -197,7 +198,7 @@ describe('scheduleCronTask', () => {
 
 describe('tool path and command path cannot drift', () => {
   it('rejects the same inputs with the identical sentence', () => {
-    const cases: readonly [string, CronCreateInput][] = [
+    const cases: readonly [string, CronCreateInput & { readonly cron: string }][] = [
       ['unparseable expression', { cron: 'nope', prompt: 'x', recurring: true }],
       ['five-year window', { cron: '0 0 31 2 *', prompt: 'x', recurring: true }],
       ['one-shot rollover', { cron: '0 0 1 11 *', prompt: 'x', recurring: false }],
@@ -209,10 +210,12 @@ describe('tool path and command path cannot drift', () => {
       const viaTool = tool.resolveExecution(input);
 
       expect(validated.ok, label).toBe(false);
-      expect(viaTool, label).toMatchObject({
-        isError: true,
-        output: validated.ok ? 'validator accepted' : validated.error,
-      });
+      // Same sentence first; the tool then appends the local clock (`now:` /
+      // `timeZone:`) so the model can correct the schedule.
+      expect(viaTool, label).toMatchObject({ isError: true });
+      const output = (viaTool as { output: string }).output;
+      expect(output.startsWith(validated.ok ? 'validator accepted' : `${validated.error}\nnow: `), label).toBe(true);
+      expect(output, label).toMatch(/\ntimeZone: .+$/);
     }
   });
 
@@ -246,14 +249,16 @@ describe('tool path and command path cannot drift', () => {
     if (!('execute' in execution)) return;
 
     // Fill the store between prepare and execute — the window manual approval
-    // opens, and the only failure `execute` itself can produce.
+    // opens. (For a cron request the other execute-time failure is the one-shot
+    // rollover recheck, covered with the clock tests.)
     for (let i = 0; i < MAX_CRON_JOBS_PER_SESSION; i += 1) {
       manager.addTask({ cron: '*/5 * * * *', prompt: `task-${String(i)}` });
     }
 
-    await expect(execution.execute(toolContext())).resolves.toMatchObject({
-      isError: true,
-      output: `Cron job cap reached (max ${String(MAX_CRON_JOBS_PER_SESSION)} per session).`,
-    });
+    const result = await execution.execute(toolContext());
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output as string).toMatch(
+      new RegExp(`^Cron job cap reached \\(max ${String(MAX_CRON_JOBS_PER_SESSION)} per session\\)\\.\\nnow: .+\\ntimeZone: .+$`),
+    );
   });
 });
