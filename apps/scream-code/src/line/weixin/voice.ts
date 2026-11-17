@@ -101,12 +101,6 @@ export async function findFfmpeg(): Promise<string | null> {
   return null;
 }
 
-/** Test hook: forget the cached lookup. */
-export function resetFfmpegCache(): void {
-  cachedFfmpeg = undefined;
-  cachedMissAt = 0;
-}
-
 async function runFfmpeg(ffmpeg: string, args: string[], input: Buffer): Promise<Buffer> {
   // `spawn`, not `execFile`: execFile decodes stdout according to `encoding`
   // (utf8 by default) and would mangle the AMR bytes; we need raw Buffers.

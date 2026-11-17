@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { sanitizeShellOutput } from '@/tui/utils/sanitize';
+import { sanitizeShellOutput } from '#/tui/utils/sanitize';
 
 describe('sanitizeShellOutput', () => {
   it('preserves plain printable text', () => {

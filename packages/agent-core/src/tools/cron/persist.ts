@@ -2,9 +2,10 @@
  * Cron task persistence.
  *
  * Thin wrapper over `createPerIdJsonStore` that pins the on-disk layout
- * (`<sessionDir>/cron/<task_id>.json`), the cron-id shape (8 lowercase
- * hex chars — same shape `SessionCronStore` generates), and a shape
- * guard for `CronTask`.
+ * (`<root>/cron/<task_id>.json`; the CronManager passes the agent homedir,
+ * so the main agent's tasks live in `<sessionDir>/agents/main/cron/`), the
+ * cron-id shape (8 lowercase hex chars — same shape `SessionCronStore`
+ * generates), and a shape guard for `CronTask`.
  *
  * No `PersistedCronTask` type: a `CronTask` is already pure plain data,
  * so the on-disk record is the in-memory record verbatim. Optional

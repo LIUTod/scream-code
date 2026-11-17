@@ -59,7 +59,7 @@ const DIFF_CONTEXT_LINES = 2;
 const DIFF_MAX_LINES = 40;
 
 export class AstEditTool implements BuiltinTool<AstEditInput> {
-  readonly name = 'ast_edit';
+  readonly name = 'AstEdit';
   readonly description = AST_EDIT_DESCRIPTION;
   readonly parameters = toInputJsonSchema(AstEditInputSchema);
 
@@ -107,7 +107,7 @@ export class AstEditTool implements BuiltinTool<AstEditInput> {
     if (args.rewrite.includes('$$$')) {
       return {
         output:
-          '`$$$NAME` multi-capture expansion is not supported by ast_edit. Rewrite with single-node $NAME placeholders, split the edit, or use Edit for that change.',
+          '`$$$NAME` multi-capture expansion is not supported by AstEdit. Rewrite with single-node $NAME placeholders, split the edit, or use Edit for that change.',
         isError: true,
       };
     }

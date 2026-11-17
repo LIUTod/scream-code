@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { fetchLatestVersionFromNpm } from '#/cli/update/cdn';
+import { fetchLatestVersionFromNpm } from '#/cli/update/latest-version';
 
 function mockExecFileOk(stdout: string): typeof import('node:child_process').execFile {
   const cb = (

@@ -19,8 +19,8 @@ import {
 } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
-import type { ColorPalette } from '@/tui/theme/colors';
-import { printableChar } from '@/tui/utils/printable-key';
+import type { ColorPalette } from '#/tui/theme/colors';
+import { printableChar } from '#/tui/utils/printable-key';
 import { t } from '@scream-code/config';
 
 const ELLIPSIS = '…';

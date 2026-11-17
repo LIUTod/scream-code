@@ -364,5 +364,3 @@ export interface LoginProgressSpinnerHandle {
   stop(opts: { ok: boolean; label: string }): void;
   setLabel(label: string): void;
 }
-
-export type ProgressSpinnerHandle = LoginProgressSpinnerHandle;

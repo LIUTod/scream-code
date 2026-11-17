@@ -60,6 +60,17 @@ export interface MediaProjectionState {
 }
 
 /**
+ * Shared mutable state for request-structure repair in a turn. Once a step
+ * recovers from a provider rejecting the message sequence itself
+ * (`isRecoverableRequestStructureError`), `active` stays set and later steps
+ * in the same turn send the normalized sequence (`repairMessageStructure`)
+ * directly, the same way {@link MediaProjectionState} keeps media recovery.
+ */
+export interface StructureRepairState {
+  active: boolean;
+}
+
+/**
  * @deprecated Legacy umbrella union. Use `LoopStepStopReason` for per-step
  * model responses and `LoopTurnStopReason` for `TurnResult`.
  */

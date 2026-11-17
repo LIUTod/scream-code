@@ -1,4 +1,4 @@
-import type { Session, ScreamHarness, ThinkingEffort } from '@scream-code/scream-code-sdk';
+import type { Session, ScreamHarness } from '@scream-code/scream-code-sdk';
 
 import { t } from '@scream-code/config';
 

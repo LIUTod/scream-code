@@ -5,7 +5,6 @@ import {
 
 import type { Agent } from '..';
 import {
-  type ScreamErrorPayload,
   makeErrorPayload,
   toScreamErrorPayload,
 } from '#/errors';
@@ -46,7 +45,7 @@ import {
 } from './utils';
 
 import { abortable, userCancellationReason } from '../../utils/abort';
-import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../context';
+import { USER_PROMPT_ORIGIN, type PromptOrigin } from '../context';
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';

@@ -11,7 +11,7 @@
  * 手法：真起 ephemeral server（listen 0）+ 真 fetch。通过 vi.mock('node:http')
  * 包装 createServer 捕获 server 实例，afterEach 里 closeAllConnections + close，
  * 保证不遗留悬挂 server/timer（vitest 正常退出）。
- * 已知点：knowledge-web.ts:38 在模块加载时注册一个 process 'exit' listener，
+ * 已知点：knowledge-web.ts 的 `process.on('exit', closeAllServers)` 在模块加载时注册一个 process 'exit' listener，
  * 属模块级一次性注册（见"exit listener"用例的容忍说明）。
  */
 import type { Server } from 'node:http';
@@ -115,7 +115,7 @@ describe('handleWeb — 生命周期', () => {
   });
 
   it('process exit listener 仅在模块加载时注册一次，重复 import/handleWeb 不累积', async () => {
-    // 模块级注册 = 已知且容忍的 +1（knowledge-web.ts:38 closeAllServers 兜底）
+    // 模块级注册 = 已知且容忍的 +1（knowledge-web.ts 的 `process.on('exit', closeAllServers)` 兜底）
     expect(exitAfterImport - exitBeforeImport).toBe(1);
 
     // 二次 import 命中模块缓存，不再注册

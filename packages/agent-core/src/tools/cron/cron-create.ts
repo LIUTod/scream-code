@@ -4,7 +4,7 @@
  * cron cadence (`recurring: true`, the default).
  *
  * Tasks live in `SessionCronStore` and are mirrored to
- * `<sessionDir>/cron/<id>.json` via `CronManager.addTask`, so a
+ * `<sessionDir>/agents/main/cron/<id>.json` via `CronManager.addTask`, so a
  * resuming the same session reloads them and the scheduler
  * picks up where it left off (fires that fell during downtime are
  * collapsed into a single delivery with `coalescedCount`). Tasks do

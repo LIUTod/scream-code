@@ -414,13 +414,6 @@ function buildLtodCallbacks(
   };
 }
 
-export function buildMessagesWithSystem(systemPrompt: string, history: Message[]): Message[] {
-  return [
-    { role: 'system', content: [{ type: 'text', text: systemPrompt }], toolCalls: [] },
-    ...history,
-  ];
-}
-
 /**
  * Remove image parts from messages for context-overflow retry.
  * Returns null when no media was found (no point retrying without media).

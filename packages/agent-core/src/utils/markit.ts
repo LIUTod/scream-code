@@ -3,9 +3,6 @@
 // graph, installs a quiet stdout hook for the mupdf WASM module, and routes
 // every conversion through the filesystem cache.
 
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-
 import { log } from '#/logging/logger';
 import type { ConversionResult, Markit, StreamInfo } from '@scream-code/knowledge/markit';
 import { abortError } from './abort';
@@ -160,45 +157,6 @@ async function runCachedBufferConversion(
     await writeMarkitConversionCache(cacheKey, finalized.content);
   }
   return { ...finalized, cache: cacheEnabled ? 'miss' : 'skipped' };
-}
-
-export async function convertFileWithMarkit(
-  filePath: string,
-  signal?: AbortSignal,
-  options?: { imageDir?: string },
-): Promise<MarkitConversionResult> {
-  if (options?.imageDir !== undefined) {
-    // Image extraction writes files into imageDir as a side effect; a
-    // markdown-only cache hit would leave the directory missing members, so
-    // this path stays uncached.
-    try {
-      const result = await runMarkitConversion(
-        (markitInstance) => markitInstance.convertFile(filePath, { imageDir: options.imageDir }),
-        signal,
-      );
-      return { ...finalizeConversion(result.markdown), cache: 'skipped' };
-    } catch (error) {
-      if (isAbort(error)) {
-        throw abortError();
-      }
-      return { content: '', ok: false, error: normalizeError(error), cache: 'skipped' };
-    }
-  }
-
-  throwIfAborted(signal);
-  let bytes: Uint8Array;
-  try {
-    bytes = await untilAborted(signal, () => fs.readFile(filePath));
-  } catch (error) {
-    if (isAbort(error)) throw abortError();
-    return { content: '', ok: false, error: normalizeError(error), cache: 'miss' };
-  }
-  const streamInfo: StreamInfo = {
-    localPath: filePath,
-    extension: path.extname(filePath).toLowerCase(),
-    filename: path.basename(filePath),
-  };
-  return runCachedBufferConversion(bytes, streamInfo, signal, true);
 }
 
 export async function convertBufferWithMarkit(

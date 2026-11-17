@@ -336,7 +336,6 @@ function buildSubagentUsageSection(
 
 export function buildUsageReportLines(options: UsageReportOptions): string[] {
   const colors = options.colors;
-  const accent = chalk.hex(colors.primary).bold;
   const value = chalk.hex(colors.text);
   const muted = chalk.hex(colors.textDim);
   const errorStyle = chalk.hex(colors.error);

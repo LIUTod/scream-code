@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
 import type { SessionSubagentHost } from '../../../session/subagent-host';

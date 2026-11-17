@@ -1,10 +1,6 @@
-import { resolve } from 'node:path';
-
 import { defineConfig } from 'vitest/config';
 
 import { rawTextPlugin } from './build/raw-text-plugin.mjs';
-
-const workspaceRoot = import.meta.dirname;
 
 export default defineConfig({
   test: {
@@ -12,11 +8,6 @@ export default defineConfig({
       'packages/*',
       {
         plugins: [rawTextPlugin()],
-        resolve: {
-          alias: {
-            '@': resolve(workspaceRoot, 'apps/scream-code/src'),
-          },
-        },
         test: {
           name: 'cli',
           include: ['apps/scream-code/test/**/*.test.ts', 'apps/scream-code/test/**/*.test.tsx'],

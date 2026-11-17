@@ -101,12 +101,31 @@ export interface DeferredToolGroup {
    * the enable result both render this list. */
   readonly toolNames: readonly string[];
   /**
+   * When to open the group, rendered into the portal description. Only for a
+   * group the model should reach for on its own; the rest stay a bare name.
+   */
+  readonly useWhen?: string;
+  /**
    * Build the group's tools. Returns only the tools whose backing runtime
    * exists (a group can be empty when its store is not configured — e.g.
    * `memory` without a memo store); the registry treats an empty result as
    * "nothing to enable" and refuses instead of pretending success.
    */
   construct(context: DeferredToolGroupContext): readonly BuiltinTool[];
+}
+
+/**
+ * Main-agent-only groups build nothing on a sub agent. The eager registry
+ * (`agent/tool/index.ts`) gates these tools on `type === 'main'`; a sub agent
+ * reaches a factory only through an explicit tool list
+ * (`registerExplicitDeferredTools`), which must not hand it goal, memory,
+ * plugin or self-inspection tools the eager path withholds.
+ */
+function mainOnly(
+  context: DeferredToolGroupContext,
+  build: () => readonly BuiltinTool[],
+): readonly BuiltinTool[] {
+  return context.agent.type === 'main' ? build() : [];
 }
 
 /**
@@ -119,6 +138,8 @@ export const DEFERRED_GROUPS: readonly DeferredToolGroup[] = [
   {
     name: 'cron',
     toolNames: ['CronCreate', 'CronList', 'CronDelete'],
+    useWhen:
+      'schedule your own follow-up: a later check while waiting on CI, a deploy or a review, a reminder at a time the user named, or a recurring job',
     construct: (context) =>
       context.agent.cron
         ? [
@@ -138,62 +159,70 @@ export const DEFERRED_GROUPS: readonly DeferredToolGroup[] = [
       'MemoryConsolidateApply',
     ],
     construct: (context) =>
-      context.agent.memoStore === undefined
-        ? []
-        : [
-            new MemoryLookupTool(context.agent),
-            new MemoryEditTool(context.agent),
-            new MemoryWriteTool(context.agent),
-            new MemoryConsolidatePlanTool(context.agent),
-            new MemoryConsolidateApplyTool(context.agent),
-          ],
+      mainOnly(context, () =>
+        context.agent.memoStore === undefined
+          ? []
+          : [
+              new MemoryLookupTool(context.agent),
+              new MemoryEditTool(context.agent),
+              new MemoryWriteTool(context.agent),
+              new MemoryConsolidatePlanTool(context.agent),
+              new MemoryConsolidateApplyTool(context.agent),
+            ],
+      ),
   },
   {
     name: 'knowledge',
     toolNames: ['KnowledgeLookup'],
     construct: (context) =>
-      context.agent.knowledgeStore === undefined ? [] : [new KnowledgeLookupTool(context.agent)],
+      mainOnly(context, () =>
+        context.agent.knowledgeStore === undefined ? [] : [new KnowledgeLookupTool(context.agent)],
+      ),
   },
   {
     name: 'goal',
     toolNames: ['CreateGoal', 'GetGoal', 'UpdateGoal', 'SetGoalBudget', 'WriteGoalNote'],
-    construct: (context) => [
-      new CreateGoalTool(context.agent),
-      new GetGoalTool(context.agent),
-      new UpdateGoalTool(context.agent, context.goalGrader),
-      new SetGoalBudgetTool(context.agent),
-      new WriteGoalNoteTool(context.agent),
-    ],
+    construct: (context) =>
+      mainOnly(context, () => [
+        new CreateGoalTool(context.agent),
+        new GetGoalTool(context.agent),
+        new UpdateGoalTool(context.agent, context.goalGrader),
+        new SetGoalBudgetTool(context.agent),
+        new WriteGoalNoteTool(context.agent),
+      ]),
   },
   {
     name: 'image',
     toolNames: ['ImageGenerate'],
     construct: (context) =>
-      context.agent.screamHomeDir === undefined
-        ? []
-        : [
-            new ImageGenerateTool(
-              context.cwd,
-              context.agent.screamHomeDir,
-              context.jian,
-              context.workspace,
-            ),
-          ],
+      mainOnly(context, () =>
+        context.agent.screamHomeDir === undefined
+          ? []
+          : [
+              new ImageGenerateTool(
+                context.cwd,
+                context.agent.screamHomeDir,
+                context.jian,
+                context.workspace,
+              ),
+            ],
+      ),
   },
   {
     name: 'make-skill',
     toolNames: ['MakeSkillPlan', 'MakeSkillApply'],
-    construct: (context) => [new MakeSkillPlanTool(context.agent), new MakeSkillApplyTool(context.agent)],
+    construct: (context) =>
+      mainOnly(context, () => [new MakeSkillPlanTool(context.agent), new MakeSkillApplyTool(context.agent)]),
   },
   {
     name: 'manage-plugin',
     toolNames: ['ManagePlugin'],
-    construct: (context) => [new ManagePluginTool(context.agent)],
+    construct: (context) => mainOnly(context, () => [new ManagePluginTool(context.agent)]),
   },
   {
     name: 'inspect',
     toolNames: ['InspectOwnAssets'],
-    construct: (context) => [new InspectOwnAssetsTool(context.agent)],
+    construct: (context) => mainOnly(context, () => [new InspectOwnAssetsTool(context.agent)]),
   },
   {
     // A Python debugger session is opt-in: it spawns a process tree, needs
@@ -201,9 +230,8 @@ export const DEFERRED_GROUPS: readonly DeferredToolGroup[] = [
     // Construction is cheap (nothing spawns until `launch`/`attach`).
     name: 'debug',
     toolNames: ['Debug'],
-    construct: (context) => [
-      new DebugTool(context.jian, context.cwd, context.agent.lspSupervisor),
-    ],
+    construct: (context) =>
+      mainOnly(context, () => [new DebugTool(context.jian, context.cwd, context.agent.lspSupervisor)]),
   },
 ];
 
@@ -222,11 +250,6 @@ export function isDeferredBuiltinToolName(name: string): boolean {
   return DEFERRED_TOOL_NAME_INDEX.has(name);
 }
 
-/** The group a deferred tool name belongs to (undefined for other names). */
-export function getDeferredGroupByToolName(name: string): DeferredToolGroup | undefined {
-  return DEFERRED_TOOL_NAME_INDEX.get(name);
-}
-
 // ── Portal tool ──────────────────────────────────────────────────────
 
 export const DiscoverToolsInputSchema = z
@@ -237,7 +260,11 @@ export const DiscoverToolsInputSchema = z
 export type DiscoverToolsInput = z.infer<typeof DiscoverToolsInputSchema>;
 
 function buildDeferredGroupsDescription(): string {
-  return DEFERRED_GROUPS.map((group) => `${group.name} (${group.toolNames.join(', ')})`).join('; ');
+  return DEFERRED_GROUPS.map((group) =>
+    group.useWhen === undefined
+      ? `${group.name} (${group.toolNames.join(', ')})`
+      : `${group.name} (${group.toolNames.join(', ')}; ${group.useWhen})`,
+  ).join('; ');
 }
 
 /**

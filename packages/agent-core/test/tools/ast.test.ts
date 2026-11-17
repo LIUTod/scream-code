@@ -66,11 +66,11 @@ function fakeDiagnosticsRegistry(diagnostics: readonly LspDiagnostic[]): LspRegi
 describe('ast tools', () => {
   it('exposes metadata and schema', () => {
     const grep = new AstGrepTool(testJian, workspace);
-    expect(grep.name).toBe('ast_grep');
+    expect(grep.name).toBe('AstGrep');
     expect(grep.parameters).toMatchObject({ type: 'object', properties: { pattern: { type: 'string' } } });
 
     const edit = new AstEditTool(testJian, workspace);
-    expect(edit.name).toBe('ast_edit');
+    expect(edit.name).toBe('AstEdit');
     expect(AstEditInputSchema.safeParse({ pattern: 'a($B)', rewrite: 'b($B)', path: 'x.ts' }).success).toBe(true);
     expect(AstEditInputSchema.safeParse({ pattern: 'a($B)', path: 'x.ts' }).success).toBe(false);
   });
@@ -180,7 +180,7 @@ describe('ast tools', () => {
 
     // resolveExecution of a successful tool call always yields a runnable
     // execution; the error arm carries no matcher.
-    if (execution.isError === true) throw new Error('ast_edit refused to resolve');
+    if (execution.isError === true) throw new Error('AstEdit refused to resolve');
     const match = (pattern: string) =>
       matchPermissionRule({
         rule: { decision: 'allow', scope: 'session-runtime', pattern } as PermissionRule,
@@ -189,10 +189,12 @@ describe('ast tools', () => {
       });
 
     // A session "always allow" for this file keeps matching the same edit ...
+    expect(match(`AstEdit(${file})`)).toBeDefined();
+    // A rule saved under the tool's old name still matches it.
     expect(match(`ast_edit(${file})`)).toBeDefined();
     // ... while a rule phrased with the AST pattern does not: the pattern is
     // the edit's content, not the subject being authorised.
-    expect(match('ast_edit(console.log($A))')).toBeUndefined();
+    expect(match('AstEdit(console.log($A))')).toBeUndefined();
   });
 
   it('reports a truncated scan instead of claiming a complete total', async () => {

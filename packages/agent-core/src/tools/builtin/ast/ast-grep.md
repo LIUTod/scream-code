@@ -4,4 +4,4 @@ Search code by AST structure instead of text. Use it when the shape matters — 
 - `language`: typescript | tsx | javascript (inferred from the file extension when omitted).
 - `path`: a file or a directory (defaults to the workspace root). Directories are walked recursively, skipping node_modules/.git/dist and similar build output.
 - Results list one line per match as `path:line:column  matched-text` (first line of the match, truncated), capped at 100 matches; the header states the true total.
-- Read-only. For structural rewrites use `ast_edit` (preview first, then apply).
+- Read-only. For structural rewrites use `AstEdit` (preview first, then apply).

@@ -36,9 +36,13 @@ describe('BotModePermissionPolicy', () => {
   });
 
   it('approves read-only tools in bot mode', () => {
-    for (const tool of ['Read', 'Grep', 'Glob', 'WebSearch', 'PaperSearch', 'TodoList', 'ContactParent', 'Agent', 'UpdateGoal']) {
+    for (const tool of ['Read', 'Grep', 'AstGrep', 'Glob', 'WebSearch', 'PaperSearch', 'TodoList', 'ContactParent', 'Agent', 'UpdateGoal']) {
       expect(botPolicy().evaluate(ctx(tool))?.kind).toBe('approve');
     }
+  });
+
+  it('keeps the structural rewrite out: AstEdit is not reversible-by-path like Edit', () => {
+    expect(botPolicy().evaluate(ctx('AstEdit', { path: './file.ts' }))?.kind).toBe('deny');
   });
 
   it('approves in-workspace edits in bot mode', () => {
@@ -140,11 +144,26 @@ describe('BotModePermissionPolicy', () => {
     }
   });
 
-  it('lets a bot ask a person but never schedule itself', () => {
-    expect(botPolicy().evaluate(ctx('AskUserQuestion'))?.kind).toBe('approve');
+  it('never asks a person, and schedules its own follow-ups', () => {
+    // Bot mode runs without a person by design: a question would hold the run
+    // until someone came back, so the agent decides itself; coming back to its
+    // own work (one-off or repeating, from any turn) is the point, and the user
+    // who picked the mode owns that trade-off.
+    const asked = botPolicy().evaluate(ctx('AskUserQuestion'));
+    expect(asked?.kind).toBe('deny');
+    expect(asked?.kind === 'deny' ? asked.message : '').toMatch(/Decide yourself.*safest reasonable option/);
     for (const tool of ['CronCreate', 'CronList', 'CronDelete']) {
-      expect(botPolicy().evaluate(ctx(tool))?.kind).toBe('deny');
+      expect(botPolicy().evaluate(ctx(tool))?.kind, tool).toBe('approve');
     }
+    expect(botPolicy().evaluate(ctx('CronCreate', { cron: '0 9 * * *', prompt: 'daily', recurring: true }))?.kind).toBe(
+      'approve',
+    );
+  });
+
+  it('can open deferred tool groups, so allowlisted tools inside them are reachable', () => {
+    // Without the portal, CronCreate / MemoryLookup / KnowledgeLookup /
+    // CreateGoal sit in groups a bot could never enable.
+    expect(botPolicy().evaluate(ctx('DiscoverTools', { group: 'cron' }))?.kind).toBe('approve');
   });
 
   it('refuses writes under .git (hook installation is privilege escalation)', () => {

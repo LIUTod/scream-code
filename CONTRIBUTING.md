@@ -4,7 +4,7 @@ Thank you for your interest in contributing!
 
 ## Getting Started
 
-- Node.js >= 22.0.0
+- Node.js >= 22.19.0
 - pnpm 10.33.0
 
 ```bash
@@ -23,9 +23,11 @@ pnpm test
 ## Project Structure
 
 - `apps/scream-code`: CLI / TUI application
-- `apps/vis`: Visual debugging tools
 - `packages/agent-core`: Agent engine
-- `packages/node-sdk`: Public TypeScript SDK
+- `packages/node-sdk`: TypeScript SDK the CLI is built on
 - `packages/ltod`: LLM provider abstraction
 - `packages/jian`: Execution environment
-- `packages/oauth`: OAuth utilities
+- `packages/config`: Platform configuration and model management
+- `packages/memory`: Persistent cross-session memory store
+- `packages/knowledge`: Local knowledge base and document conversion
+- `packages/evals`: Agent evaluation suites

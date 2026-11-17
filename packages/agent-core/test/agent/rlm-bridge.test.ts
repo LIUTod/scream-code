@@ -100,22 +100,22 @@ describe('createRlmHostHandlers', () => {
     await expect(handlers['rlm.result']!({ id: run['id'] })).rejects.toThrow('unknown rlm handle');
   }, 10_000);
 
-  it('keeps the live python tool across registry rebuilds, resetting it only on a cwd change', () => {
+  it('keeps the live Python tool across registry rebuilds, resetting it only on a cwd change', () => {
     const harness = testAgent();
     harness.configure();
     const tools = harness.agent.tools;
-    const first = tools.getBuiltinTool('python');
+    const first = tools.getBuiltinTool('Python');
     expect(first).toBeInstanceOf(PythonTool);
 
     // A rebuild (config refresh / skill reload) must reuse the instance: the
     // running kernel, its in-memory state and the rlm() handle table live on
     // it, so a fresh instance would silently drop all three.
     tools.initializeBuiltinTools();
-    expect(tools.getBuiltinTool('python')).toBe(first);
+    expect(tools.getBuiltinTool('Python')).toBe(first);
 
     // A different cwd is a different workspace: deterministic reset.
     harness.agent.config.update({ cwd: tmpdir() });
-    const reset = tools.getBuiltinTool('python');
+    const reset = tools.getBuiltinTool('Python');
     expect(reset).toBeInstanceOf(PythonTool);
     expect(reset).not.toBe(first);
     expect((reset as PythonTool).cwd).toBe(tmpdir());

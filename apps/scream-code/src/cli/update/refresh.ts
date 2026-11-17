@@ -1,5 +1,5 @@
 import { writeUpdateCache } from './cache';
-import { fetchLatestVersionFromNpm } from './cdn';
+import { fetchLatestVersionFromNpm } from './latest-version';
 import { type UpdateCache } from './types';
 
 export interface RefreshUpdateCacheDeps {

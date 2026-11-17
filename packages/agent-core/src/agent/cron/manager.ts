@@ -12,11 +12,12 @@
  *     duplicate idle flag — the turn machinery already knows;
  *   - translate a fired `CronTask` into a `steer(...)` call carrying a
  *     `CronJobOrigin` and emitting a `cron.fired` event;
- *   - mirror every store mutation to `<sessionDir>/cron/<id>.json`
- *     (via {@link addTask} / {@link removeTasks}) so that a session resume
- *     can call {@link loadFromDisk} to rehydrate previously-scheduled
- *     tasks. When no `sessionDir` is supplied (subagents, tests,
- *     ephemeral sessions) the manager stays purely in-memory.
+ *   - mirror every store mutation to `<agent homedir>/cron/<id>.json`
+ *     (`<sessionDir>/agents/main/cron/` for the main agent; subagents get
+ *     no CronManager) via {@link addTask} / {@link removeTasks}, so that a
+ *     session resume can call {@link loadFromDisk} to rehydrate
+ *     previously-scheduled tasks. When the agent has no `homedir` (tests,
+ *     ephemeral agents) the manager stays purely in-memory.
  *   - provide a `handleMissed(...)` entry point that future boot-time
  *     missed-task notification will call. Today the scheduler's
  *     `coalescedCount` semantics handle missed fires inline, so this
@@ -139,8 +140,8 @@ export class CronManager {
   private sigusr1Handler: NodeJS.SignalsListener | null = null;
 
   /**
-   * File-backed mirror of {@link store}. `undefined` when no
-   * `sessionDir` was supplied — the manager then behaves as pure
+   * File-backed mirror of {@link store}. `undefined` when the agent has
+   * no `homedir` — the manager then behaves as pure
    * in-memory, matching pre-persistence semantics. When defined,
    * `addTask` / `removeTasks` schedule fire-and-forget writes so a
    * later session resume can reload via {@link loadFromDisk}.
@@ -198,7 +199,7 @@ export class CronManager {
 
   /**
    * Add a fresh task to the in-memory store and, when persistence is
-   * attached, mirror the new record to `<sessionDir>/cron/<id>.json`.
+   * attached, mirror the new record to `<agent homedir>/cron/<id>.json`.
    *
    * The store call is synchronous (CronCreate needs the id for its
    * response); the on-disk write is fire-and-forget so a slow disk
@@ -280,7 +281,7 @@ export class CronManager {
   }
 
   /**
-   * Rehydrate the in-memory store from `<sessionDir>/cron/` after
+   * Rehydrate the in-memory store from `<agent homedir>/cron/` after
    * a session resume. No-op when persistence is not attached. Idempotent:
    * clears the in-memory map and re-inserts every record on disk.
    *
@@ -431,7 +432,7 @@ export class CronManager {
    * Translate a scheduler fire into a steer carrying a `cron_job` origin.
    *
    * `agent.turn.steer` returns the new turnId, or `null` when the input
-   * was buffered because a turn is in flight (see turn/index.ts:84).
+   * was buffered because a turn is in flight (see `TurnFlow.steer` in turn/index.ts).
    * We propagate that as `buffered` on the origin so the rendered envelope
    * can distinguish "fired into a fresh turn" from "fired into a steer
    * buffer that may not run until the user's turn ends".

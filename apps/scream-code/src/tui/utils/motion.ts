@@ -40,17 +40,9 @@ export function reducedMotionRequested(value: string | undefined): boolean {
   return lower !== '0' && lower !== 'false' && lower !== 'no';
 }
 
-export function setMotionEnabled(enabled: boolean): void {
-  motion = enabled;
-}
-
 /** Spinner period, or `undefined` when spinners must stay still (motion off, or interval 0). */
 export function spinnerPeriodMs(): number | undefined {
   return motionEnabled() && spinnerMs > 0 ? spinnerMs : undefined;
-}
-
-export function setSpinnerIntervalMs(ms: number): void {
-  spinnerMs = ms;
 }
 
 /** 0 (static) or a whole number of ms >= 50; anything else is `undefined`. */

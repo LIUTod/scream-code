@@ -53,6 +53,11 @@ const STRING_CONSTANT = /(?:export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*
  */
 const MAIN_PROMPT_ALLOWANCES = new Map<string, string>([
   ['ContactParent', 'described as the subagent-side channel, not a main-agent call'],
+  [
+    'DiscoverTools',
+    'the deferred-tool portal is appended at runtime by tool shaping, not listed in the profile; the scheduling section names it conditionally ("when they are not among your tools yet")',
+  ],
+  ['Python', 'the language name in prose ("Python packages", "a persistent Python kernel"); the RLM tool is offered only in /rlm mode'],
 ]);
 
 /**
@@ -78,7 +83,7 @@ const SUBAGENT_PROMPT_ALLOWANCES = new Map<string, string>([
   ['TaskStop', 'background-task paragraph is guarded by "if ... available and you are the root agent"'],
   ['PaperSearch', 'retrieval-routing section describes the source hierarchy, not a required call'],
   ['WebSearch', 'retrieval-routing section describes the source hierarchy, not a required call'],
-  ['python', 'verify role text uses it in command examples (`python3 -m py_compile`)'],
+  ['Python', 'the language name in prose and command examples (`python3 -m py_compile`), not a call to the RLM tool'],
 ]);
 
 /**
@@ -88,7 +93,7 @@ const SUBAGENT_PROMPT_ALLOWANCES = new Map<string, string>([
  * set by the registry when `loopControl.toolPortal` is active.
  */
 const NON_MODEL_TOOL_CLASSES = new Map<string, string>([
-  ['python', 'sandbox runner used by RunScript, has no model-facing schema'],
+  ['Python', 'the RLM kernel tool: added to the active set by /rlm, never profile-listed'],
   [
     'DiscoverTools',
     'tool portal fronts the deferred built-in groups; registry-managed, never profile-listed',

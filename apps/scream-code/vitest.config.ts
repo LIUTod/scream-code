@@ -1,21 +1,12 @@
-import { resolve } from 'node:path';
-
 import { defineConfig } from 'vitest/config';
 
 import { rawTextPlugin } from '../../build/raw-text-plugin.mjs';
-
-const appRoot = import.meta.dirname;
 
 export default defineConfig({
   test: {
     projects: [
       {
         plugins: [rawTextPlugin()],
-        resolve: {
-          alias: {
-            '@': resolve(appRoot, 'src'),
-          },
-        },
         test: {
           name: 'cli',
           include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],

@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { resolveScreamHome } from '../config/path';
 import { describeLocalTimeZone, formatLocalIso } from '../utils/local-time';
 import { renderPrompt } from '../utils/render-prompt';
+import { canonicalToolName } from '../tools/tool-names';
 import { buildSelfMap } from './self-map';
 import type {
   RawAgentProfile,
@@ -108,7 +109,8 @@ function resolveMergedProfile(
       ...parent?.promptVars,
       ...profile.promptVars,
     },
-    tools: profile.tools !== undefined ? [...profile.tools] : [...(parent?.tools ?? [])],
+    // A user profile may still list a renamed built-in by its old name.
+    tools: profile.tools !== undefined ? profile.tools.map(canonicalToolName) : [...(parent?.tools ?? [])],
     // An inheriting profile that declares its own `tools:` states an explicit
     // tool contract for that role (every built-in subagent does). The root
     // profile's list is the opposite: it IS the default resolved set (all

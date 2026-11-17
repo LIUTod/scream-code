@@ -84,21 +84,9 @@ export const zh: Record<string, string> = {
 
   // ─── 通用 ─────────────────────
   'common.cancel': '取消',
-  'common.confirm': '确认',
-  'common.submit': '提交',
-  'common.back': '返回',
-  'common.close': '关闭',
-  'common.delete': '删除',
-  'common.install': '安装',
-  'common.uninstall': '卸载',
   'common.restart': '重启',
   'common.start': '启动',
   'common.stop': '关闭',
-  'common.off': '关闭',
-  'common.on': '开启',
-  'common.done': '完成',
-  'common.fail': '失败',
-  'common.running': '运行中',
   'common.not_set': '未设置',
 
   // ─── 错误 ─────────────────────
@@ -107,9 +95,6 @@ export const zh: Record<string, string> = {
   'error.unsupported_format': '仅支持 .md、.markdown、.txt、.pdf、.docx、.xlsx 文件',
   'error.image_not_supported': '当前模型不支持图片输入。',
   'error.video_not_supported': '当前模型不支持视频输入。',
-  'error.network_timeout': '网络超时，建议检查网络或开启加速后重试。',
-  'error.load_failed': '加载失败: {msg}',
-  'error.internal': '内部错误',
   'error.no_session': '没有活跃的会话。',
   'error.session_header_hint':
     '请在 config.toml 对应服务商下设置 session_header = "{name}"，以提供网关要求的会话标识。',
@@ -183,15 +168,6 @@ export const zh: Record<string, string> = {
   'input.large_cancelled': '输入已取消。',
 
   // ─── 欢迎 ─────────────────────
-  'welcome.config': '/config  配置模型',
-  'welcome.sessions': '/sessions  恢复历史会话',
-  'welcome.quick_menu': '/  输入后打开快捷菜单',
-  'welcome.just_now': '刚刚',
-  'welcome.minutes_ago': '{minutes}分钟前',
-  'welcome.hours_ago': '{hours}小时前',
-  'welcome.days_ago': '{days}天前',
-  'welcome.no_recent': '无最近会话',
-  'welcome.recent': '最近会话',
   'welcome.like_active': 'like已激活',
   'welcome.like_inactive': 'like未加载',
   'welcome.help_hint': '/help 查看帮助',
@@ -422,7 +398,6 @@ export const zh: Record<string, string> = {
   'mcp.recommended': '推荐 MCP（Enter 安装）',
   'mcp.installed': '已安装',
   'mcp.install_enter': 'Enter 安装',
-  'mcp.confirm_uninstall': '确认卸载',
   'mcp.uninstall_yes': '是，卸载',
   'mcp.installing': '正在安装',
   'mcp.configuring': '正在配置',
@@ -431,7 +406,6 @@ export const zh: Record<string, string> = {
   'mcp.disable_failed': '停用失败: {msg}',
   'mcp.detected_starting': '已检测到安装，正在启动...',
   'mcp.start_failed': '启动失败: {msg}',
-  'mcp.uninstall_done': '已卸载。',
   'mcp.uninstall_failed': '卸载失败: {msg}',
   'mcp.footer_hint': 'Enter 选择  a 认证  o 运行选项  d 卸载  Esc 返回',
   'mcp.macos_only': '仅支持 macOS',
@@ -838,8 +812,6 @@ export const zh: Record<string, string> = {
   'toolcall.sub_agent_named': '子 agent {name} ({id})',
   'toolcall.sub_agent': '子 agent ({id})',
   'toolcall.more_tools': '还有 {count} 个 tool call...',
-  'toolcall.agent_used': '{name} 已使用 {tool}',
-  'toolcall.agent_in_use': '{name} 正在使用 {tool}',
   'toolcall.starting': '启动中…',
   'toolcall.running': '运行中',
   'toolcall.completed': '已完成',
@@ -980,15 +952,6 @@ export const zh: Record<string, string> = {
   'taskbrowser.agent_source_unknown': '独立（无父线索）',
 
   // ─── 子代理模型绑定 ─────────────
-  'subagent.desc_coder': '通用软件工程任务',
-  'subagent.desc_reviewer': '代码审查，发现 bug 和 API 契约违反',
-  'subagent.desc_writer': '内容生产与研究报告',
-  'subagent.desc_explore': '快速代码库探索（只读）',
-  'subagent.desc_oracle': '既有代码的系统尺度审查（架构/技术债/可维护性/冗余）',
-  'subagent.desc_plan': '实现规划与架构设计（只读）',
-  'subagent.desc_verify': '运行构建/测试/lint 验证改动',
-  'subagent.desc_worker': '办公自动化：格式转换、批量处理、文件整理',
-  'subagent.desc_designer': '视觉层设计：UI/UX/TUI 方向、规格、落地与审计',
   'subagent.follow_main': '跟随主模型',
   'subagent.follow_main_desc': '使用主代理当前模型（默认）',
   // Unset role/housekeeping rows: config.toml (`model_roles` /
@@ -1044,9 +1007,7 @@ export const zh: Record<string, string> = {
   'usage.managed_title': '计划用量',
   'usage.no_data': '暂无用量数据。',
   'usage.used': '已用',
-  'usage.session_title': '会话用量',
   'usage.context_window': '上下文窗口',
-  'usage.subagent_title': '子 Agent 用量',
   'usage.panel_title': ' 用量 ',
   'usage.session_total': '会话总计',
   'usage.token_limit': '本次运行 token 上限：{used} / {limit}',
@@ -1157,7 +1118,6 @@ export const zh: Record<string, string> = {
   'permission.auto': '自动',
   'permission.auto_desc': '完全无交互运行。工具操作自动批准，跳过代理问题以便其自行决策。',
   'permission.yolo_desc': '自动批准工具操作（含危险命令）。需要您决策时（提问、计划评审）代理仍会来找您。',
-  'permission.bot': 'Bot',
   'permission.bot_desc': '无人值守模式：可逆操作自动执行；其余一律拒绝并排队等你决策。',
   'permission.ask_desc': '只读问答模式：直接对话回答，不修改文件、不运行命令、不调用 MCP 工具。',
   'permission.select_title': '选择权限模式',
@@ -1230,7 +1190,6 @@ export const zh: Record<string, string> = {
   // ─── editor-selector ───────────
   'editor.auto_detect': '自动检测 ($VISUAL / $EDITOR)',
   'editor.select_title': '选择外部编辑器',
-  'editor.empty_session_hint': 'Tips：如果你支持本项目或遇到问题，欢迎在 GitHub 上反馈或点个星标。按 Ctrl+B 切换显示',
   'editor.tip_offer': '💡 Tips：部分模型低至1折起，一个API搞定！todapi.work 【Ctrl+B 关闭 Tips】',
   'editor.tip_ad': '💡 Tips：如果你支持本项目或遇到问题，欢迎在 GitHub 上反馈或点个星标  【Ctrl+B 关闭 Tips】',
   'editor.tip_1': '💡 Tips：空输入框状态下可按下 Tab 切换模型思考等级  【Ctrl+B 关闭 Tips】',
@@ -1329,8 +1288,6 @@ export const zh: Record<string, string> = {
 
   // ─── shell-execution ───────────
   'shell.more_lines': '...（还有 {count} 行，按 ctrl+o 展开）',
-
-  // ─── channel 配置 ─────────────
 
   // ─── Skill marketplace ────────
   'market.humanizer_name': 'Humanizer AI 文本去味',
@@ -1447,8 +1404,6 @@ export const zh: Record<string, string> = {
   'knowledge.empty_store': '知识库为空，请先用 /knowledge 摄入文档',
   'knowledge.web_opened': '知识图谱已打开: {url}',
 
-  // ─── CC ────────────────────────
-
   // ─── Registry ──────────────────
   'registry.auto_desc': '切换自动权限模式',
   'registry.yolo_desc': '切换至自动批准模式(yolo)',
@@ -1467,19 +1422,9 @@ export const zh: Record<string, string> = {
   'registry.model_desc': '切换 LLM 模型',
 
   // ─── MCP ───────────────────────
-  'mcp.desktop_desc': 'macOS 桌面自动化：截图/点击/键入/滚动/窗口管理（Background delivery，无需聚焦）',
   'mcp.browser_desc': '浏览器自动化：导航/点击/填表/截图/控制台与网络调试/性能分析',
   'mcp.capability_browser': '🌐 浏览器自动化',
   'mcp.capability_memory': '🧠 决策记忆',
-
-  // ─── Knowledge web ─────────────
-  'kw.title': 'Scream 知识图谱',
-  'kw.entity': '实体',
-  'kw.event': '事件',
-  'kw.relation': '关系',
-  'kw.search_placeholder': '搜索...',
-  'kw.btn_reset': '重置',
-  'kw.btn_expand': '全部',
 
   // ─── Registry (remaining) ──────
   'registry.compact_desc': '压缩对话上下文',
@@ -1619,27 +1564,6 @@ export const zh: Record<string, string> = {
   'registry.eval_desc': '运行端到端测试（Agent健康度检查）',
   'registry.exit_desc': '退出应用',
 
-  // ─── Knowledge web HTML ────────
-  'kw.hint_drag': '拖拽平移 · 滚轮缩放 · 单击展开/收起 · 双击详情',
-  'kw.detail_name': '名称',
-  'kw.detail_type': '类型',
-  'kw.detail_category': '分类',
-  'kw.detail_weight': '权重',
-  'kw.detail_description': '描述',
-  'kw.detail_keywords': '关键词',
-  'kw.detail_related': '关联',
-  'kw.btn_collapse': '收起',
-  'kw.btn_expand_all': '全部展开',
-  'kw.btn_collapse_all': '全部收起',
-  'kw.loading': '加载中',
-  'kw.loading_timeout': '数据未在 8 秒内返回，请检查终端',
-  'kw.no_data': '无法加载',
-  'kw.no_data_hint': '请先用 /knowledge 摄入文档',
-  'kw.no_results': '无匹配结果',
-  'kw.back': '返回',
-  'kw.root_label': '根',
-  'kw.close': '关闭',
-
   // ─── Config messages ───────────
   'tui.invalid_config': '~/.scream-code/tui.toml 中的 TUI 配置无效；使用默认配置。',
 
@@ -1658,13 +1582,11 @@ export const zh: Record<string, string> = {
   'badge.wolfpack': '群狼',
   'badge.rlm': 'RLM',
   'badge.goal': '目标',
-  'badge.auto': '自动',
   'badge.yes': 'YES',
   'badge.bot': 'BOT',
   'badge.ask': 'ASK',
 
   // ─── Knowledge Web (in-browser) ────
-  'kw.lang_toggle': 'English',
   'kw.embedding_downloading': '向量模型下载中…',
   'kw.embedding_progress': '正在下载向量模型 {done} / {total}（{percent}%）',
   'kw.embedding_progress_unknown': '正在下载向量模型 {done}',

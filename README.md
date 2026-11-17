@@ -52,7 +52,7 @@ npm install -g scream-code
 ```
 
 > [!NOTE]
-> Requires **Node.js >= 22**. Git recommended. Same command installs and updates. No native build steps and no dependency install scripts: the local embedding engine runs on WebAssembly.
+> Requires **Node.js >= 22.19**. Git recommended. Same command installs and updates. No native build steps and no dependency install scripts: the local embedding engine runs on WebAssembly.
 > The first use of the knowledge/memory vector features downloads a ~53MB model into `~/.scream-code/cache` (progress is shown, and the download verifies its checksum before use).
 
 ### Quick Start
@@ -87,7 +87,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 
 ### Slash Commands
 
-Type `/` in the input to browse. All 55 commands:
+Type `/` in the input to browse. All 58 commands:
 
 <details>
 <summary>Full command reference (click to expand)</summary>
@@ -139,7 +139,7 @@ Type `/` in the input to browse. All 55 commands:
 | `/version` | Show version info |
 | **Extensions** | |
 | `/mcp` | Manage MCP servers |
-| `/plugin` (`/skills`, `/plugin`) | Skill center |
+| `/plugin` (`/skills`, `/plugins`) | Skill center |
 | `/extension` | Code extensions: activate or deactivate a plugin entry point |
 | `/make-skill` | Distill the session into a Skill |
 | `/image` | Draw or edit an image (image skill; set up once with `/config image`) |

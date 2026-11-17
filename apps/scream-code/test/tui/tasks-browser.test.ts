@@ -6,9 +6,9 @@ import {
   TasksBrowserApp,
   type TasksBrowserProps,
   type TasksFilter,
-} from '@/tui/components/dialogs/tasks-browser';
-import { darkColors } from '@/tui/theme/colors';
-import type { AgentRow } from '@/tui/utils/subagent-instances';
+} from '#/tui/components/dialogs/tasks-browser';
+import { darkColors } from '#/tui/theme/colors';
+import type { AgentRow } from '#/tui/utils/subagent-instances';
 
 const ANSI_SGR = /\[[0-9;]*m/g;
 function strip(text: string): string {

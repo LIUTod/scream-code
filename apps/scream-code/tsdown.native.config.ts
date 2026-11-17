@@ -1,13 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
-import { resolve } from 'node:path';
 
 import { defineConfig } from 'tsdown';
 
 import { rawTextPlugin } from '../../build/raw-text-plugin.mjs';
 import { BUILT_IN_CATALOG_DEFINE, builtInCatalogDefine } from './scripts/built-in-catalog.mjs';
 
-const appRoot = import.meta.dirname;
 const packageJson = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
 ) as { version: string };
@@ -40,9 +38,6 @@ export default defineConfig({
   target: 'node22',
   banner: { js: '#!/usr/bin/env node' },
   plugins: [rawTextPlugin()],
-  alias: {
-    '@': resolve(appRoot, 'src'),
-  },
   define: {
     [BUILT_IN_CATALOG_DEFINE]: builtInCatalogDefine(),
     __SCREAM_CODE_VERSION__: JSON.stringify(packageJson.version),

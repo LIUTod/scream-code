@@ -280,7 +280,7 @@ export class PythonTool implements BuiltinTool<PythonInput> {
    * reports the skipped snapshot through a one-shot warning. */
   static readonly SNAPSHOT_BYTE_LIMIT = 32 * 1024 * 1024;
 
-  readonly name = 'python' as const;
+  readonly name = 'Python' as const;
   readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(PythonInputSchema);
   /** Working directory the kernel runs in. Readable so the tool registry can

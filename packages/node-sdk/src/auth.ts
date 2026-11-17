@@ -8,27 +8,6 @@ export interface ScreamAuthFacadeOptions {
   readonly configPath: string;
 }
 
-export interface ScreamAuthLoginResult {
-  readonly providerName: string;
-  readonly ok: true;
-  readonly defaultModel: string;
-  readonly defaultThinking: boolean;
-  readonly configPath?: string | undefined;
-}
-
-export interface ScreamAuthLogoutResult {
-  readonly providerName: string;
-  readonly ok: true;
-}
-
-export interface ScreamAuthSubmitFeedbackInput {
-  readonly content: string;
-  readonly sessionId: string;
-  readonly version: string;
-  readonly os: string;
-  readonly model: string | null;
-}
-
 export class ScreamAuthFacade {
   constructor(private readonly options: ScreamAuthFacadeOptions) {}
 

@@ -60,6 +60,18 @@ const ALLOWED_ROLE_USER_SITES: readonly {
   readonly reason: string;
 }[] = [
   {
+    file: 'packages/agent-core/src/loop/structure-repair.ts',
+    code: "(message.role === 'user' || (message.role === 'assistant' && previous.toolCalls.length === 0));",
+    reason:
+      'Request-structure repair merges same-role runs in the provider request copy; it is about the wire role sequence a strict endpoint rejected, not about who wrote the message.',
+  },
+  {
+    file: 'packages/agent-core/src/loop/structure-repair.ts',
+    code: "if (first === -1 || messages[first]!.role === 'user') return [...messages];",
+    reason:
+      'Request-structure repair checks that the provider request opens on the user role, which a strict endpoint requires; any user-role message satisfies the wire rule regardless of authorship.',
+  },
+  {
     file: IDENTITY_MODULE,
     code: "if (message.role !== 'user') return false;",
     reason:

@@ -1,4 +1,4 @@
-import type { ContentPart, Message } from '@scream-code/ltod';
+import type { Message } from '@scream-code/ltod';
 
 import type { SkillSource } from '../../skill';
 import type { BackgroundTaskStatus } from '../../tools/background';
@@ -100,16 +100,6 @@ export type ContextMessage = Message & {
    */
   readonly useless?: boolean;
 };
-
-export interface UserMessageRecord {
-  content: readonly ContentPart[];
-  origin: PromptOrigin;
-}
-
-export interface SystemReminderRecord {
-  content: string;
-  origin: PromptOrigin;
-}
 
 export interface AgentContextData {
   history: readonly ContextMessage[];

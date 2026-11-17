@@ -32,6 +32,7 @@ import { LspTool } from '../../tools/builtin/lsp-tool';
 import { LspRegistry } from '../../lsp/registry';
 import type { GoalGraderFn } from '../../tools/builtin/goal/update-goal';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
+import { canonicalToolName } from '../../tools/tool-names';
 import type {
   BuiltinTool,
   McpServerRegistrationResult,
@@ -1015,7 +1016,10 @@ export class ToolManager {
     return this.builtinTools.get(name);
   }
 
-  setActiveTools(names: readonly string[]): void {
+  setActiveTools(requested: readonly string[]): void {
+    // Old names of renamed built-ins (an SDK caller's list, a user profile)
+    // become current names here, so every later check sees one spelling.
+    const names = requested.map(canonicalToolName);
     this.agent.records.logRecord({
       type: 'tools.set_active_tools',
       names,
@@ -1053,7 +1057,7 @@ export class ToolManager {
    * like naming any other tool the registry does not have.
    */
   registerExplicitDeferredTools(names: readonly string[]): readonly string[] {
-    const wanted = new Set(names);
+    const wanted = new Set(names.map(canonicalToolName));
     const registered: string[] = [];
     for (const group of DEFERRED_GROUPS) {
       const requested = group.toolNames.filter((name) => wanted.has(name));
@@ -1393,7 +1397,7 @@ export class ToolManager {
     // workspace, so the old kernel is disposed and the next /rlm call starts
     // a deterministic fresh kernel instead of quietly serving the wrong
     // directory.
-    const previousPython = this.getBuiltinTool('python');
+    const previousPython = this.getBuiltinTool('Python');
     let pythonTool: b.PythonTool;
     if (previousPython instanceof b.PythonTool && previousPython.cwd === cwd) {
       pythonTool = previousPython;
@@ -1444,7 +1448,7 @@ export class ToolManager {
           availableTools: this.enabledTools,
         }),
         // /rlm mode: persistent python kernel. Registered but NOT enabled by
-        // default — activated only when the /rlm command adds 'python' to the
+        // default — activated only when the /rlm command adds 'Python' to the
         // active tools (setActiveTools), so default behaviour is unchanged.
         // Host handlers are ALWAYS passed so the kernel bootstrap always
         // defines rlm()/rlm_wait() — the handler body checks subagentHost at

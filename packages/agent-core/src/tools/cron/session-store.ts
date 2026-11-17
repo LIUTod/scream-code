@@ -3,7 +3,7 @@
  *
  * The store itself is purely in-memory; cross-restart persistence is
  * layered on top by `CronManager.addTask` / `removeTasks`, which
- * mirror every mutation to `<sessionDir>/cron/<id>.json`. On resume
+ * mirror every mutation to `<agent homedir>/cron/<id>.json`. On resume
  * the manager calls {@link adopt} to put each persisted task back into
  * the store with its original id and `createdAt` preserved.
  *

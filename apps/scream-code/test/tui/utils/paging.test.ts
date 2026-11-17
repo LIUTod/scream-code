@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { pageView } from '@/tui/utils/paging';
+import { pageView } from '#/tui/utils/paging';
 
 describe('pageView', () => {
   it('keeps the selected index on the first page', () => {

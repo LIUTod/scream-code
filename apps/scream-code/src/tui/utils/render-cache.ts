@@ -13,16 +13,8 @@
  * compare cached vs. uncached runs in the same process).
  */
 
-let enabled = process.env['SCREAM_TUI_NO_RENDER_CACHE'] !== '1';
+const enabled = process.env['SCREAM_TUI_NO_RENDER_CACHE'] !== '1';
 
 export function isRenderCacheEnabled(): boolean {
   return enabled;
-}
-
-/**
- * Override the cache at runtime. Intended for benchmarks / tests only;
- * production code should not call this.
- */
-export function setRenderCacheEnabled(value: boolean): void {
-  enabled = value;
 }

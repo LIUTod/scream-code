@@ -321,7 +321,7 @@ export async function handleScriptCommand(host: SlashCommandHost, args: string):
 
 /** /rlm-max-depth [N] — query or set the maximum RLM recursion depth.
  * N=0 or no limit means unlimited (the default). Validation is shared with
- * the core setter and the web REST route (agent-core session/rlm-settings). */
+ * the core setter (agent-core session/rlm-settings). */
 export async function handleRlmMaxDepthCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {

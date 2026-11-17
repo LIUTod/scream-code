@@ -15,7 +15,7 @@ describe('InspectOwnAssets e2e (temporary)', () => {
     const tool = agent.tools.getBuiltinTool('InspectOwnAssets');
     expect(tool).toBeDefined();
 
-    // Mount the real default agent profile (as session/index.ts:310 does) so
+    // Mount the real default agent profile (as the session does in session/index.ts, `agent.useProfile`) so
     // the full wiring is exercised: profile tools list -> enabledTools ->
     // model-visible loopTools.
     agent.useProfile(DEFAULT_AGENT_PROFILES['agent']!);
@@ -69,7 +69,7 @@ describe('InspectOwnAssets e2e (temporary)', () => {
     // drives activeTools from profile.tools, covered by the first test.)
     ctx.configure({ tools: ['InspectOwnAssets'] });
 
-    // The session flow mounts the default agent profile (session/index.ts:310),
+    // The session flow mounts the default agent profile (session/index.ts, `agent.useProfile`),
     // which lists InspectOwnAssets — the model request must carry it.
     const inspectCall: ToolCall = {
       id: 'call_inspect',

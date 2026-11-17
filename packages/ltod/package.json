@@ -40,11 +40,9 @@
     "@anthropic-ai/sdk": "^0.95.2",
     "@google/genai": "^1.49.0",
     "openai": "^6.34.0",
-    "zod": "catalog:",
-    "zod-to-json-schema": "^3.25.2"
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "ajv": "^8.18.0",
-    "ajv-formats": "^3.0.1"
+    "ajv": "^8.18.0"
   }
 }

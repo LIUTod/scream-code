@@ -357,7 +357,7 @@ export class Session {
    */
   /**
    * Enables or disables the /rlm persistent-python mode. When enabled, the
-   * `python` tool (persistent kernel) is added to the active tools; when
+   * `Python` tool (persistent kernel) is added to the active tools; when
    * disabled it is removed and its kernel is disposed. Default is disabled.
    */
   async setRlmEnabled(enabled: boolean): Promise<void> {

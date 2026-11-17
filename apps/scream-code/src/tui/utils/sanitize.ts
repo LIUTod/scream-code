@@ -1,4 +1,3 @@
-import { truncateToWidth } from '@liutod-scream/pi-tui';
 import * as os from 'node:os';
 
 /** Replace tabs with spaces, keeping column alignment. Default tab width 4. */
@@ -26,23 +25,6 @@ export const TRUNCATE_LENGTHS = {
   /** Status bar / one-liners */
   STATUS: 80,
 } as const;
-
-/**
- * Sanitize a single line for terminal rendering: replace tabs, truncate to width.
- * Returns the sanitized string.
- */
-export function sanitizeLine(line: string, maxWidth: number): string {
-  return truncateToWidth(replaceTabs(line), maxWidth);
-}
-
-/**
- * Sanitize multi-line text for terminal rendering:
- * replace tabs in every line, truncate each to maxWidth.
- * Returns an array of sanitized lines.
- */
-export function sanitizeLines(text: string, maxWidth: number): string[] {
-  return text.split('\n').map((line) => sanitizeLine(line, maxWidth));
-}
 
 /**
  * Strip terminal control characters from untrusted shell output before it is

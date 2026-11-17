@@ -508,7 +508,7 @@ function translateDisallowedTool(entry: string): string | undefined {
 }
 
 /**
- * Map a Claude-CLI `--permission-mode` value onto a surviving engine posture.
+ * Map a stream-json client's `--permission-mode` value onto a surviving engine posture.
  *
  * The prompting posture (`manual`) no longer exists: a mode that used to route
  * unmatched calls to the approval handler now runs in the closest surviving

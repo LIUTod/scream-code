@@ -18,7 +18,7 @@ const MAX_RENDERED_SIGNATURES = 5;
  * Rendering follows the todo-list/goal injectors: `getInjection` returns the
  * plain text and the base class hands it to
  * `ContextMemory.appendSystemReminder`, which wraps it in
- * `<system-reminder>` tags (context/index.ts:234-242).
+ * `<system-reminder>` tags (context/index.ts).
  */
 export class EditRecoveryInjector extends DynamicInjector {
   protected override readonly injectionVariant = EDIT_RECOVERY_VARIANT;

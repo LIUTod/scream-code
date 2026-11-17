@@ -271,6 +271,15 @@ describe('Permission auto mode', () => {
       expect.stringContaining('Do not retry a denied call unchanged'),
       expect.anything(),
     );
+    // It decides instead of asking, and keeps going by scheduling follow-ups.
+    expect(appendSystemReminder).toHaveBeenCalledWith(
+      expect.stringContaining('Do not ask the user (AskUserQuestion is blocked)'),
+      expect.anything(),
+    );
+    expect(appendSystemReminder).toHaveBeenCalledWith(
+      expect.stringContaining('schedule your own follow-up with the cron tools'),
+      expect.anything(),
+    );
   });
 
   it('announces yolo mode and its destructive-action caveat on a real transition', async () => {
@@ -321,6 +330,28 @@ describe('Permission auto mode', () => {
       expect.stringContaining('Yolo permission mode is active'),
       expect.anything(),
     );
+  });
+
+  it('blocks AskUserQuestion in bot mode and tells the agent to decide itself', async () => {
+    const { manager, requestApproval } = makePermissionManager(async () => ({
+      decision: 'approved',
+    }));
+    manager.setMode('bot');
+
+    await expect(
+      manager.beforeToolCall(
+        hookContext({
+          id: 'call_question_bot',
+          toolName: 'AskUserQuestion',
+          args: { questions: [] },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      block: true,
+      reason: expect.stringContaining('AskUserQuestion is unavailable in bot mode: nobody is here to answer'),
+    });
+    // Nobody is asked anything: no approval prompt either.
+    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it('blocks AskUserQuestion in auto mode before execution', async () => {

@@ -24,6 +24,7 @@ import {
 } from '../tools/args-validator';
 import { randomUUID } from 'node:crypto';
 import { PathSecurityError } from '../tools/policies/path-access';
+import { canonicalToolName } from '../tools/tool-names';
 
 import { isParentInterject, isUserCancellation, parentInterjectReason, userCancellationReason } from '../utils/abort';
 import { errorMessage, isAbortError } from './errors';
@@ -522,23 +523,35 @@ function preflightToolCall(
   tools: readonly ExecutableTool[] | undefined,
   toolCall: ToolCall,
 ): PreflightedToolCall {
-  const toolName = toolCall.name;
+  const requested = toolCall.name;
   const parsedArgs = parseToolCallArguments(toolCall.arguments);
   const args = parsedArgs.success ? parsedArgs.data : {};
-  const tool = tools?.find((candidate) => candidate.name === toolName);
+  // An exact name wins (a user or MCP tool may own an old built-in name); a
+  // renamed built-in still answers to its old name, which a model keeps using
+  // after seeing it earlier in the session. From here on the call is the
+  // current tool's: permission rules, hooks and the result all see that name.
+  const renamed = canonicalToolName(requested);
+  const tool =
+    tools?.find((candidate) => candidate.name === requested) ??
+    (renamed === requested ? undefined : tools?.find((candidate) => candidate.name === renamed));
   if (tool === undefined) {
     return {
       kind: 'rejected',
       toolCall,
-      toolName,
+      toolName: requested,
       args,
-      output: describeUnknownTool(toolName, tools),
+      output: describeUnknownTool(requested, tools),
     };
   }
+  // Rename the call itself, not just the lookup: every policy and hook reads
+  // `toolCall.name`, and a deny rule on the current name must not be dodged
+  // by calling the tool by its old one.
+  const toolName = tool.name;
+  const resolvedCall: ToolCall = tool.name === requested ? toolCall : { ...toolCall, name: tool.name };
   if (!parsedArgs.success) {
     return {
       kind: 'rejected',
-      toolCall,
+      toolCall: resolvedCall,
       toolName,
       args,
       output: `Invalid args for tool "${toolName}": malformed JSON in arguments: ${parsedArgs.error}`,
@@ -549,7 +562,7 @@ function preflightToolCall(
   if (validationError !== null) {
     return {
       kind: 'rejected',
-      toolCall,
+      toolCall: resolvedCall,
       toolName,
       args: parsedArgs.data,
       output: `Invalid args for tool "${toolName}": ${validationError}`,
@@ -557,7 +570,7 @@ function preflightToolCall(
   }
   return {
     kind: 'runnable',
-    toolCall,
+    toolCall: resolvedCall,
     toolName,
     tool,
     args: normalizedArgs,

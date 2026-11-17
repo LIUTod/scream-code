@@ -48,7 +48,7 @@ describe('capability guard permission policy', () => {
       'Write',
       'Edit',
       'Bash',
-      'python',
+      'Python',
       'RunScript',
       'Agent',
       'SendSubagentMessage',
@@ -94,7 +94,7 @@ describe('capability guard permission policy', () => {
 
   it('execute keeps command execution but still denies nesting', () => {
     expect(evaluate('execute', 'Bash')).toBeUndefined();
-    expect(evaluate('execute', 'python')).toBeUndefined();
+    expect(evaluate('execute', 'Python')).toBeUndefined();
     expect(evaluate('execute', 'Write')).toBeUndefined();
     for (const name of ['Agent', 'SendSubagentMessage', 'WolfPack']) {
       expect(evaluate('execute', name)?.kind, name).toBe('deny');

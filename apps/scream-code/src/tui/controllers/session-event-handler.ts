@@ -1266,10 +1266,11 @@ export class SessionEventHandler {
   }
 
   private handleSessionError(event: ErrorEvent): void {
-    // A refused prompt can emit `error` alone: core answers a second prompt
-    // with `turn.agent_busy` while a turn is already active
-    // (packages/agent-core/src/agent/turn/index.ts:124-135) and never emits
-    // `turn.ended`, while the TUI already marked the request as running in
+    // A refused prompt can emit `error` alone: core answers a prompt with
+    // `turn.agent_busy` while the session is still resuming
+    // (packages/agent-core/src/agent/turn/index.ts, `TurnFlow.prompt`; a
+    // prompt during an active turn is buffered as a steer instead) and never
+    // emits `turn.ended`, while the TUI already marked the request as running in
     // beginSessionRequest(). Error events carry no top-level turnId (ErrorEvent
     // is ScreamErrorPayload + type), so this event cannot set the turn marker
     // below — an unset marker here means no turn has produced an event yet.

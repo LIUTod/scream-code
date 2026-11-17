@@ -564,9 +564,9 @@ export class Agent {
     this.cacheWarmer?.dispose();
     if (!this.rlmEnabled) return;
     this.rlmEnabled = false;
-    const withoutPython = this.tools.getActiveTools().filter((name) => name !== 'python');
+    const withoutPython = this.tools.getActiveTools().filter((name) => name !== 'Python');
     this.tools.setActiveTools(withoutPython);
-    (this.tools.getBuiltinTool('python') as { dispose?: () => void } | undefined)?.dispose?.();
+    (this.tools.getBuiltinTool('Python') as { dispose?: () => void } | undefined)?.dispose?.();
     // Symmetric with setRlmEnabled(false): persist rlm.exit so a close →
     // resume replay restores rlmEnabled=false (and the python tool removal
     // above stays consistent). Without this, replay would see only rlm.enter
@@ -576,7 +576,7 @@ export class Agent {
 
   /**
    * Enables or disables the /rlm persistent-python mode. On enable, the
-   * `python` tool is added to the active tools; on disable it is removed and
+   * `Python` tool is added to the active tools; on disable it is removed and
    * its kernel is disposed. Default state (disabled) leaves the tool list and
    * default behaviour untouched.
    */
@@ -584,15 +584,15 @@ export class Agent {
     this.rlmEnabled = enabled;
     const current = this.tools.getActiveTools();
     if (enabled) {
-      if (!current.includes('python')) {
-        this.tools.setActiveTools([...current, 'python']);
+      if (!current.includes('Python')) {
+        this.tools.setActiveTools([...current, 'Python']);
       }
     } else {
-      const withoutPython = current.filter((name) => name !== 'python');
+      const withoutPython = current.filter((name) => name !== 'Python');
       if (withoutPython.length !== current.length) {
         this.tools.setActiveTools(withoutPython);
       }
-      (this.tools.getBuiltinTool('python') as { dispose?: () => void } | undefined)?.dispose?.();
+      (this.tools.getBuiltinTool('Python') as { dispose?: () => void } | undefined)?.dispose?.();
     }
     this.records.logRecord(
       enabled
@@ -648,8 +648,8 @@ export class Agent {
   inheritRlm(): void {
     this.rlmEnabled = true;
     const current = this.tools.getActiveTools();
-    if (!current.includes('python')) {
-      this.tools.setActiveTools([...current, 'python']);
+    if (!current.includes('Python')) {
+      this.tools.setActiveTools([...current, 'Python']);
     }
     this.records.logRecord({
       type: 'rlm.enter',
@@ -691,11 +691,11 @@ export class Agent {
     this.rlmEnabled = enabled;
     const current = this.tools.getActiveTools();
     if (enabled) {
-      if (!current.includes('python')) {
-        this.tools.setActiveTools([...current, 'python']);
+      if (!current.includes('Python')) {
+        this.tools.setActiveTools([...current, 'Python']);
       }
     } else {
-      const withoutPython = current.filter((name) => name !== 'python');
+      const withoutPython = current.filter((name) => name !== 'Python');
       if (withoutPython.length !== current.length) {
         this.tools.setActiveTools(withoutPython);
       }

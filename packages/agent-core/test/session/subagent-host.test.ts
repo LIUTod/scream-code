@@ -155,7 +155,7 @@ describe('SessionSubagentHost', () => {
     // profile application — otherwise the child cannot call rlm() and the
     // recursion chain stops at the first level (a regression this test must
     // catch).
-    expect(childAgent.tools.getActiveTools()).toContain('python');
+    expect(childAgent.tools.getActiveTools()).toContain('Python');
   });
 
   it('does not give RLM to a child when the parent is not in RLM mode', async () => {
@@ -188,7 +188,7 @@ describe('SessionSubagentHost', () => {
     };
     expect(childAgent.getRlmEnabled()).toBe(false);
     expect(childAgent.getRlmDepth()).toBe(1);
-    expect(childAgent.tools.getActiveTools()).not.toContain('python');
+    expect(childAgent.tools.getActiveTools()).not.toContain('Python');
   });
 
   it('keeps an RLM grandchild under the read-only parent capability mode', async () => {
@@ -1301,8 +1301,8 @@ describe('SessionSubagentHost', () => {
     // A configured child owns real builtin tools, python included — the
     // instance it would spawn its kernel from.
     child.configure();
-    const parentPython = parent.agent.tools.getBuiltinTool('python');
-    const childPython = child.agent.tools.getBuiltinTool('python');
+    const parentPython = parent.agent.tools.getBuiltinTool('Python');
+    const childPython = child.agent.tools.getBuiltinTool('Python');
     expect(parentPython).toBeDefined();
     expect(childPython).toBeDefined();
     const parentKernelDispose = vi.spyOn(

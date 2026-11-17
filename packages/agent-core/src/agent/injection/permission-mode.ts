@@ -29,6 +29,8 @@ const BOT_MODE_ENTER_REMINDER = [
   '  - Reversible work (reads, in-workspace edits, read-only commands) runs without approval.',
   '  - Irreversible actions (push, publish, delete, sensitive files, unclassified operations) are denied automatically — bot never asks, so nothing is queued or reviewed interactively; the denial reason is returned to you.',
   '  - Do not retry a denied call unchanged. Continue with what is allowed and report what needs the user.',
+  '  - Do not ask the user (AskUserQuestion is blocked): decide with the safest reasonable option, note the assumption, and continue; only what truly needs the user goes on that report.',
+  '  - Nobody is watching, so do not stop where the work only has to wait (CI, a deploy, a rate limit, the next step of a long job): schedule your own follow-up with the cron tools and carry on when it fires, until the agreed work is done.',
 ].join('\n');
 
 const BOT_MODE_EXIT_REMINDER = [

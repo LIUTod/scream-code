@@ -70,13 +70,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The root typecheck script depends on workspace package dists
-      # (build:packages). pnpm install does not build them (no prepare
-      # script), and the ubuntu job passes only because its cache happens to
-      # carry the dists — Windows starts cold, so build explicitly.
-      - name: Build workspace packages
-        run: pnpm run build:packages
-
       # Windows job verifies the RLM persistent-kernel tests on a real
       # Windows python (spawn python/python3 + pipe REPL + file bridge).
       # Only the RLM tests run here: the rest of the agent-core suite has
@@ -84,7 +77,8 @@ jobs:
       # projection) that are linux-covered; running them on Windows would
       # fail for reasons unrelated to RLM. agent-core has no dependency on
       # the @scream-code/config workspace link, so this job avoids that
-      # Windows pnpm resolution quirk too.
+      # Windows pnpm resolution quirk too. No build step: every workspace
+      # package exports its TypeScript sources, so the tests need no dists.
       - name: Test (RLM on Windows)
         run: pnpm --filter @scream-code/agent-core exec vitest run test/tools/builtin/python.test.ts test/tools/builtin/rlm-interrupt.test.ts
 

@@ -6,9 +6,10 @@ import { migrateV1_4ToV1_5 } from './v1.5';
 import { migrateV1_5ToV1_6 } from './v1.6';
 import { migrateV1_6ToV1_7 } from './v1.7';
 import { migrateV1_7ToV1_8 } from './v1.8';
+import { migrateV1_8ToV1_9 } from './v1.9';
 
 // Wire protocol versions currently support only the `number.number` format.
-export const AGENT_WIRE_PROTOCOL_VERSION = '1.8';
+export const AGENT_WIRE_PROTOCOL_VERSION = '1.9';
 
 export interface WireMigrationRecord {
   readonly type: string;
@@ -30,6 +31,7 @@ const MIGRATIONS: readonly WireMigration[] = [
   migrateV1_5ToV1_6,
   migrateV1_6ToV1_7,
   migrateV1_7ToV1_8,
+  migrateV1_8ToV1_9,
 ];
 
 export function isNewerWireVersion(readVersion: string): boolean {

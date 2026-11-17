@@ -209,7 +209,7 @@ describe('Agent compaction', () => {
     });
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     // config.provider is a GETTER that builds a fresh provider on every
-    // access (config/index.ts:103-105), so reference identity cannot be
+    // access (agent/config/index.ts, `get provider()`), so reference identity cannot be
     // asserted. Assert the observable effect instead: withThinking() lands
     // the thinking flag in the provider's generation kwargs, while a bare
     // provider (the old compaction path) has no thinking entry at all and

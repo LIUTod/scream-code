@@ -33,18 +33,21 @@ if (!existsSync(srcReadme)) {
   process.exit(1);
 }
 // The package copy sits one directory deeper than the repo root, so
-// repo-relative links would 404 on npmjs.com. Rewrite `docs/...` links to
-// absolute GitHub URLs while copying.
+// repo-relative links would 404 on npmjs.com. Rewrite `docs/...` links and
+// `assets/...` images (logo, sponsor) to absolute GitHub URLs while copying.
 const repoUrl = String(pkg.repository?.url ?? '')
   .replace(/^git\+/, '')
   .replace(/\.git$/, '');
 const docsBase = repoUrl.length > 0 ? `${repoUrl}/blob/main` : null;
+const rawBase = repoUrl.length > 0 ? `${repoUrl}/raw/main` : null;
 const readmeSource = readFileSync(srcReadme, 'utf-8');
 writeFileSync(
   dstReadme,
-  docsBase === null
+  docsBase === null || rawBase === null
     ? readmeSource
-    : readmeSource.replaceAll('](docs/', `](${docsBase}/docs/`),
+    : readmeSource
+        .replaceAll('](docs/', `](${docsBase}/docs/`)
+        .replaceAll('src="assets/', `src="${rawBase}/assets/`),
 );
 console.log('[verify-publish] Synced README.md from repo root to package dir.');
 

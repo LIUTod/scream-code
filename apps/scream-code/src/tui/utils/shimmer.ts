@@ -145,16 +145,3 @@ export function shimmerTextWithPalette(text: string, palette: ShimmerPalette): s
   }
   return out;
 }
-
-/**
- * Build a custom shimmer palette from a single crest colour — useful for
- * matching a specific accent. The dim/muted tiers are taken from the base
- * palette; only the high tier is replaced.
- */
-export function accentPalette(colors: ColorPalette, crestHex: string): ShimmerPalette {
-  return {
-    low: colors.textDim,
-    mid: colors.textMuted,
-    high: crestHex,
-  };
-}

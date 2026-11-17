@@ -67,8 +67,6 @@ export interface PermissionData {
   rules: PermissionRule[];
 }
 
-export type PermissionDecision = 'approve' | 'deny' | 'ask';
-
 export type PermissionReasonValue = string | number | boolean | null;
 
 export type PermissionDecisionReason = Readonly<Record<string, PermissionReasonValue>>;

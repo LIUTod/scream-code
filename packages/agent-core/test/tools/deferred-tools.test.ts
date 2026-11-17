@@ -1,7 +1,7 @@
 /**
  * Deferred tool portal (DiscoverTools).
  *
- * Eight low-frequency built-in groups stay out of the default tool table;
+ * Nine low-frequency built-in groups stay out of the default tool table;
  * the portal tool fronts them: enabling a group constructs its instances,
  * puts their names into the enabled set, and the turn loop's frozen
  * enabled-name filter turns that into next-turn availability.
@@ -129,6 +129,20 @@ describe('deferred group table', () => {
       'InspectOwnAssets',
     ]);
   });
+
+  it('main-agent-only groups build nothing on a sub agent, even with every runtime present', () => {
+    // The eager registry gates these tools on `type === 'main'`; a sub agent
+    // only reaches a factory through an explicit tool list, which must not
+    // hand it what the eager path withholds.
+    const full = fullContext();
+    const subContext: DeferredToolGroupContext = {
+      ...full,
+      agent: { ...(full.agent as unknown as Record<string, unknown>), type: 'sub', cron: null } as unknown as Agent,
+    };
+    for (const group of DEFERRED_GROUPS) {
+      expect(group.construct(subContext).map((t) => t.name), group.name).toEqual([]);
+    }
+  });
 });
 
 describe('DiscoverTools portal tool', () => {
@@ -140,6 +154,15 @@ describe('DiscoverTools portal tool', () => {
         expect(tool.description, name).toContain(name);
       }
     }
+  });
+
+  it('says when to open the cron group, so the model reaches for it on its own', () => {
+    const tool = new DiscoverToolsTool({} as ToolManager);
+    expect(tool.description).toContain(
+      'cron (CronCreate, CronList, CronDelete; schedule your own follow-up: a later check while waiting on CI, a deploy or a review',
+    );
+    // Groups without a hint keep the bare form.
+    expect(tool.description).toMatch(/memory \([A-Za-z, ]+\)/);
   });
 
   it('input schema rejects unknown group names', () => {
@@ -266,6 +289,21 @@ describe('tool portal in the registry (default mode)', () => {
     expect([...ctx.agent.tools.getActiveTools()]).toEqual(['Bash', 'CronCreate']);
   });
 
+  it('an explicit list on a sub agent does not construct main-agent-only tools', () => {
+    const ctx = testAgent({ type: 'sub' });
+    ctx.configure();
+    ctx.agent.useProfile({
+      name: 'explicit-sub',
+      systemPrompt: () => 'explicit sub profile prompt',
+      tools: ['Bash', 'CreateGoal', 'InspectOwnAssets', 'ManagePlugin', 'MakeSkillPlan', 'Debug'],
+      toolsExplicit: true,
+    });
+    expect(ctx.agent.tools.loopTools.map((tool) => tool.name)).toEqual(['Bash']);
+    for (const name of ['CreateGoal', 'InspectOwnAssets', 'ManagePlugin', 'MakeSkillPlan', 'Debug']) {
+      expect(ctx.agent.tools.getBuiltinTool(name), name).toBeUndefined();
+    }
+  });
+
   it('constructs a deferred name set through the SDK active-tool path', async () => {
     // `session.setActiveTools` → rpc → the agent's handler; it never passes
     // through `useProfile`, so the registry needs the same post-set
@@ -390,10 +428,10 @@ describe('toolPortal: off restores the pre-portal registry', () => {
         "Edit",
         "Grep",
         "Glob",
-        "ast_grep",
-        "ast_edit",
+        "AstGrep",
+        "AstEdit",
         "Bash",
-        "python",
+        "Python",
         "RunScript",
         "EnterPlanMode",
         "ExitPlanMode",

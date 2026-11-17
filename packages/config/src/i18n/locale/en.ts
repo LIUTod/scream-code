@@ -84,21 +84,9 @@ export const en: Record<string, string> = {
 
   // ─── Common ───────────────────
   'common.cancel': 'Cancel',
-  'common.confirm': 'Confirm',
-  'common.submit': 'Submit',
-  'common.back': 'Back',
-  'common.close': 'Close',
-  'common.delete': 'Delete',
-  'common.install': 'Install',
-  'common.uninstall': 'Uninstall',
   'common.restart': 'Restart',
   'common.start': 'Start',
   'common.stop': 'Stop',
-  'common.off': 'Off',
-  'common.on': 'On',
-  'common.done': 'Done',
-  'common.fail': 'Failed',
-  'common.running': 'Running',
   'common.not_set': 'Not set',
 
   // ─── Errors ───────────────────
@@ -107,9 +95,6 @@ export const en: Record<string, string> = {
   'error.unsupported_format': 'Only .md, .markdown, .txt, .pdf, .docx and .xlsx files are supported',
   'error.image_not_supported': 'Current model does not support image input.',
   'error.video_not_supported': 'Current model does not support video input.',
-  'error.network_timeout': 'Network timeout. Check your connection or try with a proxy.',
-  'error.load_failed': 'Load failed: {msg}',
-  'error.internal': 'Internal error',
   'error.no_session': 'No active session.',
   'error.session_header_hint':
     'Set session_header = "{name}" under this provider in config.toml to supply the required session id.',
@@ -183,15 +168,6 @@ export const en: Record<string, string> = {
   'input.large_cancelled': 'Input cancelled.',
 
   // ─── Welcome ──────────────────
-  'welcome.config': '/config  Configure model',
-  'welcome.sessions': '/sessions  Resume session',
-  'welcome.quick_menu': '/  Open quick menu',
-  'welcome.just_now': 'just now',
-  'welcome.minutes_ago': '{minutes}m ago',
-  'welcome.hours_ago': '{hours}h ago',
-  'welcome.days_ago': '{days}d ago',
-  'welcome.no_recent': 'No recent sessions',
-  'welcome.recent': 'Recent sessions',
   'welcome.like_active': 'like active',
   'welcome.like_inactive': 'like not loaded',
   'welcome.help_hint': '/help for help',
@@ -426,7 +402,6 @@ export const en: Record<string, string> = {
   'mcp.recommended': 'Recommended MCP (Enter to install)',
   'mcp.installed': 'Installed',
   'mcp.install_enter': 'Enter to install',
-  'mcp.confirm_uninstall': 'Confirm Uninstall',
   'mcp.uninstall_yes': 'Yes, uninstall',
   'mcp.installing': 'Installing',
   'mcp.configuring': 'Configuring',
@@ -435,7 +410,6 @@ export const en: Record<string, string> = {
   'mcp.disable_failed': 'Disable failed: {msg}',
   'mcp.detected_starting': 'Detected installation, starting...',
   'mcp.start_failed': 'Start failed: {msg}',
-  'mcp.uninstall_done': 'Uninstalled.',
   'mcp.uninstall_failed': 'Uninstall failed: {msg}',
   'mcp.footer_hint': 'Enter select  a auth  o options  d uninstall  Esc back',
   'mcp.macos_only': 'macOS only',
@@ -842,8 +816,6 @@ export const en: Record<string, string> = {
   'toolcall.sub_agent_named': 'Sub agent {name} ({id})',
   'toolcall.sub_agent': 'Sub agent ({id})',
   'toolcall.more_tools': '{count} more tool calls...',
-  'toolcall.agent_used': '{name} used {tool}',
-  'toolcall.agent_in_use': '{name} using {tool}',
   'toolcall.starting': 'Starting…',
   'toolcall.running': 'Running',
   'toolcall.completed': 'Completed',
@@ -986,15 +958,6 @@ export const en: Record<string, string> = {
   'taskbrowser.agent_source_unknown': 'standalone (no parent info)',
 
   // ─── Subagent model binder ──────
-  'subagent.desc_coder': 'General software engineering',
-  'subagent.desc_reviewer': 'Code review, bug & API contract violations',
-  'subagent.desc_writer': 'Content production & research reports',
-  'subagent.desc_explore': 'Quick codebase exploration (read-only)',
-  'subagent.desc_oracle': 'Large-scope review of existing code (architecture, debt, maintainability, dead weight)',
-  'subagent.desc_plan': 'Implementation planning & architecture design (read-only)',
-  'subagent.desc_verify': 'Run build/test/lint to verify changes',
-  'subagent.desc_worker': 'Office automation: format conversion, batch processing, file organization',
-  'subagent.desc_designer': 'Visual design: UI/UX/TUI direction, specs & polish',
   'subagent.follow_main': 'Follow main model',
   'subagent.follow_main_desc': 'Use the main agent\'s current model (default)',
   // Unset role/housekeeping rows: config.toml (`model_roles` /
@@ -1054,9 +1017,7 @@ export const en: Record<string, string> = {
   'usage.managed_title': 'Managed Usage',
   'usage.no_data': 'No usage data available.',
   'usage.used': 'used',
-  'usage.session_title': 'Session Usage',
   'usage.context_window': 'Context Window',
-  'usage.subagent_title': 'Sub-Agent Usage',
   'usage.panel_title': ' Usage ',
   'usage.session_total': 'Session Total',
   'usage.token_limit': 'Token limit (this run): {used} / {limit}',
@@ -1167,7 +1128,6 @@ export const en: Record<string, string> = {
   'permission.auto': 'Auto',
   'permission.auto_desc': 'Run fully without interaction. Tool operations are auto-approved; agent questions are skipped so it can decide on its own.',
   'permission.yolo_desc': 'Auto-approve tool operations (dangerous commands included). The agent still brings its questions and plan reviews to you.',
-  'permission.bot': 'Bot',
   'permission.bot_desc': 'Unattended mode: reversible actions auto-approve; anything else is denied and parked for you to review.',
   'permission.ask_desc': 'Read-only Q&A mode: answer in conversation, never modify files, run commands, or call MCP tools.',
   'permission.select_title': 'Select permission mode',
@@ -1240,7 +1200,6 @@ export const en: Record<string, string> = {
   // ─── editor-selector ───────────
   'editor.auto_detect': 'Auto detect ($VISUAL / $EDITOR)',
   'editor.select_title': 'Select external editor',
-  'editor.empty_session_hint': 'Tips: Like this project or hit an issue? Give feedback or a star on GitHub. Ctrl+B: toggle this tip.',
   'editor.tip_offer': '💡 Tips: Some models from 90% off — one API for all! todapi.work [Ctrl+B to hide Tips]',
   'editor.tip_ad': '💡 Tips: Like this project or hit an issue? Give feedback or a star on GitHub  [Ctrl+B to hide Tips]',
   'editor.tip_1': '💡 Tips: Press Tab on an empty input to cycle thinking effort  [Ctrl+B to hide Tips]',
@@ -1456,8 +1415,6 @@ export const en: Record<string, string> = {
   'knowledge.empty_store': 'Knowledge base is empty, please ingest documents with /knowledge first',
   'knowledge.web_opened': 'Knowledge graph opened: {url}',
 
-  // ─── CC ────────────────────────
-
   // ─── Registry ──────────────────
   'registry.auto_desc': 'Toggle auto permission mode',
   'registry.yolo_desc': 'Toggle auto-approve mode (yolo)',
@@ -1476,19 +1433,9 @@ export const en: Record<string, string> = {
   'registry.model_desc': 'Switch LLM model',
 
   // ─── MCP ───────────────────────
-  'mcp.desktop_desc': 'macOS desktop automation: screenshot/click/type/scroll/window management (Background delivery, no focus needed)',
   'mcp.browser_desc': 'Browser automation: navigation/click/fill/screenshot/console & network debugging/performance analysis',
   'mcp.capability_browser': '🌐 browser automation',
   'mcp.capability_memory': '🧠 decision memory',
-
-  // ─── Knowledge web ─────────────
-  'kw.title': 'Scream Knowledge Graph',
-  'kw.entity': 'Entities',
-  'kw.event': 'Events',
-  'kw.relation': 'Relations',
-  'kw.search_placeholder': 'Search...',
-  'kw.btn_reset': 'Reset',
-  'kw.btn_expand': 'All',
 
   // ─── Registry (remaining) ──────
   'registry.compact_desc': 'Compact conversation context',
@@ -1628,27 +1575,6 @@ export const en: Record<string, string> = {
   'registry.eval_desc': 'Run end-to-end tests (Agent health check)',
   'registry.exit_desc': 'Exit application',
 
-  // ─── Knowledge web HTML ────────
-  'kw.hint_drag': 'Drag to pan · Scroll to zoom · Click to expand/collapse · Double-click for details',
-  'kw.detail_name': 'Name',
-  'kw.detail_type': 'Type',
-  'kw.detail_category': 'Category',
-  'kw.detail_weight': 'Weight',
-  'kw.detail_description': 'Description',
-  'kw.detail_keywords': 'Keywords',
-  'kw.detail_related': 'Related',
-  'kw.btn_collapse': 'Collapse',
-  'kw.btn_expand_all': 'Expand All',
-  'kw.btn_collapse_all': 'Collapse All',
-  'kw.loading': 'Loading',
-  'kw.loading_timeout': 'Data did not return within 8 seconds, please check the terminal',
-  'kw.no_data': 'Failed to load',
-  'kw.no_data_hint': 'Please ingest documents with /knowledge first',
-  'kw.no_results': 'No matching results',
-  'kw.back': 'Back',
-  'kw.root_label': 'Root',
-  'kw.close': 'Close',
-
   // ─── Config messages ───────────
   'tui.invalid_config': 'Invalid TUI config in ~/.scream-code/tui.toml; using defaults.',
 
@@ -1667,13 +1593,11 @@ export const en: Record<string, string> = {
   'badge.wolfpack': 'Wolfpack',
   'badge.rlm': 'RLM',
   'badge.goal': 'Goal',
-  'badge.auto': 'Auto',
   'badge.yes': 'YES',
   'badge.bot': 'BOT',
   'badge.ask': 'ASK',
 
   // ─── Knowledge Web (in-browser) ────
-  'kw.lang_toggle': '中文',
   'kw.embedding_downloading': 'Vector model downloading…',
   'kw.embedding_progress': 'Downloading vector model {done} / {total} ({percent}%)',
   'kw.embedding_progress_unknown': 'Downloading vector model {done}',

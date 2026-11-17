@@ -13,7 +13,7 @@ import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@scream-code/scre
 
 import { t } from '@scream-code/config';
 
-import type { BackgroundAgentStatusData, BackgroundAgentStatusPhase } from '@/tui/types';
+import type { BackgroundAgentStatusData, BackgroundAgentStatusPhase } from '#/tui/types';
 
 const MAX_DETAIL_LENGTH = 240;
 
@@ -24,8 +24,6 @@ function truncate(value: string | undefined): string | undefined {
   if (collapsed.length <= MAX_DETAIL_LENGTH) return collapsed;
   return `${collapsed.slice(0, MAX_DETAIL_LENGTH - 3)}...`;
 }
-
-export type BackgroundTaskTranscriptPhase = 'started' | 'updated' | 'terminal';
 
 function phaseFromStatus(status: BackgroundTaskStatus): BackgroundAgentStatusPhase {
   switch (status) {

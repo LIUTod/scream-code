@@ -23,6 +23,7 @@ import type {
   LoopTerminalStepStopReason,
   LoopTurnStopReason,
   MediaProjectionState,
+  StructureRepairState,
   RecordStepUsageResult,
   TokenCapState,
   TurnResult,
@@ -119,6 +120,8 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   // Shared mutable state: once a step recovers via media degradation, all
   // subsequent steps in this turn use the same projection directly.
   const mediaProjection: MediaProjectionState = { mode: 'normal' };
+  // Same idea for a rejected message structure: repair once, keep it.
+  const structureRepair: StructureRepairState = { active: false };
   const recordStepUsage = async (
     stepUsage: TokenUsage,
   ): Promise<RecordStepUsageResult | void> => {
@@ -173,6 +176,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         hasPendingSteer: input.hasPendingSteer,
         pendingSteerKind: input.pendingSteerKind,
         mediaProjection,
+        structureRepair,
         onStreamingDraft: input.onStreamingDraft,
       });
       activeStep = undefined;

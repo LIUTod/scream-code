@@ -2,7 +2,7 @@
  * Resume / cross-restart persistence for CronManager.
  *
  * The manager's `addTask` / `removeTasks` wrappers mirror every mutation
- * to `<sessionDir>/cron/<id>.json`, and `loadFromDisk()` re-populates
+ * to `<agent homedir>/cron/<id>.json`, and `loadFromDisk()` re-populates
  * the in-memory store when a session is resumed. The scheduler's
  * `createdAt`-based baseline is what makes a reloaded task fire
  * correctly even when ideal fire times landed during downtime — these

@@ -131,7 +131,7 @@ export const WINDOWS_PATH_HINT =
   'returned in Windows backslash form; convert them to forward slashes before ' +
   'using them in a Bash command.';
 
-// POSIX mode bits — same constants used by JianPath.isDir (packages/jian/src/path.ts:199).
+// POSIX file-type bits from `st_mode` (S_IFMT mask, S_IFDIR directory type).
 const S_IFMT = 0o170000;
 const S_IFDIR = 0o040000;
 

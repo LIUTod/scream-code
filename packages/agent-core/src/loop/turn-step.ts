@@ -9,15 +9,30 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { isImageFormatError, isRecoverableRequestStructureError, isRequestTooLargeError, type TokenUsage } from '@scream-code/ltod';
+import {
+  isImageFormatError,
+  isRecoverableRequestStructureError,
+  isRequestTooLargeError,
+  type Message,
+  type TokenUsage,
+} from '@scream-code/ltod';
 import type { Logger } from '#/logging/types';
 
 import type { LoopEventDispatcher } from './events';
 import type { LLM, LLMChatParams, LLMChatResponse } from './llm';
 import { degradeMedia, stripMedia } from './media-projection';
 import { chatWithRetry } from './retry';
+import { repairMessageStructure } from './structure-repair';
 import { recordUnexecutedToolCalls, runToolCallBatch, type ToolCallStepContext } from './tool-call';
-import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason, MediaProjectionState, RecordStepUsageResult } from './types';
+import type {
+  ExecutableTool,
+  LoopHooks,
+  LoopMessageBuilder,
+  LoopStepStopReason,
+  MediaProjectionState,
+  RecordStepUsageResult,
+  StructureRepairState,
+} from './types';
 
 type ChatStreamingCallbacks = Pick<
   LLMChatParams,
@@ -63,12 +78,45 @@ export interface ExecuteLoopStepDeps {
    */
   readonly pendingSteerKind?: (() => 'user' | 'parent-interject') | undefined;
   readonly mediaProjection?: MediaProjectionState | undefined;
+  /** Turn-shared request-structure repair state (see `StructureRepairState`). */
+  readonly structureRepair?: StructureRepairState | undefined;
   /**
    * Crash-recovery draft sink: receives throttled full snapshots of the
    * in-flight stream (and an empty pair to clear once real parts land).
    * Implementations write a `context.stream_draft` wire record directly.
    */
   readonly onStreamingDraft?: ((text: string, think: string) => void) | undefined;
+}
+
+/**
+ * Switch on the projection that recovers from `error`, returning the warning
+ * to log, or `undefined` when no recovery applies (or it was already used —
+ * each one is tried at most once per turn).
+ */
+function enableRecoveryFor(
+  error: unknown,
+  mediaProjection: MediaProjectionState | undefined,
+  structureRepair: StructureRepairState | undefined,
+): string | undefined {
+  if (mediaProjection !== undefined) {
+    if (isRequestTooLargeError(error) && mediaProjection.mode === 'normal') {
+      mediaProjection.mode = 'degraded';
+      return 'request too large - retrying with media degraded';
+    }
+    if (isRequestTooLargeError(error) && mediaProjection.mode === 'degraded') {
+      mediaProjection.mode = 'stripped';
+      return 'request still too large with degraded media - retrying with all media stripped';
+    }
+    if (isImageFormatError(error) && mediaProjection.mode !== 'stripped') {
+      mediaProjection.mode = 'stripped';
+      return 'image format error - retrying with all media stripped';
+    }
+  }
+  if (structureRepair !== undefined && !structureRepair.active && isRecoverableRequestStructureError(error)) {
+    structureRepair.active = true;
+    return 'request structure rejected - retrying with normalized messages';
+  }
+  return undefined;
 }
 
 export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
@@ -96,6 +144,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     maxRetryAttempts,
     recordUsage,
     mediaProjection,
+    structureRepair,
   } = deps;
 
   if (hooks?.beforeStep !== undefined) {
@@ -146,14 +195,22 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     step: currentStep,
   });
 
-  // Apply sticky media projection from a previous step's recovery (so the
-  // same degradation is used without a wasted failed request per step).
-  let effectiveMessages = messages;
-  if (mediaProjection?.mode === 'degraded') {
-    effectiveMessages = degradeMedia(messages);
-  } else if (mediaProjection?.mode === 'stripped') {
-    effectiveMessages = stripMedia(messages);
-  }
+  // Apply the sticky projections from a previous step's recovery (so the
+  // same degradation / repair is used without a wasted failed request per
+  // step): media first, then the structure repair over the result.
+  const projectMessages = (raw: Message[]): Message[] => {
+    let projected = raw;
+    if (mediaProjection?.mode === 'degraded') {
+      projected = degradeMedia(projected);
+    } else if (mediaProjection?.mode === 'stripped') {
+      projected = stripMedia(projected);
+    }
+    if (structureRepair?.active === true) {
+      projected = repairMessageStructure(projected);
+    }
+    return projected;
+  };
+  let effectiveMessages = projectMessages(messages);
 
   const chatParams: LLMChatParams = {
     messages: effectiveMessages,
@@ -181,70 +238,25 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       log,
     });
   } catch (error) {
-    // Media degradation recovery: if the provider rejects the request
-    // because of media (too large or bad format), transform the messages
-    // and retry once. The sticky `mediaProjection` state ensures
-    // subsequent steps in the same turn use the degraded projection
-    // directly without re-failing.
-    if (mediaProjection !== undefined && !signal.aborted) {
-      if (
-        isRequestTooLargeError(error) &&
-        mediaProjection.mode !== 'degraded' &&
-        mediaProjection.mode !== 'stripped'
-      ) {
-        mediaProjection.mode = 'degraded';
-        effectiveMessages = degradeMedia(messages);
-        log?.warn('request too large - retrying with media degraded');
-        response = await chatWithRetry({
-          llm,
-          params: { ...chatParams, messages: effectiveMessages },
-          dispatchEvent,
-          turnId,
-          currentStep,
-          stepUuid,
-          maxAttempts: maxRetryAttempts,
-          log,
-        });
-      } else if (
-        isRequestTooLargeError(error) &&
-        mediaProjection.mode === 'degraded'
-      ) {
-        mediaProjection.mode = 'stripped';
-        effectiveMessages = stripMedia(messages);
-        log?.warn('request still too large with degraded media - retrying with all media stripped');
-        response = await chatWithRetry({
-          llm,
-          params: { ...chatParams, messages: effectiveMessages },
-          dispatchEvent,
-          turnId,
-          currentStep,
-          stepUuid,
-          maxAttempts: maxRetryAttempts,
-          log,
-        });
-      } else if (
-        isImageFormatError(error) &&
-        mediaProjection.mode !== 'stripped'
-      ) {
-        mediaProjection.mode = 'stripped';
-        effectiveMessages = stripMedia(messages);
-        log?.warn('image format error - retrying with all media stripped');
-        response = await chatWithRetry({
-          llm,
-          params: { ...chatParams, messages: effectiveMessages },
-          dispatchEvent,
-          turnId,
-          currentStep,
-          stepUuid,
-          maxAttempts: maxRetryAttempts,
-          log,
-        });
-      } else {
-        throw error;
-      }
-    } else {
-      throw error;
-    }
+    // Request recovery: when the provider rejects the request because of
+    // media (too large, bad format) or because of the message sequence
+    // itself, switch the matching projection on and retry once. The sticky
+    // turn-shared state means later steps in the same turn send the
+    // projected messages directly instead of failing again.
+    const recovery = signal.aborted ? undefined : enableRecoveryFor(error, mediaProjection, structureRepair);
+    if (recovery === undefined) throw error;
+    effectiveMessages = projectMessages(messages);
+    log?.warn(recovery);
+    response = await chatWithRetry({
+      llm,
+      params: { ...chatParams, messages: effectiveMessages },
+      dispatchEvent,
+      turnId,
+      currentStep,
+      stepUuid,
+      maxAttempts: maxRetryAttempts,
+      log,
+    });
   }
   const usage = response.usage;
   const usageResult = await recordUsage(usage);

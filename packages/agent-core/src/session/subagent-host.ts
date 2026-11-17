@@ -660,7 +660,7 @@ export class SessionSubagentHost {
    * would survive here rather than be killed by mistake.
    *
    * The kernel is torn down directly instead of through `Agent.disposeRlm()`:
-   * disposeRlm records `rlm.exit` and drops `python` from the tool set, which
+   * disposeRlm records `rlm.exit` and drops `Python` from the tool set, which
    * would make a later resume replay this child as RLM-disabled even though the
    * parent it inherited the mode from is still running RLM. Killing the kernel
    * leaves no orphan process while keeping the child's mode on its records.
@@ -673,8 +673,8 @@ export class SessionSubagentHost {
       // run's own result (or its rejection) with this teardown error.
       parent.log.warn('Failed to dispose subagent lsp servers', { error: String(error) });
     }
-    const python = child.tools.getBuiltinTool('python') as { dispose?: () => void } | undefined;
-    if (python === undefined || python === parent.tools.getBuiltinTool('python')) return;
+    const python = child.tools.getBuiltinTool('Python') as { dispose?: () => void } | undefined;
+    if (python === undefined || python === parent.tools.getBuiltinTool('Python')) return;
     try {
       python.dispose?.();
     } catch (error) {

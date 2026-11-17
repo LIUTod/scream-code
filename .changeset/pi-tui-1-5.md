@@ -1,7 +1,0 @@
----
-"scream-code": patch
----
-
-The TUI package moves from 1.1.0 to 1.5.0, which brings the upstream rendering fixes the local fork was missing: streaming Markdown re-renders only the block that changed instead of the whole document, bold/italic next to CJK punctuation renders, bare URLs stop at CJK punctuation, an unclosed `$$` block no longer swallows the table after it, deeply nested blockquotes no longer grow exponentially, HTML comments are no longer printed as body text, wide display math falls back to its source instead of being shredded across lines, the working indicator no longer disappears because of a stray terminal prompt marker, delayed terminal replies no longer leak into keyboard input, terminal modes are restored when the process exits without a clean stop, Kitty function keys and Shift+Enter are recognised, and more terminals are detected for images and hyperlinks. Wheel input under a focused overlay now falls through to the transcript, lists handle PageUp/PageDown, and fuzzy ranking prefers contiguous matches.
-
-On top of the port, four defects found in review are fixed: declaration files no longer ship `.ts` import specifiers (consumers either failed to compile or silently received `any`), narrow terminals no longer receive lines wider than their width when padding is set, the Markdown `tableHeader` option is honoured instead of silently ignored, and the spinner restyles after a theme change. The fork's own behaviour — render backpressure, scrollback preservation, search overlay, line cache, editor Tab hook — is unchanged.

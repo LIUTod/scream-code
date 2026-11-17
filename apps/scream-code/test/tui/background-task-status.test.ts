@@ -1,7 +1,7 @@
 import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@scream-code/scream-code-sdk';
 import { describe, expect, it } from 'vitest';
 
-import { formatBackgroundTaskTranscript } from '@/tui/utils/background-task-status';
+import { formatBackgroundTaskTranscript } from '#/tui/utils/background-task-status';
 
 function task(overrides: Partial<BackgroundTaskInfo> = {}): BackgroundTaskInfo {
   return {

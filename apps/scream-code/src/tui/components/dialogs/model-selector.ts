@@ -14,7 +14,6 @@ import type { ColorPalette } from '#/tui/theme/colors';
 import { SearchableList } from '#/tui/utils/searchable-list';
 import { SELECT_POINTER } from '../../constant/symbols';
 
-import type { ChoiceOption } from './choice-picker';
 
 type ThinkingAvailability = 'toggle' | 'always-on' | 'unsupported';
 
@@ -39,15 +38,6 @@ export function providerDisplayName(provider: string): string {
   if (provider === DEFAULT_OAUTH_PROVIDER_NAME) return PRODUCT_NAME;
   if (provider.startsWith('managed:')) return provider.slice('managed:'.length);
   return provider;
-}
-
-export function createModelChoiceOptions(
-  models: Record<string, ModelAlias>,
-): readonly ChoiceOption[] {
-  return Object.entries(models).map(([alias, cfg]) => ({
-    value: alias,
-    label: `${modelDisplayName(alias, cfg)} (${providerDisplayName(cfg.provider)})`,
-  }));
 }
 
 /** Status of the independently configured image-generation API (/config image). */

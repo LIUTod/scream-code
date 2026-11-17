@@ -1412,7 +1412,7 @@ describe('SessionEventHandler', () => {
 
 describe('SessionEventHandler — phase convergence', () => {
   /** Mirrors the wire shape: ErrorEvent = ScreamErrorPayload + type, i.e. no
-   *  top-level turnId (packages/agent-core/src/rpc/events.ts:86-88). */
+   *  top-level turnId (`ErrorEvent` in packages/agent-core/src/rpc/events.ts). */
   function errorEvent(code = 'turn.agent_busy') {
     return {
       ...baseEvent('error'),

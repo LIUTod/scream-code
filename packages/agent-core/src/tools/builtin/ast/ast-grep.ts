@@ -39,7 +39,7 @@ export const AstGrepInputSchema = z.object({
 export type AstGrepInput = z.infer<typeof AstGrepInputSchema>;
 
 export class AstGrepTool implements BuiltinTool<AstGrepInput> {
-  readonly name = 'ast_grep';
+  readonly name = 'AstGrep';
   readonly description = AST_GREP_DESCRIPTION;
   readonly parameters = toInputJsonSchema(AstGrepInputSchema);
 

@@ -12,13 +12,13 @@ import type { Component, Terminal } from '@liutod-scream/pi-tui';
 import type { BackgroundTaskInfo, Session } from '@scream-code/scream-code-sdk';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 
-import { TaskOutputViewer } from '@/tui/components/dialogs/task-output-viewer';
+import { TaskOutputViewer } from '#/tui/components/dialogs/task-output-viewer';
 import {
   TasksBrowserController,
   type TasksBrowserHost,
   type TasksBrowserState,
-} from '@/tui/controllers/tasks-browser';
-import { darkColors } from '@/tui/theme/colors';
+} from '#/tui/controllers/tasks-browser';
+import { darkColors } from '#/tui/theme/colors';
 
 const ESC = '\u001B';
 

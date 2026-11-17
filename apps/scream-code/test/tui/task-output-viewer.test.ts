@@ -2,8 +2,8 @@ import type { Terminal } from '@liutod-scream/pi-tui';
 import type { BackgroundTaskInfo } from '@scream-code/scream-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
-import { TaskOutputViewer } from '@/tui/components/dialogs/task-output-viewer';
-import { darkColors } from '@/tui/theme/colors';
+import { TaskOutputViewer } from '#/tui/components/dialogs/task-output-viewer';
+import { darkColors } from '#/tui/theme/colors';
 
 const ANSI_SGR = /\[[0-9;]*m/g;
 function strip(text: string): string {

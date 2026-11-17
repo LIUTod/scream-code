@@ -23,13 +23,6 @@ function detectSystemLocale(): Locale {
     // Intl not available — fall through
   }
 
-  // 3. Windows: check process.env.LANG set by some Node distributions
-  if (process.platform === 'win32') {
-    const winRaw = env['LANG'];
-    const winLang = (winRaw !== undefined && winRaw !== '' ? winRaw : '').toLowerCase();
-    if (winLang.startsWith('zh')) return 'zh';
-  }
-
   return 'en';
 }
 

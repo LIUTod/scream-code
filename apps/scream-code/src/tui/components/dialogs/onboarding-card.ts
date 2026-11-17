@@ -8,7 +8,7 @@
  * selection instead of a bare list.
  */
 
-import type { Component, Focusable } from '@liutod-scream/pi-tui';
+import type { Focusable } from '@liutod-scream/pi-tui';
 import { Container, matchesKey, Key, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 

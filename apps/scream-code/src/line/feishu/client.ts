@@ -59,10 +59,6 @@ export interface FeishuEventMessage {
   senderUserId: string;
 }
 
-export interface FeishuSdkLike {
-  new (opts: { appId: string; appSecret: string; domain?: string }): unknown;
-}
-
 // ─── Transient retry (port of withTransientRetry) ─────────────────────────
 
 export const MAX_TRANSIENT_RETRIES = 3;
@@ -647,6 +643,3 @@ export function normalizeReceiveEvent(data: unknown): FeishuEventMessage | undef
       raw?.sender?.sender_id?.open_id ?? raw?.sender?.sender_id?.user_id ?? raw?.sender?.sender_id?.union_id ?? '',
   };
 }
-
-/** Lark international base URL (mirror of the reference's Domain.Lark). */
-export const LARK_INTERNATIONAL_DOMAIN = 'https://open.larksuite.com';

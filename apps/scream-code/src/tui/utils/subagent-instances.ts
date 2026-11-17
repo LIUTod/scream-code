@@ -29,7 +29,7 @@ import type { SubagentSlot, SubagentSlotStatus } from '#/tui/utils/subagent-slot
 
 /**
  * agent-core synthesizes `rlm_<timestamp>_<rand>` parent tool-call ids for
- * rlm() spawns (packages/agent-core/src/agent/tool/index.ts:374), so no
+ * rlm() spawns (packages/agent-core/src/agent/tool/index.ts, `createRlmHostHandlers`), so no
  * tool-call row ever exists for them — the id shape is the only RLM marker
  * available to the TUI. A renamed prefix degrades to the generic "unknown"
  * attribution, never to a wrong one.

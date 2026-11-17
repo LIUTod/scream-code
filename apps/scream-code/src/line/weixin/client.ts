@@ -15,8 +15,6 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 
-import { log } from '@scream-code/scream-code-sdk';
-
 import type { WeixinRuntimeOptions } from '../config';
 import { buildCdnUploadUrl, encryptAesEcb } from './cdn';
 
@@ -508,8 +506,4 @@ export async function validateWeixinToken(
     response.ret,
     response.errcode,
   );
-}
-
-export function logWeixinDebug(context: Record<string, unknown>): void {
-  log.debug('line-weixin', context);
 }

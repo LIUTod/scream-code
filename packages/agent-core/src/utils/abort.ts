@@ -89,32 +89,3 @@ export function linkAbortSignal(source: AbortSignal, target: AbortController): (
     source.removeEventListener('abort', onAbort);
   };
 }
-
-export interface DeadlineAbortSignal {
-  readonly signal: AbortSignal;
-  readonly timedOut: () => boolean;
-  readonly clear: () => void;
-}
-
-export function createDeadlineAbortSignal(
-  source: AbortSignal,
-  timeoutMs: number,
-): DeadlineAbortSignal {
-  const controller = new AbortController();
-  const unlinkAbortSignal = linkAbortSignal(source, controller);
-  let didTimeout = false;
-  let timeout: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
-    didTimeout = true;
-    controller.abort(abortError());
-  }, timeoutMs);
-
-  return {
-    signal: controller.signal,
-    timedOut: () => didTimeout,
-    clear: () => {
-      if (timeout !== undefined) clearTimeout(timeout);
-      timeout = undefined;
-      unlinkAbortSignal();
-    },
-  };
-}

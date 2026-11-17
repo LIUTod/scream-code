@@ -9,7 +9,8 @@ import { isRealUserPrompt } from '../context/identity';
  * (message-replay.ts REPLAY_TURN_LIMIT). Records older than the window are
  * serialized across the in-process RPC boundary (a full JSON round-trip) but
  * never displayed, so capping here bounds both resume memory and the RPC
- * payload for long sessions. Keep in sync with the TUI's REPLAY_TURN_LIMIT.
+ * payload for long sessions. The TUI imports this constant through the SDK,
+ * so there is one value.
  */
 export const REPLAY_TURN_LIMIT = 10;
 

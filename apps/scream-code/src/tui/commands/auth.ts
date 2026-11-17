@@ -4,7 +4,6 @@ import { t } from '@scream-code/config';
 import {
   applyCatalogProvider,
   catalogBaseUrl,
-  catalogModelToAlias,
   catalogProviderModels,
   fetchCatalog,
   inferWireType,

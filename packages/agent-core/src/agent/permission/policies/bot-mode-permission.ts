@@ -22,6 +22,9 @@ const REVERSIBLE_TOOLS = new Set([
   'ReadMediaFile',
   'Glob',
   'Grep',
+  // Structural search: read-only like Grep (AstEdit, its writing sibling,
+  // stays out).
+  'AstGrep',
   'WebSearch',
   'PaperSearch',
   'FetchURL',
@@ -33,9 +36,21 @@ const REVERSIBLE_TOOLS = new Set([
   'MemoryConsolidatePlan',
   'KnowledgeLookup',
   'TodoList',
+  // Opening a deferred tool group declares tools and runs nothing; each tool
+  // in it still passes this policy on its own. Without it, every allowlisted
+  // tool that lives in a group (memory, knowledge, goal, cron lookups) could
+  // never be reached unattended.
+  'DiscoverTools',
+  // Scheduling, including repeating tasks and follow-ups a fired turn sets
+  // itself: bot mode exists to run without a person, so an agent that cannot
+  // come back to its own work would defeat it. The user owns that trade-off by
+  // choosing bot mode; tasks stay in the session, are deletable, recurring ones
+  // expire after 7 days, and every fired turn runs under this same policy.
+  'CronCreate',
+  'CronList',
+  'CronDelete',
   'TaskList',
   'TaskOutput',
-  'AskUserQuestion',
   'ContactParent',
   'ReportFinding',
   'SendSubagentMessage',
@@ -187,6 +202,19 @@ export class BotModePermissionPolicy implements PermissionPolicy {
         };
       }
       return { kind: 'approve', reason: { reason: 'bot: in-workspace reversible edit' } };
+    }
+    if (tool === 'AskUserQuestion') {
+      // Nobody is there to answer: a question would hold the run until someone
+      // came back (the terminal UI waits on its dialog indefinitely). Bot mode
+      // exists to keep going, so the agent decides and moves on.
+      return {
+        kind: 'deny',
+        reason: { reason: 'bot: unattended, nobody to answer' },
+        message:
+          'AskUserQuestion is unavailable in bot mode: nobody is here to answer. Decide yourself — ' +
+          'pick the safest reasonable option, note the assumption, and keep working. If something truly ' +
+          'only the user can settle, skip that part, finish the rest, and list it in your final report.',
+      };
     }
     if (REVERSIBLE_TOOLS.has(tool)) {
       // Unattended mode must not let private-read data leave the machine: no

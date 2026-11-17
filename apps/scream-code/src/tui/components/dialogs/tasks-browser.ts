@@ -25,10 +25,10 @@ import {
 import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 
-import type { ColorPalette } from '@/tui/theme/colors';
-import { printableChar } from '@/tui/utils/printable-key';
-import { sanitizeShellOutput } from '@/tui/utils/sanitize';
-import type { AgentRow, AgentRowStatus, AgentSource } from '@/tui/utils/subagent-instances';
+import type { ColorPalette } from '#/tui/theme/colors';
+import { printableChar } from '#/tui/utils/printable-key';
+import { sanitizeShellOutput } from '#/tui/utils/sanitize';
+import type { AgentRow, AgentRowStatus, AgentSource } from '#/tui/utils/subagent-instances';
 import { t } from '@scream-code/config';
 
 const ELLIPSIS = '…';

@@ -3,7 +3,6 @@
  */
 
 import type { ResolvedTheme } from './colors';
-import { detectTerminalTheme } from './detect';
 
 export { darkColors, lightColors, getColorPalette } from './colors';
 export type { ColorPalette, ResolvedTheme } from './colors';
@@ -23,16 +22,6 @@ export type Theme = 'dark' | 'light' | 'auto';
 
 export function isTheme(value: string): value is Theme {
   return value === 'dark' || value === 'light' || value === 'auto';
-}
-
-/**
- * Resolve a user preference to a concrete palette key. `'auto'` triggers
- * terminal background detection (OSC 11 with COLORFGBG / dark fallback);
- * explicit choices pass through.
- */
-export async function resolveTheme(theme: Theme): Promise<ResolvedTheme> {
-  if (theme === 'auto') return detectTerminalTheme();
-  return theme;
 }
 
 /**

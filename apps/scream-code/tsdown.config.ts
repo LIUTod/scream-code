@@ -32,7 +32,6 @@ export default defineConfig({
   },
   plugins: [rawTextPlugin()],
   alias: {
-    '@': resolve(appRoot, 'src'),
     '@scream-code/memory': resolve(repoRoot, 'packages/memory/src/index.ts'),
   },
   define: {

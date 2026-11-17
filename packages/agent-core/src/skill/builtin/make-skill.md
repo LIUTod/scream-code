@@ -35,8 +35,8 @@ $ARGUMENTS
 - **阶段 1**：已经确定了 Skill 类型，但还没有确定名称。根据类型和上下文建议一个 kebab-case 名称，用 `AskUserQuestion` 询问用户是否接受或修改。
 - **阶段 2**：已经确定了名称，但还没有明确解决的问题。根据上下文总结一句话描述，用 `AskUserQuestion` 询问用户是否接受或修改。
 - **阶段 3**：已经确定了问题，但还没有明确关注重点。给出 2-4 个关注重点建议，用 `AskUserQuestion` 让用户选择或输入。
-- **阶段 4**：类型、名称、问题、重点都已确定。调用 `MakeSkillPlanTool` 生成草案，展示给用户，并用 `AskUserQuestion` 询问是否确认安装。
-- **阶段 5**：用户已确认安装。调用 `MakeSkillApplyTool` 写入插件中心。
+- **阶段 4**：类型、名称、问题、重点都已确定。调用 `MakeSkillPlan` 生成草案，展示给用户，并用 `AskUserQuestion` 询问是否确认安装。
+- **阶段 5**：用户已确认安装。调用 `MakeSkillApply` 写入插件中心。
 
 如何判断“已确定”：历史消息中已经有你提出的 `AskUserQuestion` 以及用户给出的明确回答（或选择了你建议的选项）。
 
@@ -142,7 +142,7 @@ $ARGUMENTS
 
 ### 阶段 4：展示草案并确认
 
-调用 `MakeSkillPlanTool`，参数：
+调用 `MakeSkillPlan`，参数：
 
 - `type`：阶段 0 确定的类型
 - `nameHint`：阶段 1 确定的名称
@@ -177,7 +177,7 @@ $ARGUMENTS
 
 ### 阶段 5：执行安装
 
-如果用户选择“确认安装”，调用 `MakeSkillApplyTool`，传入工具返回的完整草案 JSON（`name`、`description`、`content`、`files`）。
+如果用户选择“确认安装”，调用 `MakeSkillApply`，传入工具返回的完整草案 JSON（`name`、`description`、`content`、`files`）。
 
 把结果告知用户，例如：
 
@@ -189,8 +189,8 @@ $ARGUMENTS
 
 - 除了阶段 4 的展示文本外，**所有澄清问题都必须通过 `AskUserQuestion` 工具提出**，不要直接用文本回复提问。
 - 每轮只能问一个问题。等用户回答后再推进到下一阶段。
-- 不要在没有调用 `MakeSkillApplyTool` 的情况下直接写文件。
+- 不要在没有调用 `MakeSkillApply` 的情况下直接写文件。
 - 如果用户选择“取消”或关闭问题，礼貌地告知已取消，不做任何修改。
-- 如果 `MakeSkillApplyTool` 返回错误（例如同名 Skill 已存在），向用户说明错误并停止，不要重试。
+- 如果 `MakeSkillApply` 返回错误（例如同名 Skill 已存在），向用户说明错误并停止，不要重试。
 - 新安装的 Skill 只在**新会话**中可用；当前会话不会立即加载它。
 - 安装后的 Skill 会出现在 `/plugin` 插件中心里，用户可以统一启用、禁用或卸载。

@@ -1,8 +1,7 @@
 /**
  * Canonical RLM recursion-cap validation, shared by every command surface:
- * the core setter (`Agent.setRlmMaxDepth`), the TUI `/rlm-max-depth` command
- * and the web REST route. Keeping it in one module means the surfaces cannot
- * drift — a value one surface accepts is exactly a value the others accept.
+ * the core setter (`Agent.setRlmMaxDepth`) and the TUI `/rlm-max-depth`
+ * command. Keeping it in one module means the surfaces cannot drift — a value one surface accepts is exactly a value the others accept.
  */
 
 /**

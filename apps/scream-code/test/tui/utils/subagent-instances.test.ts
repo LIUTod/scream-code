@@ -1,15 +1,15 @@
 import type { SubagentSpawnedEvent } from '@scream-code/scream-code-sdk';
 import { describe, expect, it } from 'vitest';
 
-import type { ToolCallBlockData } from '@/tui/types';
+import type { ToolCallBlockData } from '#/tui/types';
 import {
   buildAgentRows,
   buildAncestorChain,
   createSubagentInstanceInfo,
   withSubagentInstanceEnded,
   type SubagentInstanceInfo,
-} from '@/tui/utils/subagent-instances';
-import type { SubagentSlot } from '@/tui/utils/subagent-slots';
+} from '#/tui/utils/subagent-instances';
+import type { SubagentSlot } from '#/tui/utils/subagent-slots';
 
 function spawnEvent(overrides: Partial<SubagentSpawnedEvent> = {}): SubagentSpawnedEvent {
   return {

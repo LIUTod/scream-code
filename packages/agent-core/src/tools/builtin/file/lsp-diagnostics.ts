@@ -155,7 +155,7 @@ export function formatDiagnosticsHint(result: DiagnosticsResult): string {
  *
  * Edit maintains the queue itself (it diffs each observation against the
  * file's last-seen errors to find the ones it introduced). A fix that lands
- * through a tool that bypasses Edit — Write, an ast_edit apply — still
+ * through a tool that bypasses Edit — Write, an AstEdit apply — still
  * produces the only observation that path gets, so without this the reminder
  * would stay pending forever. Only clearing happens here: these writes have
  * no baseline, so they never introduce reminders.

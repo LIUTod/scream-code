@@ -35,12 +35,12 @@ vi.mock('@scream-code/scream-code-sdk', async (importOriginal) => {
   };
 });
 
-vi.mock('@/tui/utils/paths', () => ({
+vi.mock('#/tui/utils/paths', () => ({
   getDataDir: () => '/tmp/api-balance-test',
 }));
 
 async function importApiBalance() {
-  return import('@/tui/api-balance');
+  return import('#/tui/api-balance');
 }
 
 describe('api-balance cache bounds', () => {

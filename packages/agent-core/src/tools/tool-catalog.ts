@@ -13,6 +13,7 @@
 /** Read-only inspection tools (no workspace mutation, no command execution). */
 export const READ_TOOLS: ReadonlySet<string> = new Set([
   'AskUserQuestion',
+  'AstGrep',
   'ContactParent',
   'DiscoverMcpTools',
   'FetchURL',
@@ -37,6 +38,7 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
 
 /** Tools that mutate the workspace (files, memory, plans, skills). */
 export const WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'AstEdit',
   'Edit',
   'ImageGenerate',
   'InspectOwnAssets',
@@ -49,7 +51,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /** Tools that execute commands. */
-export const EXECUTE_TOOLS: ReadonlySet<string> = new Set(['Bash', 'python', 'RunScript']);
+export const EXECUTE_TOOLS: ReadonlySet<string> = new Set(['Bash', 'Python', 'RunScript']);
 
 /** Nesting/coordination tools — only `all` mode keeps them. A restricted
  *  child must not be able to spawn an unrestricted grandchild (that would

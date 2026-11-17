@@ -4,7 +4,7 @@ Eight packages, one application. Dependencies point downward only.
 
 ```
 apps/scream-code            terminal UI (TUI), CLI, commands
-   ├── packages/node-sdk     session API over RPC (no compile-time dep on the engine)
+   ├── packages/node-sdk     session API; runs the engine in-process behind an RPC pair
    ├── packages/agent-core   engine: agent loop, tools, permissions, prompts, records
    │      ├── packages/ltod       LLM abstraction (providers, streaming, tokens)
    │      ├── packages/jian       execution environment (process, fs, env)
@@ -14,15 +14,16 @@ apps/scream-code            terminal UI (TUI), CLI, commands
    └── packages/evals        evaluation harness
 ```
 
-The SDK reaches the engine through an RPC contract, not an import, so the
-engine can run in-process or out-of-process without changing callers.
+The SDK creates the engine in-process (`ScreamCore`) and talks to it only
+through an in-memory RPC pair (`createRPC<CoreAPI, SDKAPI>()`), so callers
+depend on the RPC contract rather than on engine internals.
 
 ## agent-core
 
 | Area | Path | Role |
 |---|---|---|
 | Agent loop | `agent/index.ts` | turn lifecycle, tool dispatch, subagents |
-| Tools | `tools/builtin/*` | 49 built-in tools across 15 groups |
+| Tools | `tools/builtin/*` (registered in `agent/tool/index.ts`) | 57 built-in tools; some only for the main agent or when a service is configured |
 | Permissions | `agent/permission/` | mode policy, rules, egress allowlist |
 | Injection | `agent/injection/` | dynamic reminders (goal, permission mode, plan mode, user prefs, wolfpack, todo, working set, MCP guides) |
 | Prompts | `profile/` | `default/system.md` template, conditional parts, self-asset map |

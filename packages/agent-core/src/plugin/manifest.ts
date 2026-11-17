@@ -16,8 +16,8 @@ const SCREAM_PLUGIN_DIR_PATH = '.scream-plugin/plugin.json';
 const CLAUDE_PLUGIN_DIR_PATH = '.claude-plugin/plugin.json';
 const BARE_SKILL_PATH = 'SKILL.md';
 
-// Fields that look like third-party runtime extensions (Claude / Codex / old
-// Scream CLI). We do not run these; emit an info diagnostic so plugin authors
+// Fields that look like third-party runtime extensions (other agent
+// runtimes, old Scream CLI). We do not run these; emit an info diagnostic so plugin authors
 // and users can see why a field is silently ignored. `entryPoint` and `hooks`
 // ARE executed (code plugins + external-command hooks); `tools` is deliberately
 // left here — code plugins register tools from their entry point instead.
@@ -55,7 +55,7 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
   const claudeDirJsonExists = await isFile(claudeDirJsonPath);
 
   if (!rootJsonExists && !dirJsonExists && !claudeDirJsonExists) {
-    // Fallback 1: bare SKILL.md at repo root (common Claude Code skill pattern).
+    // Fallback 1: bare SKILL.md at repo root (a common skill-repository layout).
     const skillMdPath = path.join(pluginRoot, BARE_SKILL_PATH);
     if (await isFile(skillMdPath)) {
       return {

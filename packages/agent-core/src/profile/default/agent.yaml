@@ -14,8 +14,8 @@ tools:
   - Glob
   # Structural search and rewrite (@ast-grep/napi). Exact tool names are the
   # lowercase forms the tools declare themselves.
-  - ast_grep
-  - ast_edit
+  - AstGrep
+  - AstEdit
   - Bash
   # Script execution mode (enabled by default): runs model-written JavaScript
   # in a QuickJS sandbox and calls the tools above from inside the script.

@@ -1,3 +1,4 @@
+import { legacyToolName } from '../../tools/tool-names';
 import { runHook } from './runner';
 import type {
   HookBlockDecision,
@@ -143,8 +144,14 @@ export class HookEngine {
     const seenCommands = new Set<string>();
     const matched: HookDef[] = [];
 
+    // A tool hook written for a renamed built-in's old name (`python`,
+    // `ast_grep`, `ast_edit`) keeps firing for the tool under its new name.
+    const legacyName = TOOL_HOOK_EVENTS.has(event) ? legacyToolName(matcherValue) : undefined;
     for (const hook of this.byEvent.get(event) ?? []) {
-      if (!matches(hook.matcher ?? '', matcherValue)) continue;
+      const matcher = hook.matcher ?? '';
+      if (!matches(matcher, matcherValue) && !(legacyName !== undefined && matches(matcher, legacyName))) {
+        continue;
+      }
       if (seenCommands.has(hook.command)) continue;
       seenCommands.add(hook.command);
       matched.push(hook);
@@ -171,6 +178,9 @@ export class HookEngine {
     } catch {}
   }
 }
+
+/** Events whose matcher value is a tool name. */
+const TOOL_HOOK_EVENTS: ReadonlySet<string> = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure']);
 
 function matches(pattern: string, value: string): boolean {
   if (pattern.length === 0) return true;

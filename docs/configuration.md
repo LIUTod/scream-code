@@ -32,7 +32,7 @@ Parsed by `packages/agent-core/src/config/schema.ts`.
 | `yolo` | Yolo-mode defaults |
 | `permission` | `rules[]` (`decision` allow/deny/ask, `scope`, `pattern`, `reason`) and `egressAllowlist` |
 | `hooks` | Shell hooks fired on session events |
-| `services` | Search providers (google / duckduckgo / bing / sogou / baidu) |
+| `services` | Search providers (google / duckduckgo / bing / sogou / so360 / baidu) |
 | `loopControl` | `maxStepsPerTurn`, retry and compaction thresholds, `toolPortal` (see below) |
 | `background` | Background task limits |
 | `secrets` | Redaction rules (`plain` / `regex`, `obfuscate` / `replace`, optional regex `flags`) |
@@ -83,8 +83,11 @@ maxContextSize = 200000
 maxOutputSize = 16000
 ```
 
-Optional: `capabilities`, `displayName`, `reasoningKey`, `adaptiveThinking`,
-`forceThinking`, `thinkingLevels`, `tokenizer`.
+`provider`, `model` and `maxContextSize` are required. Optional:
+`maxOutputSize`, `capabilities`, `displayName`, `reasoningKey`,
+`adaptiveThinking`, `cacheRetention` (Anthropic prompt-cache TTL: `short`, the
+default 5-minute tier, or `long`, the 1-hour tier), `forceThinking`,
+`thinkingLevels`, `tokenizer`.
 
 `tokenizer` selects the measurement used by local token estimates — compaction
 watermarks and the context gauge:
@@ -127,8 +130,7 @@ declared up front.
 max_session_tokens = 100000000   # 0 or unset = no limit
 ```
 
-A circuit breaker for unattended work (`/goal`, `/loop`, cron, wide subagent
-fan-out). You normally do not edit it by hand: **`/budget`** sets it
+A circuit breaker for unattended work (`/goal`, cron, wide subagent fan-out). You normally do not edit it by hand: **`/budget`** sets it
 interactively — `/budget` opens a list, `/budget 50m` sets it directly (`500k`,
 `20m`, `1.5b`, `500万`, `1亿` all work), `/budget off` removes it. The change
 applies to the running session at once (raising the limit un-pauses a stopped
@@ -157,7 +159,7 @@ and LINE replies with the reason.
   blocked by the limit — only turns are.
 - Setting a limit below what this run already used pauses requests at once;
   `/budget` says so when you do.
-- While the limit is tripped, recurring cron / `/loop` jobs skip their fires
+- While the limit is tripped, recurring cron jobs skip their fires
   (a skipped fire would only open an empty turn, repeat the warning, and — on
   an IM channel — repeat it in the chat); they run again at the next fire after
   the limit is raised. A one-shot reminder is still delivered.

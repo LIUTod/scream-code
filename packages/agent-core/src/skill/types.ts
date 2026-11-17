@@ -52,12 +52,6 @@ export interface SkippedSkill {
   readonly reason: string;
 }
 
-export interface SkillCatalog {
-  getSkill(name: string): SkillDefinition | undefined;
-  listSkills(): readonly SkillDefinition[];
-  listInvocableSkills(): readonly SkillDefinition[];
-}
-
 export function normalizeSkillName(name: string): string {
   return name.toLowerCase();
 }

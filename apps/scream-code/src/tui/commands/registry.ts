@@ -22,14 +22,14 @@ export const BUILTIN_SLASH_COMMANDS = [
   },
   {
     name: 'bot',
-    aliases: ['bot'],
+    aliases: [],
     description: 'registry.bot_desc',
     priority: 217,
     availability: 'always',
   },
   {
     name: 'ask',
-    aliases: ['ask'],
+    aliases: [],
     description: 'registry.ask_desc',
     priority: 218,
     availability: 'always',
@@ -64,14 +64,14 @@ export const BUILTIN_SLASH_COMMANDS = [
   },
   {
     name: 'rlm',
-    aliases: ['rlm'],
+    aliases: [],
     description: 'registry.rlm_desc',
     priority: 215,
     availability: 'always',
   },
   {
     name: 'script',
-    aliases: ['script'],
+    aliases: [],
     description: 'registry.script_desc',
     priority: 214,
     availability: 'always',
