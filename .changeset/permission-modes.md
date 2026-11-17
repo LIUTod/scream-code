@@ -1,9 +1,0 @@
----
-"scream-code": major
----
-
-Permission modes are now `auto` / `yolo` / `ask` / `bot`; the `manual` mode is gone and a fresh session starts in `yolo` instead of asking on every unmatched tool call. `/yes off` drops to `bot`, `/bot off` and `/auto off` and `/ask off` return to `yolo`, and the selector lists the four surviving modes. Legacy config values (`defaultPermissionMode = "manual"`) and stored sessions carrying `manual` normalize to `yolo` (config, the SDK boundary, and record replay), so existing setups keep loading.
-
-The policy chain is untouched, but its reach changed: user rules with `decision = 'ask'` can only fire in `ask` mode, and only for tools the read-only guard does not deny. In `yolo` / `auto` they sit below the blanket approve policies and never prompt, so an `ask` rule that used to gate a risky command is now inert for Bash and file writes (a config-load warning names those rules). `bot` denies whatever its reversible allowlist does not cover — the decision is recorded in the audit trail, nothing is queued and there is no interactive approval. No mode prompts for a dangerous command or a risky write: `yolo` / `auto` approve above those ask policies and `ask` denies Bash and writes.
-
-Claude-CLI compatibility modes are remapped: `default` / `acceptEdits` -> `auto`, `plan` -> `yolo` (yolo exempts `ExitPlanMode`, so the plan review still reaches the approval handler), `dontAsk` -> `bot` - which widens it: reversible in-workspace actions may now be approved automatically instead of being denied. `--disallowedTools` is enforced as project-scope session deny rules on both create and resume, so it keeps blocking in every mode, and Claude's `cmd:*` shorthand is translated (`Bash(git:*)` -> `Bash(git *)`); entries that cannot match any rule are reported on stderr and dropped instead of installing a dead deny. The `--allowedTools` allow-list fallback is no longer supported.
