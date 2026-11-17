@@ -20,6 +20,7 @@ import chalk from 'chalk';
 
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { motionEnabled } from '#/tui/utils/motion';
 
 const BLINK_INTERVAL = 500;
 
@@ -94,6 +95,8 @@ export class CompactionComponent extends Container {
   }
 
   private startBlink(): void {
+    // Motion off: the bullet stays lit instead of blinking.
+    if (!motionEnabled()) return;
     this.blinkTimer = setInterval(() => {
       this.blinkOn = !this.blinkOn;
       this.headerText.setText(this.buildHeader());

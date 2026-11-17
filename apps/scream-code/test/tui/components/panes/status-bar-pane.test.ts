@@ -222,4 +222,76 @@ describe('StatusBarPaneComponent', () => {
     expect(narrow).toContain('Tips');
     expect(visibleWidth(narrow)).toBeLessThanOrEqual(80);
   });
+
+  describe('narrow rows drop segments by priority', () => {
+    const reminder = activity('⏰ 定时任务已触发：检查部署状态');
+    const notice = activity('🔌 MCP chrome-devtools 已连接');
+
+    it('never shows a bare "..." chip: a chip that cannot get a usable width is dropped whole', () => {
+      const bar = new StatusBarPaneComponent({ mode: 'idle', label: '', reminder, notice });
+      const row = strip(bar.render(40)[0] ?? '');
+      expect(row).toContain('⏰ 定时任务已触发：检查部署状态');
+      expect(row).not.toContain('🔌');
+      expect(row).not.toContain('...');
+      expect(visibleWidth(row)).toBeLessThanOrEqual(40);
+    });
+
+    it('truncates a lower-priority chip with a single ellipsis when it still gets room', () => {
+      const bar = new StatusBarPaneComponent({ mode: 'idle', label: '', reminder, notice });
+      const row = strip(bar.render(60)[0] ?? '');
+      expect(row).toContain('⏰ 定时任务已触发：检查部署状态');
+      expect(row).toContain('🔌 MCP chrome-devtools');
+      expect(row).toContain('…');
+      expect(row).not.toContain('...');
+      expect(visibleWidth(row)).toBeLessThanOrEqual(60);
+    });
+
+    it('shows everything unchanged when the row is wide enough', () => {
+      const bar = new StatusBarPaneComponent({ mode: 'idle', label: '', reminder, notice });
+      const row = strip(bar.render(120)[0] ?? '').trimEnd();
+      expect(row).toBe(' ⏰ 定时任务已触发：检查部署状态  🔌 MCP chrome-devtools 已连接');
+    });
+
+    it('drops the label before the MCP notice, and the notice before the reminder', () => {
+      const wave = fakeWave('■·');
+      const tight = new StatusBarPaneComponent({
+        mode: 'tool',
+        label: '执行中：很长很长的工具名称说明',
+        pulseWave: wave,
+        reminder,
+        notice,
+      });
+      const row = strip(tight.render(50)[0] ?? '');
+      expect(row).toContain('⏰ 定时任务已触发：检查部署状态');
+      expect(row).not.toContain('执行中');
+    });
+
+    it('keeps the pulse wave at every width, whatever else is dropped', () => {
+      const bar = new StatusBarPaneComponent({
+        mode: 'tool',
+        label: '执行中',
+        pulseWave: fakeWave('■·····'),
+        reminder,
+        activity: activity('🤝 coder 向 Scream 求助中！问题：需要更多上下文'),
+        notice,
+      });
+      for (const width of [8, 12, 20, 30, 45, 70]) {
+        const row = strip(bar.render(width)[0] ?? '');
+        expect(row.startsWith(' ■·····') || row.startsWith(' ■··')).toBe(true);
+        expect(visibleWidth(row)).toBeLessThanOrEqual(width);
+      }
+    });
+
+    it('prefers the reminder over the collaboration ticker when only one fits', () => {
+      const bar = new StatusBarPaneComponent({
+        mode: 'idle',
+        label: '',
+        reminder,
+        activity: activity('🤝 coder 向 Scream 求助中！问题：需要更多上下文'),
+      });
+      const row = strip(bar.render(40)[0] ?? '');
+      expect(row).toContain('⏰');
+      expect(row).not.toContain('🤝');
+    });
+  });
 });

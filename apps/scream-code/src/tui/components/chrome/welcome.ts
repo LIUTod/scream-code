@@ -18,6 +18,7 @@ import { t } from '@scream-code/config';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
 import { BREATHE_CYCLE_MS, BREATHE_INTERVAL_MS, getBreathingFrame, resetBreathingClock } from '#/tui/utils/breathing-clock';
+import { motionEnabled } from '#/tui/utils/motion';
 
 // 24 hues × 5 interpolated steps = 120 palette entries. The breathing frame
 // walks the wheel in IMPACT_HUE_STEP jumps (see renderMascotRow) so every
@@ -233,6 +234,7 @@ export class WelcomeComponent implements Component {
   }
 
   private startBreathing(): void {
+    if (!motionEnabled()) return; // resting colour, no timers
     resetBreathingClock();
     this.breatheTimer = setInterval(() => {
       this.ui.requestRender();

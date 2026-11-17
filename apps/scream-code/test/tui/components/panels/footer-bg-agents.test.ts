@@ -39,8 +39,9 @@ function makeFooter(state: AppState) {
   return new FooterComponent(state, darkColors, uiMock);
 }
 
-// Unified badge format (global-setup pins locale zh):
-//   [后台任务 xN] / [后台Agent xN] / [前台Agent xN]
+// Counter format (global-setup pins locale zh): `后台任务 xN`, `后台Agent xN`,
+// `前台Agent xN` — joined by ` · ` in one run, no brackets; collapsed into a
+// single `运行中 N` when the row is too short for the long form.
 describe('FooterComponent — background task / agent badges', () => {
   it('omits both badges when counts are 0', () => {
     const footer = makeFooter(baseState());
@@ -54,7 +55,7 @@ describe('FooterComponent — background task / agent badges', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 0, foregroundSubagents: 0 });
     const out = strip(footer.render(160)[1]!);
-    expect(out).toMatch(/\[后台任务 x1\]/);
+    expect(out).toContain('后台任务 x1');
     expect(out).not.toMatch(/后台Agent x\d/);
   });
 
@@ -62,7 +63,7 @@ describe('FooterComponent — background task / agent badges', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 1, foregroundSubagents: 0 });
     const out = strip(footer.render(160)[1]!);
-    expect(out).toMatch(/\[后台Agent x1\]/);
+    expect(out).toContain('后台Agent x1');
     expect(out).not.toMatch(/后台任务 x\d/);
   });
 
@@ -70,8 +71,8 @@ describe('FooterComponent — background task / agent badges', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 3, foregroundSubagents: 0 });
     const out = strip(footer.render(160)[1]!);
-    expect(out).toMatch(/\[后台任务 x2\]/);
-    expect(out).toMatch(/\[后台Agent x3\]/);
+    expect(out).toContain('后台任务 x2');
+    expect(out).toContain('后台Agent x3');
     // Task badge appears before agent badge in the line.
     expect(out.indexOf('后台任务 x2')).toBeLessThan(out.indexOf('后台Agent x3'));
   });
@@ -80,14 +81,14 @@ describe('FooterComponent — background task / agent badges', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 1, foregroundSubagents: 0 });
     const out = strip(footer.render(160)[1]!);
-    expect(out).toMatch(/\[后台任务 x1\]/);
-    expect(out).toMatch(/\[后台Agent x1\]/);
+    expect(out).toContain('后台任务 x1');
+    expect(out).toContain('后台Agent x1');
   });
 
   it('updates badges live via setBackgroundCounts', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 1, foregroundSubagents: 1 });
-    expect(strip(footer.render(160)[1]!)).toMatch(/\[后台任务 x2\]/);
+    expect(strip(footer.render(160)[1]!)).toContain('后台任务 x2');
     footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 0 });
     const after = strip(footer.render(160)[1]!);
     expect(after).not.toMatch(/后台任务 x\d/);
@@ -107,18 +108,52 @@ describe('FooterComponent — background task / agent badges', () => {
   it('drops the badges when terminal is too narrow to fit them', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 4, agentTasks: 3, foregroundSubagents: 2 });
-    // Extremely narrow width: the context readout on line 2 wins the row, so
-    // the badges are clipped away entirely.
+    // Extremely narrow width: the channel and work status win the row, so the
+    // counters are dropped whole — never left as a half-cut fragment.
     const rows = strip(footer.render(20).join(''));
-    expect(rows).not.toMatch(/\[后台任务 x4\]/);
-    expect(rows).not.toMatch(/\[后台Agent x3\]/);
+    expect(rows).not.toContain('后台任务');
+    expect(rows).not.toContain('后台Agent');
+    expect(rows).not.toContain('前台Agent');
+    expect(rows).not.toContain('运行中');
+  });
+
+  it('joins the counters with · and no brackets', () => {
+    const footer = makeFooter(baseState());
+    footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 3, foregroundSubagents: 1 });
+    const out = strip(footer.render(200)[1]!);
+    expect(out).toContain('后台任务 x2 · 后台Agent x3 · 前台Agent x1');
+    expect(out).not.toContain('[');
+  });
+
+  it('collapses the three counters into one running total when the row is short', () => {
+    const footer = makeFooter(baseState());
+    footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 3, foregroundSubagents: 1 });
+    let collapsed = false;
+    for (let width = 30; width <= 200; width++) {
+      const out = strip(footer.render(width)[1]!);
+      if (out.includes('运行中 6')) {
+        collapsed = true;
+        expect(out).not.toContain('后台任务');
+      }
+    }
+    expect(collapsed).toBe(true);
+  });
+
+  it('the total counts every kind, including a single one', () => {
+    const footer = makeFooter(baseState());
+    footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 4 });
+    let total = false;
+    for (let width = 30; width <= 200; width++) {
+      if (strip(footer.render(width)[1]!).includes('运行中 4')) total = true;
+    }
+    expect(total).toBe(true);
   });
 
   it('renders the foreground subagents badge alone (P1)', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 2 });
     const out = strip(footer.render(160)[1]!);
-    expect(out).toMatch(/\[前台Agent x2\]/);
+    expect(out).toContain('前台Agent x2');
     expect(out).not.toMatch(/后台任务 x\d/);
     expect(out).not.toMatch(/后台Agent x\d/);
   });
@@ -134,8 +169,8 @@ describe('FooterComponent — background task / agent badges', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 1, foregroundSubagents: 3 });
     const out = strip(footer.render(160)[1]!);
-    expect(out).toMatch(/\[后台任务 x1\]/);
-    expect(out).toMatch(/\[后台Agent x1\]/);
-    expect(out).toMatch(/\[前台Agent x3\]/);
+    expect(out).toContain('后台任务 x1');
+    expect(out).toContain('后台Agent x1');
+    expect(out).toContain('前台Agent x3');
   });
 });

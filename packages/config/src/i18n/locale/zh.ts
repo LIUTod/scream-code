@@ -117,13 +117,22 @@ export const zh: Record<string, string> = {
   // ─── 底部提示 ─────────────────
   'footer.context': '📨 Context：{bar} {percent}',
   'footer.context_plain': '📨 Context：{percent}',
-  'footer.hit': 'Hitr',
-  'footer.git_label': '📁 工作区Git',
+  'footer.hit': '缓存命中',
+  // Shorter label used before the cache-hit readout is dropped on narrow terminals.
+  'footer.hit_short': '缓存',
+  'footer.git_label': '📁 Git',
   'footer.line_status': 'Line: {status}',
+  'footer.line_short': 'Line',
   'footer.line_disconnected': '未连接',
+  'footer.line_wechat': '微信',
+  'footer.line_lark': '飞书',
   'footer.tasks_running': '后台任务 x{count}',
   'footer.agents_running': '后台Agent x{count}',
   'footer.subagents_working': '前台Agent x{count}',
+  // All three counters collapsed into one when the row is too narrow for the long form.
+  'footer.running_total': '运行中 {count}',
+  'footer.goal': '目标 {time} · {turns}轮',
+  'footer.goal_turns': '目标 {turns}轮',
 
   // ─── 侧栏面板 ─────────────
   'sidebar.git': 'Git',
@@ -1643,7 +1652,7 @@ export const zh: Record<string, string> = {
 
   // ─── Plan / Fusion badges ─────
   'badge.plan': '计划',
-  'badge.fusion': '融合计划',
+  'badge.fusion': '融合',
   'badge.wolfpack': '群狼',
   'badge.rlm': 'RLM',
   'badge.goal': '目标',

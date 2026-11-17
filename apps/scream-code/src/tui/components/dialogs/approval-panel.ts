@@ -29,6 +29,7 @@ import type {
   PendingApproval,
 } from '#/tui/reverse-rpc/types';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { motionEnabled } from '#/tui/utils/motion';
 import { replaceTabs } from '#/tui/utils/sanitize';
 
 export interface ApprovalPanelResponse {
@@ -242,7 +243,8 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     };
     // Tests construct the panel without a TUI: no timer, the indicator
     // stays on the first frame so snapshots stay deterministic.
-    if (this.ui !== undefined) {
+    // Motion off: the indicator stays on its first frame too.
+    if (this.ui !== undefined && motionEnabled()) {
       this.intervalId = setInterval(() => {
         this.animFrame = (this.animFrame + 1) % PIXEL_PULSE_FRAMES.length;
         this.ui?.requestRender();

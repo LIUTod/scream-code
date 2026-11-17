@@ -43,13 +43,13 @@ function makeFooter(overrides: Partial<AppState> = {}): FooterComponent {
 }
 
 describe('FooterComponent — git badge', () => {
-  it('closes line 1 with 📁 工作区Git +added-deleted', () => {
+  it('closes line 1 with 📁 Git +added-deleted', () => {
     const footer = makeFooter();
     footer.setGitDiffProvider(() => ({ added: 12, deleted: 3 }));
 
     const line1 = strip(footer.render(120)[0] ?? '');
-    expect(line1).toContain('📁 工作区Git +12-3');
-    expect(line1.indexOf('k2')).toBeLessThan(line1.indexOf('📁 工作区Git'));
+    expect(line1).toContain('📁 Git +12-3');
+    expect(line1.indexOf('k2')).toBeLessThan(line1.indexOf('📁 Git'));
     expect(visibleWidth(line1)).toBe(120);
     footer.dispose();
   });
@@ -62,7 +62,7 @@ describe('FooterComponent — git badge', () => {
 
     const rows = footer.render(120);
     expect(rows).toHaveLength(2);
-    for (const line of rows) expect(strip(line)).not.toContain('工作区Git');
+    for (const line of rows) expect(strip(line)).not.toMatch(/Git \+\d/);
     footer.dispose();
   });
 
@@ -70,7 +70,7 @@ describe('FooterComponent — git badge', () => {
     const footer = makeFooter();
     footer.setGitDiffProvider(() => null);
 
-    for (const line of footer.render(120)) expect(strip(line)).not.toContain('工作区Git');
+    for (const line of footer.render(120)) expect(strip(line)).not.toMatch(/Git \+\d/);
     footer.dispose();
   });
 
@@ -95,9 +95,10 @@ describe('FooterComponent — git badge', () => {
     const line1 = strip(footer.render(140)[0] ?? '');
     const line2 = strip(footer.render(140)[1] ?? '');
     // The git summary stays on line 1, after the model name.
-    expect(line1.indexOf('📁 工作区Git')).toBeGreaterThan(line1.indexOf('k2'));
-    // Line 2 opens with the mode badges, then goal, then task badges.
-    expect(line2.indexOf('后台任务')).toBeGreaterThan(line2.indexOf('GOAL'));
+    expect(line1.indexOf('📁 Git')).toBeGreaterThan(line1.indexOf('k2'));
+    // Line 2 opens with the mode switches, then goal, then the running counters.
+    expect(line2.indexOf('后台任务')).toBeGreaterThan(line2.indexOf('目标'));
+    expect(line2.indexOf('目标')).toBeGreaterThan(line2.indexOf('群狼'));
 
     const narrow = footer.render(40);
     expect(narrow).toHaveLength(2);

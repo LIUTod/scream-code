@@ -134,7 +134,7 @@ describe('i18n setLocale / getLocale', () => {
     const bogus: string = 'fr';
     mod.setLocale(bogus as Locale);
     expect(mod.getLocale()).toBe('en');
-    expect(mod.t('footer.hit')).toBe('Hitr');
+    expect(mod.t('footer.hit')).toBe('Cache hit');
   });
 });
 

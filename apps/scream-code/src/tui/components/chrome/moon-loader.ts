@@ -1,7 +1,8 @@
 import { Text } from '@liutod-scream/pi-tui';
 import type { TUI } from '@liutod-scream/pi-tui';
 
-import { BRAILLE_SPINNER_FRAMES, BRAILLE_SPINNER_INTERVAL_MS } from '#/tui/constant/rendering';
+import { BRAILLE_SPINNER_FRAMES } from '#/tui/constant/rendering';
+import { spinnerPeriodMs } from '#/tui/utils/motion';
 
 export class MoonLoader extends Text {
   private currentFrame = 0;
@@ -23,7 +24,10 @@ export class MoonLoader extends Text {
   start(): void {
     this.lastTickAt = performance.now();
     this.updateDisplay();
-    this.scheduleTick(BRAILLE_SPINNER_INTERVAL_MS, BRAILLE_SPINNER_INTERVAL_MS);
+    // Motion off or a static spinner (interval 0): one still frame, no timer.
+    const period = spinnerPeriodMs();
+    if (period === undefined) return;
+    this.scheduleTick(period, period);
   }
 
   stop(): void {

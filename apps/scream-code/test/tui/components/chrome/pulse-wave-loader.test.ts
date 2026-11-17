@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PulseWaveLoader } from '#/tui/components/chrome/pulse-wave-loader';
+import { applyMotionEnv, resetMotion } from '#/tui/utils/motion';
 
 /** Only `requestRender` is exercised by the loader. */
 function fakeUi(): never {
@@ -61,5 +62,44 @@ describe('PulseWaveLoader colour provider', () => {
     // Colour is the only difference: the visible glyph run never reflows.
     expect(after).toContain('■');
     expect(stripSgr(before)).toBe(stripSgr(after));
+  });
+});
+
+describe('PulseWaveLoader motion settings', () => {
+  afterEach(() => {
+    resetMotion();
+    vi.useRealTimers();
+  });
+
+  it('draws a still first frame and runs no timer when motion is off', () => {
+    vi.useFakeTimers();
+    applyMotionEnv({ SCREAM_MOTION: 'off' });
+    const loader = new PulseWaveLoader(fakeUi(), () => '#00FF00');
+    expect(stripSgr(loader.getFrameText())).toContain('■');
+    expect(vi.getTimerCount()).toBe(0);
+    const frame = loader.getFrameText();
+    vi.advanceTimersByTime(1000);
+    expect(loader.getFrameText()).toBe(frame);
+    loader.stop();
+  });
+
+  it('is also still when the spinner interval is 0', () => {
+    vi.useFakeTimers();
+    applyMotionEnv({ SCREAM_SPINNER_INTERVAL_MS: '0' });
+    const loader = new PulseWaveLoader(fakeUi(), () => '#00FF00');
+    expect(vi.getTimerCount()).toBe(0);
+    loader.stop();
+  });
+
+  it('advances on the configured interval, not a fixed 80 ms', () => {
+    vi.useFakeTimers();
+    applyMotionEnv({ SCREAM_SPINNER_INTERVAL_MS: '400' });
+    const loader = new PulseWaveLoader(fakeUi(), () => '#00FF00');
+    const first = stripSgr(loader.getFrameText());
+    vi.advanceTimersByTime(300);
+    expect(stripSgr(loader.getFrameText())).toBe(first); // an 80 ms wave would have moved
+    vi.advanceTimersByTime(150);
+    expect(stripSgr(loader.getFrameText())).not.toBe(first);
+    loader.stop();
   });
 });

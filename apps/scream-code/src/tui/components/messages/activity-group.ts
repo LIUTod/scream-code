@@ -33,6 +33,7 @@ import {
   BRAILLE_SPINNER_FRAMES,
   BRAILLE_SPINNER_INTERVAL_MS,
 } from '#/tui/constant/rendering';
+import { spinnerPeriodMs } from '#/tui/utils/motion';
 import { renderBackgroundStatus } from './background-agent-status';
 import { getActivityLines } from '#/tui/utils/activity-lines';
 
@@ -292,6 +293,8 @@ export class ActivityGroupComponent extends Container {
   private spinnerTimer: ReturnType<typeof setTimeout> | undefined;
   private spinnerFrame = 0;
   private lastSpinnerTickAt = 0;
+  /** Frame period for this animation run (see utils/motion); set when it starts. */
+  private spinnerPeriod = BRAILLE_SPINNER_INTERVAL_MS;
   private renderedWidth: number | undefined;
   /** Reasoning text already shown when a notice interrupted the newest run. */
   private interruptedThinking: { text: string; length: number } | undefined;
@@ -971,10 +974,10 @@ export class ActivityGroupComponent extends Container {
       if (this.spinnerTimer !== timer) return;
       const startedAt = performance.now();
       const elapsed = startedAt - this.lastSpinnerTickAt;
-      if (elapsed >= BRAILLE_SPINNER_INTERVAL_MS) {
-        const steps = Math.floor(elapsed / BRAILLE_SPINNER_INTERVAL_MS);
+      if (elapsed >= this.spinnerPeriod) {
+        const steps = Math.floor(elapsed / this.spinnerPeriod);
         this.spinnerFrame = (this.spinnerFrame + steps) % BRAILLE_SPINNER_FRAMES.length;
-        this.lastSpinnerTickAt += steps * BRAILLE_SPINNER_INTERVAL_MS;
+        this.lastSpinnerTickAt += steps * this.spinnerPeriod;
         const width = this.renderedWidth ?? 80;
         // A live row must follow the frame in both modes: the header alone used
         // to spin while collapsed, which left expanded groups (and every
@@ -988,7 +991,7 @@ export class ActivityGroupComponent extends Container {
       }
       const frameCostMs = performance.now() - startedAt;
       if (this.spinnerTimer !== timer) return;
-      const cadenceDelayMs = Math.max(0, BRAILLE_SPINNER_INTERVAL_MS - frameCostMs);
+      const cadenceDelayMs = Math.max(0, this.spinnerPeriod - frameCostMs);
       const backpressureDelayMs = frameCostMs * 9;
       this.scheduleSpinnerTick(Math.max(cadenceDelayMs, backpressureDelayMs));
     }, delayMs);
@@ -997,8 +1000,13 @@ export class ActivityGroupComponent extends Container {
 
   private startSpinner(): void {
     if (this.ui === undefined || this.spinnerTimer !== undefined) return;
+    // Motion off or a static spinner (interval 0): the glyph keeps its first
+    // frame and no timer runs.
+    const period = spinnerPeriodMs();
+    if (period === undefined) return;
+    this.spinnerPeriod = period;
     this.lastSpinnerTickAt = performance.now();
-    this.scheduleSpinnerTick(BRAILLE_SPINNER_INTERVAL_MS);
+    this.scheduleSpinnerTick(period);
   }
 
   private stopSpinner(): void {

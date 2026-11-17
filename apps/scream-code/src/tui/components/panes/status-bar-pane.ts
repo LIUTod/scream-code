@@ -48,6 +48,47 @@ export interface StatusBarPaneOptions {
   readonly notice?: () => StatusChipLine | null;
 }
 
+/** One piece of the status row. Lower `rank` = higher priority; rank 0 (the wave) is never dropped. */
+export interface StatusRowPart {
+  readonly text: string;
+  readonly rank: number;
+}
+
+/** Columns a chip needs to be worth showing truncated; below this it is dropped whole. */
+const MIN_TRUNCATED_CHIP_COLS = 10;
+const STATUS_ROW_SEPARATOR = 2;
+
+/**
+ * Compose the row, dropping by priority when it does not fit.
+ *
+ * The lowest-priority part goes first: it is truncated (single `…`) when it
+ * would still keep at least {@link MIN_TRUNCATED_CHIP_COLS} columns, otherwise
+ * dropped whole, so a chip never shows up as a bare `...`. Priority: wave
+ * (never dropped) > reminder > collaboration ticker > MCP notice > label. The
+ * last part standing is clipped by the caller's width truncation instead.
+ */
+export function fitStatusRow(parts: readonly StatusRowPart[], width: number): string {
+  const available = Math.max(1, width - 1); // leading space
+  let kept = parts.map((part) => ({ ...part }));
+  const total = (): number =>
+    kept.reduce((sum, part) => sum + visibleWidth(part.text), 0) +
+    Math.max(0, kept.length - 1) * STATUS_ROW_SEPARATOR;
+  while (total() > available) {
+    const droppable = kept.filter((part) => part.rank > 0);
+    if (droppable.length === 0) break;
+    const victim = droppable.reduce((worst, part) => (part.rank > worst.rank ? part : worst));
+    const room = visibleWidth(victim.text) - (total() - available);
+    if (droppable.length > 1 && room < MIN_TRUNCATED_CHIP_COLS) {
+      kept = kept.filter((part) => part !== victim);
+      continue;
+    }
+    if (room >= 1) victim.text = truncateToWidth(victim.text, room, '…');
+    else kept = kept.filter((part) => part !== victim);
+    break;
+  }
+  return ` ${kept.map((part) => part.text).join('  ')}`;
+}
+
 /**
  * Single-line row: `<wave>  <label>  <reminder>  <activity>  <notice>`,
  * empty parts omitted.
@@ -96,33 +137,20 @@ class StatusLine implements Component {
           : chalk.hex(this.labelColor)(this.label)
         : null;
 
-    // An informational notice (e.g. an MCP server status) must keep its slot:
-    // the rotating idle tip yields width first instead of pushing the notice
-    // past the truncation point, where it would disappear entirely.
-    if (labelText !== null && noticeText !== null) {
-      const fixedSegments = [waveText, reminderText, activityText, noticeText].filter(
-        (segment): segment is string => segment !== null,
-      );
-      const fixedWidth =
-        1 + // leading space
-        fixedSegments.reduce((total, segment) => total + visibleWidth(segment), 0) +
-        fixedSegments.length * 2; // separator before the label + between fixed parts
-      const room = minWidth - fixedWidth;
-      labelText = room >= 2 ? truncateToWidth(labelText, room, '…') : null;
-    }
-
-    const segments: string[] = [];
-    if (waveText !== null) segments.push(waveText);
-    if (labelText !== null && labelText.length > 0) segments.push(labelText);
-    for (const chipText of [reminderText, activityText, noticeText]) {
-      if (chipText !== null) segments.push(chipText);
-    }
-    if (segments.length === 0) return [];
+    // Keep display order (wave, label, reminder, activity, notice) but fit by
+    // priority — see fitStatusRow.
+    const parts: StatusRowPart[] = [];
+    if (waveText !== null) parts.push({ text: waveText, rank: 0 });
+    if (labelText !== null && labelText.length > 0) parts.push({ text: labelText, rank: 4 });
+    if (reminderText !== null) parts.push({ text: reminderText, rank: 1 });
+    if (activityText !== null) parts.push({ text: activityText, rank: 2 });
+    if (noticeText !== null) parts.push({ text: noticeText, rank: 3 });
+    if (parts.length === 0) return [];
     // A bare wave keeps the pre-existing output (no padding).
-    if (this.wave !== undefined && segments.length === 1) {
-      return [truncateToWidth(segments[0]!, minWidth)];
+    if (this.wave !== undefined && parts.length === 1) {
+      return [truncateToWidth(parts[0]!.text, minWidth)];
     }
-    return [truncateToWidth(` ${segments.join('  ')}`, minWidth)];
+    return [truncateToWidth(fitStatusRow(parts, minWidth), minWidth)];
   }
 
   invalidate(): void {

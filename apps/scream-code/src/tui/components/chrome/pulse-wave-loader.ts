@@ -2,11 +2,8 @@ import { Text } from '@liutod-scream/pi-tui';
 import type { TUI } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
-import {
-  PULSE_WAVE_CELLS,
-  PULSE_WAVE_FRAMES,
-  PULSE_WAVE_INTERVAL_MS,
-} from '#/tui/constant/rendering';
+import { PULSE_WAVE_CELLS, PULSE_WAVE_FRAMES } from '#/tui/constant/rendering';
+import { spinnerPeriodMs } from '#/tui/utils/motion';
 
 /** Leading/trailing glyph: U+2588 (Block Elements — guaranteed single-column
  * width). The remaining stage cells render muted middle dots (U+00B7). */
@@ -59,7 +56,10 @@ export class PulseWaveLoader extends Text {
   start(): void {
     this.lastTickAt = performance.now();
     this.updateDisplay();
-    this.scheduleTick(PULSE_WAVE_INTERVAL_MS, PULSE_WAVE_INTERVAL_MS);
+    // Motion off or a static spinner (interval 0): one still frame, no timer.
+    const period = spinnerPeriodMs();
+    if (period === undefined) return;
+    this.scheduleTick(period, period);
   }
 
   stop(): void {

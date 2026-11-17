@@ -3,6 +3,7 @@ import { Text, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { BRAILLE_SPINNER_FRAMES, BRAILLE_SPINNER_INTERVAL_MS, MESSAGE_INDENT } from '#/tui/constant/rendering';
+import { spinnerPeriodMs } from '#/tui/utils/motion';
 import { DONE_MARK, FAILURE_MARK } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { BackgroundAgentStatusData } from '#/tui/types';
@@ -71,6 +72,8 @@ export class BackgroundAgentStatusComponent implements Component {
   private spinnerFrame = 0;
   private spinnerTimer: ReturnType<typeof setTimeout> | undefined;
   private lastSpinnerTickAt = 0;
+  /** Frame period for this animation run (see utils/motion); set when it starts. */
+  private spinnerPeriod = BRAILLE_SPINNER_INTERVAL_MS;
   /** Only a notice that is still running animates; a finished one is static. */
   private live: boolean;
 
@@ -128,8 +131,13 @@ export class BackgroundAgentStatusComponent implements Component {
 
   private startSpinner(): void {
     if (this.spinnerTimer !== undefined) return;
+    // Motion off or a static spinner (interval 0): the glyph keeps its first
+    // frame and no timer runs.
+    const period = spinnerPeriodMs();
+    if (period === undefined) return;
+    this.spinnerPeriod = period;
     this.lastSpinnerTickAt = performance.now();
-    this.scheduleSpinnerTick(BRAILLE_SPINNER_INTERVAL_MS);
+    this.scheduleSpinnerTick(period);
   }
 
   private stopSpinner(): void {
@@ -144,10 +152,10 @@ export class BackgroundAgentStatusComponent implements Component {
       if (this.spinnerTimer !== timer) return;
       const startedAt = performance.now();
       const elapsed = startedAt - this.lastSpinnerTickAt;
-      if (elapsed >= BRAILLE_SPINNER_INTERVAL_MS) {
-        const steps = Math.floor(elapsed / BRAILLE_SPINNER_INTERVAL_MS);
+      if (elapsed >= this.spinnerPeriod) {
+        const steps = Math.floor(elapsed / this.spinnerPeriod);
         this.spinnerFrame = (this.spinnerFrame + steps) % BRAILLE_SPINNER_FRAMES.length;
-        this.lastSpinnerTickAt += steps * BRAILLE_SPINNER_INTERVAL_MS;
+        this.lastSpinnerTickAt += steps * this.spinnerPeriod;
         this.invalidate();
         this.ui?.requestRender();
       }
@@ -155,7 +163,7 @@ export class BackgroundAgentStatusComponent implements Component {
       if (this.spinnerTimer !== timer) return;
       // Same cadence as the activity block: keep the 80 ms beat, but give up the
       // frame instead of piling up timers when a repaint is slower than the beat.
-      const cadenceDelayMs = Math.max(0, BRAILLE_SPINNER_INTERVAL_MS - frameCostMs);
+      const cadenceDelayMs = Math.max(0, this.spinnerPeriod - frameCostMs);
       this.scheduleSpinnerTick(Math.max(cadenceDelayMs, frameCostMs * 9));
     }, delayMs);
     this.spinnerTimer = timer;

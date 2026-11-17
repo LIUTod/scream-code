@@ -166,7 +166,7 @@ describe('FooterComponent — context NaN resilience', () => {
 
     const [line1, line2] = footer.render(120);
     expect(strip(line1 ?? '')).toContain('📨 Context：');
-    expect(strip(line2 ?? '')).toContain('↓ Hitr: --');
+    expect(strip(line2 ?? '')).toContain('↓ 缓存命中: --');
     expect(strip(line2 ?? '')).toContain('Line:');
     // The gauge no longer shares a row with the hit rate.
     expect(strip(line2 ?? '')).not.toContain('Context');
@@ -177,13 +177,16 @@ describe('FooterComponent — context NaN resilience', () => {
     const [line1, line2] = footer.render(120);
     expect(strip(line1 ?? '')).not.toMatch(/计划/);
     expect(strip(line2 ?? '')).toMatch(/计划/);
+    expect(strip(line2 ?? '')).not.toMatch(/融合/);
   });
 
   it('renders fusion badge on line 2 in fusion plan mode', () => {
     const footer = makeFooter(baseState({ planMode: 'fusionplan' }));
     const [line1, line2] = footer.render(120);
-    expect(strip(line1 ?? '')).not.toMatch(/融合计划/);
-    expect(strip(line2 ?? '')).toMatch(/融合计划/);
+    expect(strip(line1 ?? '')).not.toMatch(/融合/);
+    expect(strip(line2 ?? '')).toMatch(/融合/);
+    // The fusion switch replaces the plan label rather than joining it.
+    expect(strip(line2 ?? '')).not.toContain('计划');
   });
 
   it('colors context usage with textDim when below warning threshold', () => {
@@ -220,18 +223,36 @@ describe('FooterComponent — context NaN resilience', () => {
     }
   });
 
-  it('uses a 6-cell bar between 52 and 67 columns and none below 52', () => {
+  it('shrinks the bar only as far as the row needs: 10 cells, then 6, then none', () => {
+    // `📟️ scream-k2-5` is 14 columns; the gauge is 28 / 24 / 17 columns wide with a
+    // 10-cell / 6-cell / no bar, and the row keeps 3 columns between the two.
+    const footer = makeFooter(
+      baseState({
+        model: 'scream-k2-5',
+        contextUsage: 0.5,
+        contextTokens: 50_000,
+        maxContextTokens: 200_000,
+      }),
+    );
+    const at = (width: number): string => strip(footer.render(width)[0] ?? '');
+    expect(at(45)).toContain('📨 Context：▰▰▰▰▰▱▱▱▱▱ 50.0%');
+    expect(at(44)).toContain('📨 Context：▰▰▰▱▱▱ 50.0%');
+    expect(at(41)).toContain('📨 Context：▰▰▰▱▱▱ 50.0%');
+    expect(at(40)).toContain('📨 Context：50.0%');
+    expect(at(40)).not.toMatch(/[▰▱]/);
+    expect(at(34)).toContain('📟️ scream-k2-5');
+    expect(at(34)).toContain('📨 Context：50.0%');
+    // Below that the model name is cut instead — the gauge keeps its percentage.
+    expect(at(33)).toContain('📨 Context：50.0%');
+    expect(at(33)).toContain('…');
+    for (const width of [45, 44, 41, 40, 34, 33]) expect(visibleWidth(at(width))).toBe(width);
+  });
+
+  it('keeps the full 10-cell bar on a roomy 60-column row', () => {
     const footer = makeFooter(
       baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
     );
-    const at60 = strip(footer.render(60)[0] ?? '');
-    expect(at60).toContain('📨 Context：▰▰▰▱▱▱ 50.0%');
-    expect(visibleWidth(at60)).toBe(60);
-
-    const at40 = strip(footer.render(40)[0] ?? '');
-    expect(at40).toContain('📨 Context：50.0%');
-    expect(at40).not.toContain('▰');
-    expect(at40).not.toContain('▱');
+    expect(strip(footer.render(60)[0] ?? '')).toContain('📨 Context：▰▰▰▰▰▱▱▱▱▱ 50.0%');
   });
 
   it('keeps the gauge flush against the right edge on line 1', () => {
@@ -239,7 +260,7 @@ describe('FooterComponent — context NaN resilience', () => {
       baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
     );
     const line1 = footer.render(60)[0] ?? '';
-    expect(strip(line1).endsWith('📨 Context：▰▰▰▱▱▱ 50.0%')).toBe(true);
+    expect(strip(line1).endsWith('📨 Context：▰▰▰▰▰▱▱▱▱▱ 50.0%')).toBe(true);
     expect(visibleWidth(line1)).toBe(60);
   });
 
@@ -271,6 +292,38 @@ describe('FooterComponent — context NaN resilience', () => {
     } finally {
       chalk.level = previousLevel;
     }
+  });
+});
+
+describe('FooterComponent — context color on a 1M window', () => {
+  function outFor(usage: number, tokens: number, windowTokens: number): string {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      const fc = makeFooter(
+        baseState({ contextUsage: usage, contextTokens: tokens, maxContextTokens: windowTokens }),
+      );
+      return fc.render(200).join('');
+    } finally {
+      chalk.level = previousLevel;
+    }
+  }
+
+  it('turns warning at 400K tokens, not at 600K', () => {
+    const out = outFor(0.45, 450_000, 1_000_000);
+    expect(out).toContain(hexToSgr(darkColors.warning));
+    expect(out).not.toContain(hexToSgr(darkColors.error));
+  });
+
+  it('turns error at 700K tokens, not at 900K', () => {
+    const out = outFor(0.75, 750_000, 1_000_000);
+    expect(out).toContain(hexToSgr(darkColors.error));
+  });
+
+  it('stays quiet below 400K on a 1M window', () => {
+    const out = outFor(0.3, 300_000, 1_000_000);
+    expect(out).not.toContain(hexToSgr(darkColors.warning));
+    expect(out).not.toContain(hexToSgr(darkColors.error));
   });
 });
 
@@ -328,13 +381,19 @@ describe('FooterComponent — two-line layout', () => {
 
   it('drops the bar but keeps the percentage on a narrow terminal', () => {
     const footer = makeFooter(
-      baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
+      baseState({
+        model: 'scream-k2-5',
+        contextUsage: 0.5,
+        contextTokens: 50_000,
+        maxContextTokens: 200_000,
+      }),
     );
-    // 40 columns: bar collapses, so the bar-less template must not leave the
-    // double space the collapsed bar used to occupy.
-    const line2 = strip(footer.render(40)[0]!);
-    expect(line2).toContain('📨 Context：50.0%');
-    expect(line2).not.toContain('Context: ');
+    // 38 columns: the model name takes 14, so only the bar-less gauge fits and
+    // the bar-less template must not leave the double space the bar used to occupy.
+    const line1 = strip(footer.render(38)[0]!);
+    expect(line1).toContain('📨 Context：50.0%');
+    expect(line1).not.toContain('Context: ');
+    expect(line1).not.toMatch(/[▰▱]/);
   });
 
   it('lets a transient hint take the line-1 right side while line 2 keeps the channel', () => {
@@ -351,20 +410,110 @@ describe('FooterComponent — two-line layout', () => {
   });
 });
 
-describe('FooterComponent — badge order', () => {
-  it('marks the mode badges with their emoji (🗒️ plan, 🪐 rlm, 🐺 wolfpack)', () => {
-    const footer = makeFooter(
-      baseState({ planMode: 'plan', rlmEnabled: true, wolfpackMode: true }),
-    );
-    const line2 = strip(footer.render(160)[1] ?? '');
-    expect(line2).toContain('🗒️ 计划');
-    expect(line2).toContain('🪐 RLM');
-    expect(line2).toContain('🐺 群狼');
-    expect(line2.indexOf('🗒️')).toBeLessThan(line2.indexOf('🪐'));
-    expect(line2.indexOf('🪐')).toBeLessThan(line2.indexOf('🐺'));
+describe('FooterComponent — mode switches', () => {
+  function line2Of(overrides: Partial<AppState>, width = 200): string {
+    const footer = makeFooter(baseState(overrides));
+    const line = footer.render(width)[1] ?? '';
+    footer.dispose();
+    return line;
+  }
+
+  function withTrueColor<T>(run: () => T): T {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      return run();
+    } finally {
+      chalk.level = previousLevel;
+    }
+  }
+
+  it('always lists plan → RLM → 群狼 as plain labels, with the goal absent while no goal runs', () => {
+    const row = strip(line2Of({}));
+    expect(row).toContain('计划  RLM  群狼');
+    expect(row).not.toContain('目标');
+    // No emoji marks any more — colour alone says on/off.
+    for (const mark of ['🗒️', '🪐', '🐺']) expect(row).not.toContain(mark);
   });
 
-  it('separates the identity strip (line 1) from the mode badges (line 2)', () => {
+  it('mutes a switch while it is off', () => {
+    withTrueColor(() => {
+      const row = line2Of({});
+      for (const label of ['计划', 'RLM', '群狼']) {
+        expect(row).toContain(`${hexToSgr(darkColors.textMuted)}${label}`);
+      }
+      for (const color of [darkColors.planMode, darkColors.rlmMode, darkColors.wolfpackMode]) {
+        expect(row).not.toContain(hexToSgr(color));
+      }
+    });
+  });
+
+  it('lights a switch with its own colour, in bold, while it is on', () => {
+    withTrueColor(() => {
+      const row = line2Of({ planMode: 'plan', rlmEnabled: true, wolfpackMode: true });
+      expect(row).toContain(`${hexToSgr(darkColors.planMode)}\u001B[1m计划`);
+      expect(row).toContain(`${hexToSgr(darkColors.rlmMode)}\u001B[1mRLM`);
+      expect(row).toContain(`${hexToSgr(darkColors.wolfpackMode)}\u001B[1m群狼`);
+      for (const label of ['计划', 'RLM', '群狼']) {
+        expect(row).not.toContain(`${hexToSgr(darkColors.textMuted)}${label}`);
+      }
+    });
+  });
+
+  it('lights fusion plan in the fusion colour', () => {
+    withTrueColor(() => {
+      const row = line2Of({ planMode: 'fusionplan' });
+      expect(row).toContain(`${hexToSgr(darkColors.fusionPlanMode)}\u001B[1m融合`);
+      expect(strip(row)).not.toContain('计划');
+    });
+  });
+
+  it('keeps RLM and 群狼 in place whether plan is off, plan, or fusion', () => {
+    const columns = (overrides: Partial<AppState>): number[] => {
+      const row = strip(line2Of(overrides, 120));
+      return ['RLM', '群狼'].map((label) => row.indexOf(label));
+    };
+    const off = columns({});
+    expect(off.every((at) => at > 0)).toBe(true);
+    expect(columns({ planMode: 'plan' })).toEqual(off);
+    expect(columns({ planMode: 'fusionplan' })).toEqual(off);
+  });
+
+  it('keeps every switch where it is when another one is turned on', () => {
+    const columns = (overrides: Partial<AppState>): number[] => {
+      const row = strip(line2Of(overrides, 120));
+      return ['计划', 'RLM', '群狼'].map((label) => row.indexOf(label));
+    };
+    const idle = columns({});
+    expect(idle.every((at) => at > 0)).toBe(true);
+    expect(columns({ rlmEnabled: true })).toEqual(idle);
+    expect(columns({ planMode: 'plan', wolfpackMode: true })).toEqual(idle);
+    expect(columns({ planMode: 'plan', rlmEnabled: true, wolfpackMode: true })).toEqual(idle);
+  });
+
+  it('shows the goal only while a goal is active, in the primary colour and bold', () => {
+    withTrueColor(() => {
+      const goal = {
+        objective: 'switches',
+        status: 'active',
+        turnsUsed: 4,
+        wallClockMs: 90_000,
+        wallClockBaseAt: Date.now(),
+        completionCriterion: null,
+        tokensUsed: 0,
+        inputTokens: null,
+        outputTokens: null,
+      } as const;
+      const on = line2Of({ goalActive: true, goal });
+      expect(strip(on)).toContain('目标 1m30s · 4轮');
+      expect(on).toContain(`${hexToSgr(darkColors.primary)}\u001B[1m目标`);
+      expect(strip(line2Of({ goalActive: false, goal: null }))).not.toContain('目标');
+    });
+  });
+});
+
+describe('FooterComponent — badge order', () => {
+  it('separates the identity strip (line 1) from the run strip (line 2)', () => {
     const footer = makeFooter(
       baseState({
         model: 'scream-k2-5',
@@ -398,12 +547,12 @@ describe('FooterComponent — badge order', () => {
       expect(at, `missing or out of order: ${token}`).toBeGreaterThan(previous);
       previous = at;
     }
-    // Line 2 opens with the hit rate, then plan → rlm → wolfpack → goal.
+    // Line 2 opens with the cache hit, then plan → rlm → wolfpack → goal.
     expect(first).not.toContain('群狼');
-    expect(first).not.toContain('GOAL');
-    expect(second).toMatch(/^↓ Hitr:/);
+    expect(first).not.toContain('目标');
+    expect(second).toMatch(/^↓ 缓存命中:/);
     previous = -1;
-    for (const token of ['Hitr:', '计划', 'RLM', '群狼', 'GOAL']) {
+    for (const token of ['缓存命中:', '计划', 'RLM', '群狼', '目标']) {
       const at = second!.indexOf(token);
       expect(at, `missing or out of order on line 2: ${token}`).toBeGreaterThan(previous);
       previous = at;

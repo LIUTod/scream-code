@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { visibleWidth } from '@liutod-scream/pi-tui';
 
 import { WelcomeComponent } from '#/tui/components/chrome/welcome';
+import { applyMotionEnv, resetMotion } from '#/tui/utils/motion';
 
 const ANSI = /\u001B\[[0-9;]*m/g;
 const strip = (text: string): string => text.replaceAll(ANSI, '');
@@ -74,5 +75,22 @@ describe('WelcomeComponent render', () => {
     for (const line of lines) {
       if (line.length > 0) expect(visibleWidth(line)).toBe(120);
     }
+  });
+});
+
+describe('WelcomeComponent motion switch', () => {
+  afterEach(() => {
+    resetMotion();
+    vi.useRealTimers();
+  });
+
+  it('does not breathe when motion is off: no timers, and the logo keeps its resting colour', () => {
+    vi.useFakeTimers();
+    applyMotionEnv({ SCREAM_MOTION: 'off' });
+    const component = makeComponent();
+    expect(vi.getTimerCount()).toBe(0);
+    const still = component.render(120).slice(1, 3).map(strip).join('');
+    expect(still).not.toMatch(/[▓▒░]/);
+    component.stopBreathing();
   });
 });

@@ -3,6 +3,7 @@ import type { TUI } from '@liutod-scream/pi-tui';
 
 import { FooterComponent } from '#/tui/components/chrome/footer';
 import { darkColors } from '#/tui/theme/colors';
+import { applyMotionEnv, resetMotion } from '#/tui/utils/motion';
 import type { AppState } from '#/tui/types';
 
 function baseState(overrides: Partial<AppState> = {}): AppState {
@@ -55,6 +56,88 @@ describe('FooterComponent - active status animation', () => {
       expect(requestRender.mock.calls.length).toBeGreaterThanOrEqual(4);
     }
     footer.dispose();
+  });
+
+  it('ticks once a second — not at 30fps — when motion is off, so the clocks keep moving', () => {
+    vi.useFakeTimers();
+    applyMotionEnv({ SCREAM_MOTION: 'off' });
+    try {
+      const { footer, requestRender } = makeFooter(baseState({ streamingPhase: 'tool' }));
+      vi.advanceTimersByTime(999);
+      expect(requestRender).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(requestRender).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(3000);
+      expect(requestRender).toHaveBeenCalledTimes(4);
+      expect(vi.getTimerCount()).toBe(1);
+      footer.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      resetMotion();
+    }
+  });
+
+  it('stays quiet while idle even with motion off', () => {
+    vi.useFakeTimers();
+    applyMotionEnv({ SCREAM_MOTION: 'off' });
+    try {
+      const { footer, requestRender } = makeFooter(baseState());
+      vi.advanceTimersByTime(5000);
+      expect(requestRender).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+      footer.dispose();
+    } finally {
+      resetMotion();
+    }
+  });
+
+  it('the elapsed clock advances with motion off (it is information, not decoration)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+    applyMotionEnv({ SCREAM_REDUCED_MOTION: '1' });
+    try {
+      const { footer } = makeFooter(
+        baseState({ streamingPhase: 'waiting', streamingStartTime: Date.now() }),
+      );
+      const strip = (text: string): string => text.replaceAll(/\u001B\[[0-9;]*m/g, '');
+      expect(strip(footer.render(120)[1] ?? '')).toContain('等待中 0s');
+      vi.advanceTimersByTime(7000);
+      expect(strip(footer.render(120)[1] ?? '')).toContain('等待中 7s');
+      footer.dispose();
+    } finally {
+      resetMotion();
+    }
+  });
+
+  it('keeps the goal wall-clock ticking with motion off', () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+    applyMotionEnv({ SCREAM_MOTION: 'off' });
+    try {
+      const { footer, requestRender } = makeFooter(
+        baseState({
+          goalActive: true,
+          goal: {
+            objective: 'quiet',
+            turnsUsed: 1,
+            wallClockMs: 0,
+            wallClockBaseAt: now,
+            completionCriterion: null,
+            status: 'active',
+            tokensUsed: 0,
+            inputTokens: null,
+            outputTokens: null,
+          },
+        }),
+      );
+      requestRender.mockClear();
+      vi.advanceTimersByTime(3000);
+      expect(requestRender).toHaveBeenCalledTimes(3);
+      footer.dispose();
+    } finally {
+      resetMotion();
+    }
   });
 
   it('uses the normal render scheduler at 30fps while thinking', () => {
@@ -124,11 +207,11 @@ describe('FooterComponent - active status animation', () => {
     );
 
     const line0 = footer.render(200)[1];
-    expect(line0).toContain('GOAL 5s · 3 turns');
+    expect(line0).toContain('目标 5s · 3轮');
 
     vi.advanceTimersByTime(2_500);
     const line1 = footer.render(200)[1];
-    expect(line1).toContain('GOAL 7s · 3 turns');
+    expect(line1).toContain('目标 7s · 3轮');
 
     footer.dispose();
   });

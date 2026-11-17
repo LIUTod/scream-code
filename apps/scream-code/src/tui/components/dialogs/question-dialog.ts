@@ -27,6 +27,7 @@ import type {
   QuestionSubmissionMethod,
 } from '#/tui/reverse-rpc/types';
 import { contrastTextHex, type ColorPalette } from '#/tui/theme/colors';
+import { motionEnabled } from '#/tui/utils/motion';
 
 const NUMBER_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 const MAX_BODY_LINES = 12;
@@ -138,7 +139,8 @@ export class QuestionDialogComponent extends Container implements Focusable {
 
     // Tests construct the dialog without a TUI: no timer, the pulse stays
     // on the first frame so snapshots stay deterministic.
-    if (this.ui !== undefined) {
+    // Motion off: the indicator stays on its first frame too.
+    if (this.ui !== undefined && motionEnabled()) {
       this.intervalId = setInterval(() => {
         this.animFrame = (this.animFrame + 1) % PIXEL_PULSE_FRAMES.length;
         this.ui?.requestRender();

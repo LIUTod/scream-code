@@ -20,6 +20,7 @@ import type { SessionRow } from './components/dialogs/session-picker';
 import { CustomEditor } from './components/editor/custom-editor';
 import { CHROME_GUTTER } from './constant/rendering';
 import type { TasksBrowserState } from './controllers/tasks-browser';
+import { applyMotionEnv } from '#/tui/utils/motion';
 import { createScreamTUIThemeBundle, type ScreamTUIThemeBundle } from './theme/bundle';
 import { createTerminalState, type TerminalState } from './utils/terminal-state';
 import { openUrl } from './utils/open-url';
@@ -114,6 +115,9 @@ function logRenderError(error: unknown): void {
 }
 
 export function createTUIState(options: ScreamTUIOptions): TUIState {
+  // Animation switch and spinner cadence (SCREAM_MOTION, SCREAM_SPINNER_INTERVAL_MS)
+  // before any animated component is built.
+  applyMotionEnv(process.env);
   const initialAppState = options.initialAppState;
   const theme = createScreamTUIThemeBundle(initialAppState.theme, options.resolvedTheme);
 

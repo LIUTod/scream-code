@@ -8,9 +8,11 @@
  * ~just-noticeable-difference for the 1.2s / 12-bucket fade and keeps this
  * dependency-free.
  *
- * Set `SCREAM_REDUCED_MOTION=1` to disable the fade entirely for users who
- * prefer reduced motion (vestibular sensitivity, etc.).
+ * Set `SCREAM_REDUCED_MOTION=1` (or `SCREAM_MOTION=off`) to disable the fade
+ * entirely for users who prefer reduced motion (vestibular sensitivity, etc.).
  */
+
+import { motionEnabled, reducedMotionRequested } from '#/tui/utils/motion';
 
 export const FADE_BUCKETS = 12;
 export const FADE_MS = 1200;
@@ -69,13 +71,11 @@ export function fadeColor(ageMs: number, table: string[], reduced: boolean): str
 }
 
 /**
- * Whether the user has requested reduced motion via the
- * `SCREAM_REDUCED_MOTION` env var. Accepts `1`, `true`, `yes` (case
- * insensitive); `0` / `false` / unset → false.
+ * Whether motion is reduced: the shared setting (`SCREAM_MOTION=off`, or
+ * `SCREAM_REDUCED_MOTION` applied at startup — see utils/motion) or, read live,
+ * the `SCREAM_REDUCED_MOTION` env var (`1`, `true`, `yes` any non-empty value
+ * other than `0` / `false` / `no`; unset → false).
  */
 export function isReducedMotion(): boolean {
-  const v = process.env['SCREAM_REDUCED_MOTION'];
-  if (v === undefined || v === '') return false;
-  const lower = v.toLowerCase();
-  return lower !== '0' && lower !== 'false' && lower !== 'no' && lower !== '';
+  return !motionEnabled() || reducedMotionRequested(process.env['SCREAM_REDUCED_MOTION']);
 }

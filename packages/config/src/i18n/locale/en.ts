@@ -117,13 +117,22 @@ export const en: Record<string, string> = {
   // ─── Footer hints ─────────────
   'footer.context': '📨 Context：{bar} {percent}',
   'footer.context_plain': '📨 Context：{percent}',
-  'footer.hit': 'Hitr',
-  'footer.git_label': '📁 Workspace Git',
+  'footer.hit': 'Cache hit',
+  // Shorter label used before the cache-hit readout is dropped on narrow terminals.
+  'footer.hit_short': 'Cache',
+  'footer.git_label': '📁 Git',
   'footer.line_status': 'Line: {status}',
+  'footer.line_short': 'Line',
   'footer.line_disconnected': 'Disconnected',
+  'footer.line_wechat': 'WeChat',
+  'footer.line_lark': 'Lark',
   'footer.tasks_running': 'bg task x{count}',
   'footer.agents_running': 'bg agent x{count}',
   'footer.subagents_working': 'fg agent x{count}',
+  // All three counters collapsed into one when the row is too narrow for the long form.
+  'footer.running_total': 'running {count}',
+  'footer.goal': 'Goal {time} · {turns} turns',
+  'footer.goal_turns': 'Goal {turns} turns',
 
   // ─── Sidebar panels ─────────────
   'sidebar.git': 'Git',

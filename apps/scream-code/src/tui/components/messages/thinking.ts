@@ -16,6 +16,7 @@ import {
   MESSAGE_INDENT,
   THINKING_PREVIEW_LINES,
 } from '#/tui/constant/rendering';
+import { spinnerPeriodMs } from '#/tui/utils/motion';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { isRenderCacheEnabled } from '#/tui/utils/render-cache';
@@ -44,6 +45,8 @@ export class ThinkingComponent implements Component {
   private spinnerFrame = 0;
   private spinnerTimer: ReturnType<typeof setTimeout> | undefined;
   private lastSpinnerTickAt = 0;
+  /** Frame period for this animation run (see utils/motion); set when it starts. */
+  private spinnerPeriod = BRAILLE_SPINNER_INTERVAL_MS;
   // Hold a single Text instance so pi-tui's (text, width) → lines cache
   // actually survives across renders. Re-constructing per render destroys
   // the cache and forces full re-wrap on every frame, which dominates CPU
@@ -199,15 +202,15 @@ export class ThinkingComponent implements Component {
       if (this.spinnerTimer !== timer) return;
       const startedAt = performance.now();
       const elapsed = startedAt - this.lastSpinnerTickAt;
-      if (elapsed >= BRAILLE_SPINNER_INTERVAL_MS) {
-        const steps = Math.floor(elapsed / BRAILLE_SPINNER_INTERVAL_MS);
+      if (elapsed >= this.spinnerPeriod) {
+        const steps = Math.floor(elapsed / this.spinnerPeriod);
         this.spinnerFrame = (this.spinnerFrame + steps) % BRAILLE_SPINNER_FRAMES.length;
-        this.lastSpinnerTickAt += steps * BRAILLE_SPINNER_INTERVAL_MS;
+        this.lastSpinnerTickAt += steps * this.spinnerPeriod;
         this.ui?.requestRender();
       }
       const frameCostMs = performance.now() - startedAt;
       if (this.spinnerTimer !== timer) return;
-      const cadenceDelayMs = Math.max(0, BRAILLE_SPINNER_INTERVAL_MS - frameCostMs);
+      const cadenceDelayMs = Math.max(0, this.spinnerPeriod - frameCostMs);
       const backpressureDelayMs = frameCostMs * 9;
       this.scheduleSpinnerTick(Math.max(cadenceDelayMs, backpressureDelayMs));
     }, delayMs);
@@ -216,8 +219,13 @@ export class ThinkingComponent implements Component {
 
   private startSpinner(): void {
     if (this.ui === undefined || this.spinnerTimer !== undefined) return;
+    // Motion off or a static spinner (interval 0): the glyph keeps its first
+    // frame and no timer runs.
+    const period = spinnerPeriodMs();
+    if (period === undefined) return;
+    this.spinnerPeriod = period;
     this.lastSpinnerTickAt = performance.now();
-    this.scheduleSpinnerTick(BRAILLE_SPINNER_INTERVAL_MS);
+    this.scheduleSpinnerTick(period);
   }
 
   private stopSpinner(): void {

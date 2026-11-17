@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { visibleWidth } from '@liutod-scream/pi-tui';
 
-import { FooterComponent, truncateMiddle } from '#/tui/components/chrome/footer';
+import { FooterComponent } from '#/tui/components/chrome/footer';
 import { darkColors } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
 
@@ -37,10 +37,10 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
 const uiMock = { requestRender: () => {} } as any;
 
 /**
- * Build a footer with a long LEFT (plan badge + goal + model + two background
- * badges) and a long RIGHT (cc dot + context with token counts + idle status),
- * so progressive truncation has something to chew on. `workDir` stays `/tmp`
- * (not a git repo) so the git badge is absent and the LEFT width is stable.
+ * Build a footer with a long LEFT (plan switch on + goal + model + two running
+ * counters) and a long RIGHT (channel + context gauge + idle status), so item
+ * fitting has something to chew on. `workDir` stays `/tmp` (not a git repo) so
+ * the git badge is absent and the LEFT width is stable.
  */
 function wideFooter(): FooterComponent {
   const footer = new FooterComponent(
@@ -73,48 +73,46 @@ function wideFooter(): FooterComponent {
   return footer;
 }
 
-describe('FooterComponent - progressive truncation', () => {
-  it('fits without truncation at columns=190 (no ellipsis, RIGHT visible)', () => {
+describe('FooterComponent - item fitting', () => {
+  it('fits without truncation at columns=190 (no ellipsis, nothing dropped)', () => {
     const footer = wideFooter();
     const [line1, line2] = footer.render(190);
-    expect(line1).toBeDefined();
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(190);
-    const stripped = strip(line1!);
-    expect(stripped).not.toContain('…');
-    // Line 2 opens with the hit rate, then the goal and task badges.
-    const strippedLine2 = strip(line2!);
-    expect(strippedLine2.startsWith('↓ Hitr: --')).toBe(true);
-    expect(strippedLine2).toContain('GOAL');
-    expect(strippedLine2).toContain('后台任务 x2');
-    expect(strippedLine2.indexOf('Hitr:')).toBeLessThan(strippedLine2.indexOf('GOAL'));
-    expect(strippedLine2.indexOf('GOAL')).toBeLessThan(strippedLine2.indexOf('后台任务 x2'));
-  });
-
-  it('never overflows at columns=40', () => {
-    const footer = wideFooter();
-    for (const line of footer.render(40)) {
-      expect(line).toBeDefined();
-      expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+    expect(visibleWidth(line1!)).toBe(190);
+    expect(strip(line1!)).not.toContain('…');
+    const row2 = strip(line2!);
+    expect(visibleWidth(line2!)).toBe(190);
+    expect(row2).not.toContain('…');
+    expect(row2.startsWith('↓ 缓存命中: --')).toBe(true);
+    // cache hit → plan → rlm → wolfpack → goal → counters → channel
+    let previous = -1;
+    for (const token of ['缓存命中:', '计划', 'RLM', '群狼', '目标 3m · 7轮', '后台任务 x2 · 后台Agent x3', 'Line: 未连接']) {
+      const at = row2.indexOf(token);
+      expect(at, `missing or out of order: ${token}`).toBeGreaterThan(previous);
+      previous = at;
     }
   });
 
-  it('stage 1: shrinks LEFT with a middle ellipsis to keep RIGHT visible', () => {
+  it('never overflows at columns=40, and always fills the row', () => {
     const footer = wideFooter();
-    // width 30: line 1's LEFT (model name) plus RIGHT (context gauge) exceeds
-    // it, so a shrunk LEFT (head + tail via truncateMiddle) + gap + RIGHT fits —
-    // the head keeps the model marker and the gauge survives.
-    const [line1] = footer.render(30);
-    expect(line1).toBeDefined();
-    const stripped = strip(line1!);
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(30);
-    expect(stripped).toContain('…');
-    expect(stripped).toContain('Context：'); // RIGHT survived
-    expect(stripped.startsWith('📟️')).toBe(true); // head of LEFT kept (marker)
+    for (const line of footer.render(40)) {
+      expect(line).toBeDefined();
+      expect(visibleWidth(line)).toBe(40);
+    }
   });
 
-  it('stage 2: drops RIGHT when it cannot fit even after shrinking LEFT', () => {
-    // Short LEFT (model only) + gauge wider than the row: below gauge+gap the
-    // RIGHT block is dropped so LEFT can render whole.
+  it('shrinks the model name — not the gauge — to keep the gauge visible', () => {
+    const footer = wideFooter();
+    // width 30: the gauge is already down to its bar-less form (17 cols), and
+    // the model name (11 cols) is cut to 6 + `…` so both still fit.
+    const [line1] = footer.render(30);
+    const stripped = strip(line1!);
+    expect(visibleWidth(line1!)).toBe(30);
+    expect(stripped).toBe('📟️ scream…   📨 Context：50.0%');
+  });
+
+  it('drops the gauge when it cannot fit even with the model name fully shrunk', () => {
+    // A two-letter model cannot shrink: below name + gap + gauge the gauge goes
+    // so the model renders whole.
     const footer = new FooterComponent(
       baseState({
         contextUsage: 0.5,
@@ -125,23 +123,24 @@ describe('FooterComponent - progressive truncation', () => {
       uiMock,
     );
     const [line1] = footer.render(17);
-    expect(line1).toBeDefined();
     const stripped = strip(line1!);
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(17);
-    expect(stripped).not.toContain('Context：'); // RIGHT dropped
-    expect(stripped).not.toContain('…'); // LEFT fit whole, no ellipsis needed
+    expect(visibleWidth(line1!)).toBe(17);
+    expect(stripped).not.toContain('Context：');
+    expect(stripped).not.toContain('…'); // the model fit whole, no ellipsis needed
+    expect(stripped.trimEnd()).toBe('📟️ k2');
   });
 
-  it('stage 3: truncates LEFT to the width when LEFT alone overflows', () => {
+  it('cuts a long model name to the narrowest width before giving up its gauge', () => {
     const footer = wideFooter();
     const [line1] = footer.render(10);
-    expect(line1).toBeDefined();
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(10);
-    // RIGHT is gone and LEFT is clipped to the narrow width.
-    expect(strip(line1!)).not.toContain('Hitr');
+    const stripped = strip(line1!);
+    expect(visibleWidth(line1!)).toBe(10);
+    // Gauge gone, model cut to the 7-column step (`scream…`).
+    expect(stripped).not.toContain('Context');
+    expect(stripped.trimEnd()).toBe('📟️ scream…');
   });
 
-  it('pads stage 2 to the full width so the line never wraps', () => {
+  it('pads a dropped-gauge row to the full width so the line never wraps', () => {
     const footer = new FooterComponent(
       baseState({
         contextUsage: 0.5,
@@ -156,29 +155,202 @@ describe('FooterComponent - progressive truncation', () => {
   });
 });
 
-describe('truncateMiddle', () => {
-  it('returns the input unchanged when it already fits', () => {
-    expect(truncateMiddle('abc', 10, '…')).toBe('abc');
+/** A footer with every run-strip item populated, for the line-2 fitting tests. */
+function busyFooter(overrides: Partial<AppState> = {}): FooterComponent {
+  const footer = new FooterComponent(
+    baseState({
+      model: 'scream-k2-5',
+      planMode: 'plan',
+      rlmEnabled: true,
+      wolfpackMode: true,
+      goalActive: true,
+      goal: {
+        objective: 'fit',
+        status: 'active',
+        turnsUsed: 3,
+        wallClockMs: 60_000,
+        wallClockBaseAt: Date.now(),
+        completionCriterion: null,
+        tokensUsed: 0,
+        inputTokens: null,
+        outputTokens: null,
+      },
+      streamingPhase: 'thinking',
+      streamingStartTime: Date.now() - 12_000,
+      lineActive: true,
+      linePlatform: 'wechat',
+      ...overrides,
+    }),
+    darkColors,
+    uiMock,
+  );
+  footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 1, foregroundSubagents: 3 });
+  return footer;
+}
+
+function row2(footer: FooterComponent, width: number): string {
+  return strip(footer.render(width)[1]!);
+}
+
+describe('FooterComponent - line 2 fitting', () => {
+  it('never cuts an item in half: no ellipsis, and a counter is whole or absent, at every width', () => {
+    const footer = busyFooter();
+    for (let width = 24; width <= 200; width++) {
+      const row = row2(footer, width);
+      expect(visibleWidth(row), `width ${String(width)}`).toBe(width);
+      expect(row, `width ${String(width)}`).not.toContain('…');
+      for (const word of ['后台任务', '后台Agent', '前台Agent']) {
+        if (row.includes(word)) expect(row, `width ${String(width)}`).toMatch(new RegExp(`${word} x\\d`));
+      }
+    }
+    footer.dispose();
   });
 
-  it('keeps a head and a tail fragment joined by the ellipsis', () => {
-    const out = truncateMiddle('GOAL 3m · 7 turns', 10, '…');
-    const stripped = strip(out);
-    expect(stripped).toContain('…');
-    expect(stripped).toMatch(/^GOAL/); // head keeps the start
-    expect(stripped).toMatch(/urns$/); // tail keeps the end (head 5 cols, tail 4 cols)
-    expect(visibleWidth(out)).toBeLessThanOrEqual(10);
+  it('only ever adds items as the terminal widens (never fewer at a wider width)', () => {
+    const footer = busyFooter();
+    const items: [string, RegExp][] = [
+      ['cache', /↓/],
+      ['plan', /计划/],
+      ['rlm', /RLM/],
+      ['wolfpack', /群狼/],
+      ['goal', /目标/],
+      ['counters', /后台任务|运行中/],
+      ['channel', /Line/],
+      ['status', /思考中/],
+    ];
+    for (const [name, pattern] of items) {
+      let seen = false;
+      for (let width = 20; width <= 200; width++) {
+        const present = pattern.test(row2(footer, width));
+        if (seen) expect(present, `${name} vanished again at width ${String(width)}`).toBe(true);
+        seen ||= present;
+      }
+      expect(seen, `${name} never appeared`).toBe(true);
+    }
+    footer.dispose();
   });
 
-  it('respects maxWidth=0', () => {
-    expect(truncateMiddle('abc', 0, '…')).toBe('');
+  it('shortens the cache label before it drops any switch', () => {
+    const footer = new FooterComponent(baseState({ model: 'scream-k2-5' }), darkColors, uiMock);
+    let sawFull = false;
+    let sawShortWithAllSwitches = false;
+    for (let width = 24; width <= 120; width++) {
+      const row = row2(footer, width);
+      const hasAllSwitches = row.includes('计划') && row.includes('RLM') && row.includes('群狼');
+      if (row.includes('缓存命中:')) {
+        sawFull = true;
+        // The long label only survives while every switch is still shown.
+        expect(hasAllSwitches, `width ${String(width)}`).toBe(true);
+      }
+      if (row.includes('↓ 缓存 ') && hasAllSwitches) sawShortWithAllSwitches = true;
+    }
+    expect(sawFull).toBe(true);
+    // There is a width where the label already gave way but no switch has gone.
+    expect(sawShortWithAllSwitches).toBe(true);
+    footer.dispose();
   });
 
-  it('preserves ANSI colour on both sides of the ellipsis', () => {
-    const colored = `\u001B[38;2;121;235;0mGOAL 3m · 7 turns\u001B[39m`;
-    const out = truncateMiddle(colored, 10, '…');
-    expect(visibleWidth(out)).toBeLessThanOrEqual(10);
-    // The original colour code is still present (on the tail via pendingAnsi).
-    expect(out).toContain('\u001B[38;2;121;235;0m');
+  it('keeps the channel on screen at every width where anything fits', () => {
+    const footer = busyFooter();
+    for (let width = 26; width <= 200; width++) {
+      expect(row2(footer, width), `width ${String(width)}`).toContain('Line');
+    }
+    footer.dispose();
+  });
+
+  it('collapses the running counters into one total before dropping them', () => {
+    const footer = busyFooter();
+    let sawLong = false;
+    let sawTotal = false;
+    for (let width = 30; width <= 200; width++) {
+      const row = row2(footer, width);
+      if (row.includes('后台任务 x2 · 后台Agent x1 · 前台Agent x3')) sawLong = true;
+      if (row.includes('运行中 6')) {
+        sawTotal = true;
+        expect(row).not.toContain('后台任务');
+      }
+    }
+    expect(sawLong).toBe(true);
+    expect(sawTotal).toBe(true);
+    footer.dispose();
+  });
+
+  it('collapses the running counters before any switch is dropped', () => {
+    const footer = new FooterComponent(baseState({ model: 'scream-k2-5' }), darkColors, uiMock);
+    footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 1, foregroundSubagents: 3 });
+    let sawLongWithAllSwitches = false;
+    let sawTotalWithAllSwitches = false;
+    for (let width = 30; width <= 200; width++) {
+      const row = row2(footer, width);
+      const hasAllSwitches = row.includes('计划') && row.includes('RLM') && row.includes('群狼');
+      // The long form only survives while every switch is still shown.
+      if (row.includes('后台任务')) {
+        sawLongWithAllSwitches = true;
+        expect(hasAllSwitches, `width ${String(width)}`).toBe(true);
+      }
+      if (row.includes('运行中 6') && hasAllSwitches) sawTotalWithAllSwitches = true;
+    }
+    expect(sawLongWithAllSwitches).toBe(true);
+    // There is a width where the counters already collapsed but no switch has gone.
+    expect(sawTotalWithAllSwitches).toBe(true);
+    footer.dispose();
+  });
+
+  it('shortens the goal readout step by step before dropping it', () => {
+    const footer = busyFooter();
+    const forms = ['目标 1m · 3轮', '目标 3轮'];
+    const seen = new Set<string>();
+    let bare = false;
+    for (let width = 24; width <= 200; width++) {
+      const row = row2(footer, width);
+      for (const form of forms) if (row.includes(form)) seen.add(form);
+      if (row.includes('目标') && !forms.some((form) => row.includes(form))) bare = true;
+    }
+    expect([...seen].toSorted()).toEqual([...forms].toSorted());
+    expect(bare).toBe(true);
+    footer.dispose();
+  });
+
+  it('shortens the channel to `Line` before it drops it', () => {
+    const footer = busyFooter();
+    let sawFull = false;
+    let sawShort = false;
+    for (let width = 20; width <= 200; width++) {
+      const row = row2(footer, width);
+      if (row.includes('Line: 微信')) sawFull = true;
+      if (row.includes('Line') && !row.includes('Line:')) sawShort = true;
+    }
+    expect(sawFull).toBe(true);
+    expect(sawShort).toBe(true);
+    footer.dispose();
+  });
+
+  it('sheds the elapsed clock before the work status itself', () => {
+    const footer = busyFooter();
+    expect(row2(footer, 14)).toContain('思考中 12s');
+    // Not a hard cut (`思考中 …`): the status steps down to its clock-free form.
+    const narrow = row2(footer, 10);
+    expect(narrow).toMatch(/^ *[●◉◎◌○] 思考中$/);
+    expect(visibleWidth(narrow)).toBe(10);
+    footer.dispose();
+  });
+
+  it('drops a switch that is off before one that is lit, and keeps a lit one past the counters and goal', () => {
+    const footer = busyFooter({ planMode: 'off', wolfpackMode: false, rlmEnabled: true });
+    let litAloneSeen = false;
+    for (let width = 24; width <= 200; width++) {
+      const row = row2(footer, width);
+      if (!row.includes('RLM')) {
+        // The lit switch is gone: so is everything that ranks below it.
+        for (const dimmed of ['计划', '群狼']) expect(row, `${dimmed} at ${String(width)}`).not.toContain(dimmed);
+        expect(row, `goal at ${String(width)}`).not.toContain('目标');
+        expect(row, `counters at ${String(width)}`).not.toMatch(/后台任务|运行中/);
+      } else if (!row.includes('计划') && !row.includes('群狼')) {
+        litAloneSeen = true;
+      }
+    }
+    // …and there is a width where only the lit switch is left of the three.
+    expect(litAloneSeen).toBe(true);
+    footer.dispose();
   });
 });
