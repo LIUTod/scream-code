@@ -2,6 +2,7 @@ import type { Agent } from '..';
 import type { DynamicInjector } from './injector';
 import { EditRecoveryInjector } from './edit-recovery';
 import { GoalInjector } from './goal';
+import { LocalDateInjector } from './local-date';
 import { createMcpCapabilityGuideInjectors } from './mcp-capability-guides';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
@@ -26,6 +27,7 @@ export class InjectionManager {
       new WorkingSetInjector(agent),
       new EditRecoveryInjector(agent),
       new UserPrefsInjector(agent),
+      new LocalDateInjector(agent),
     ];
   }
 

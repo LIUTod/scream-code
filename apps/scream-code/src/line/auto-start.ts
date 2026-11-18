@@ -11,16 +11,16 @@
 import { log } from '@scream-code/scream-code-sdk';
 
 import { LineConfigError, loadLineConfig } from './config';
-import { readLineDaemonStatus, startLineDaemonDetached } from './pidfile';
+import { readHostStatus, startHostDetached } from '#/host/control';
 
 export async function autoStartLineDaemonIfConfigured(): Promise<void> {
   try {
     const config = await loadLineConfig();
     if (!config?.feishu && !config?.weixin) return;
     if (!config.autoStart) return;
-    const status = await readLineDaemonStatus();
+    const status = await readHostStatus();
     if (status.running) return;
-    const { pid } = await startLineDaemonDetached();
+    const { pid } = await startHostDetached();
     log.info('line: auto-started daemon on TUI boot', { pid });
   } catch (error) {
     if (error instanceof LineConfigError) {

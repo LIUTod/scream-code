@@ -9,13 +9,22 @@
  *
  * Only commands that make sense without the TUI's widgets are supported here;
  * anything that needs a picker or wizard is refused with a pointer to the
- * desktop client.
+ * terminal, where `scream` runs those.
  */
 
 import type { Session } from '@scream-code/scream-code-sdk';
 
 import { CRON_USAGE, formatCronList, parseCronAdd } from './cron-commands';
 
+import { pauseAllBackgroundWork } from '#/host/pause-all';
+
+import {
+  briefCommand,
+  inboxDecisionCommand,
+  inboxText,
+  jobsCommand,
+  projectCommand,
+} from './background-commands';
 import type { LineCustomCommand } from './config';
 
 export interface LineCommandDeps {
@@ -51,6 +60,17 @@ export interface LineCommandDeps {
   commands?: readonly LineCustomCommand[];
   /** Runs an `exec`-type custom command and returns its reply text. */
   runExec?: (command: LineCustomCommand, arg: string) => Promise<string>;
+  /** Background tasks and the daily brief (`/jobs`, `/brief`); absent in tests that do not need them. */
+  background?: {
+    readonly screamHomeDir: string;
+    readonly sessionKey: string;
+    readonly workDir: () => string;
+    readonly hostRunning: () => Promise<boolean>;
+    readonly recentProjects: () => Promise<readonly string[]>;
+    readonly switchProject: (workDir: string) => Promise<void>;
+    /** Tell the host an inbox item was answered (it delivers on its next sweep otherwise). */
+    readonly onInboxDecided?: () => void;
+  };
 }
 
 export type LineCommandResult =
@@ -65,16 +85,23 @@ const HELP_TEXT = [
   '/model <名称>      切换模型（不带参数查看当前值）',
   '/compact           压缩上下文',
   '/stop              停止正在运行的任务',
-  '/cron              查看定时任务（add/rm 见用法）',
+  '/stop all          暂停全部后台任务，并停下正在跑的',
+  '/cron              查看本聊天的定时提醒（add/rm 见用法）',
+  '/jobs              查看后台任务（pause/resume/rm <id>）',
+  '/brief on|off      每天 08:30 把后台任务汇总发到这里',
+  '/project [编号]    查看或切换这个聊天的项目',
+  '/inbox             查看等你处理的事（审批、问题）',
+  '/approve <编号>    同意这一次（加 session：本会话都同意；加 always：以后都同意）；/reject 拒绝；/mine 我自己做了',
+  '/answer <编号> <回答>  回答后台的提问',
   '/cancel            停止并开始新会话',
   '/new               开启新会话',
   '/help              显示本帮助',
   '',
-  '以下命令需要桌面端：/line 配置向导、/theme、/model（选择器）、/sessions',
+  '以下命令请在终端里的 scream 中使用：/line 配置向导、/theme、/model（选择器）、/sessions',
   '未识别的命令会照常发给模型处理。',
 ].join('\n');
 
-const DESKTOP_ONLY = new Set(['/line', '/theme', '/sessions', '/login', '/image']);
+const TERMINAL_ONLY = new Set(['/line', '/theme', '/sessions', '/login', '/image']);
 
 const BUSY_TEXT = '当前有任务正在处理中：回复 /stop 可中止，或等这一轮结束后再发该命令。';
 
@@ -116,8 +143,8 @@ export async function runLineCommand(
   const name = (rawName ?? '').toLowerCase();
   const arg = rest.join(' ').trim();
 
-  if (DESKTOP_ONLY.has(name)) {
-    return { handled: true, text: `${name} 需要桌面端操作，IM 通道暂不支持。` };
+  if (TERMINAL_ONLY.has(name)) {
+    return { handled: true, text: `${name} 需要在终端里的 scream 中操作，IM 通道暂不支持。` };
   }
 
   switch (name) {
@@ -131,10 +158,74 @@ export async function runLineCommand(
       return { handled: true, text: await modelText(deps, arg) };
 
     case '/stop': {
+      if (arg.toLowerCase() === 'all') {
+        const result = await pauseAllBackgroundWork();
+        const stopped = deps.stopTurn?.() ?? false;
+        return {
+          handled: true,
+          text: `已暂停全部后台任务（${String(result.paused)} 个）${stopped ? '，并停止了这里正在运行的任务' : ''}。在 /jobs 里可以逐个重新开启。`,
+        };
+      }
       // Deliberately not busy-gated: stopping is only meaningful while busy.
       const stopped = deps.stopTurn?.() ?? false;
       if (!stopped) return { handled: true, text: '当前没有正在运行的任务。' };
       return { handled: true, text: '已停止当前任务。' };
+    }
+
+    case '/jobs': {
+      const background = deps.background;
+      if (background === undefined) return { handled: true, text: '后台任务不可用。' };
+      return {
+        handled: true,
+        text: await jobsCommand(background.screamHomeDir, arg, await background.hostRunning()),
+      };
+    }
+
+    case '/inbox': {
+      const background = deps.background;
+      if (background === undefined) return { handled: true, text: '收件箱不可用。' };
+      return { handled: true, text: inboxText(background.screamHomeDir) };
+    }
+
+    case '/approve':
+    case '/reject':
+    case '/mine':
+    case '/answer': {
+      const background = deps.background;
+      if (background === undefined) return { handled: true, text: '收件箱不可用。' };
+      const reply = inboxDecisionCommand(background.screamHomeDir, name, rawText.trim().slice(name.length));
+      background.onInboxDecided?.();
+      return { handled: true, text: reply };
+    }
+
+    case '/brief': {
+      const background = deps.background;
+      if (background === undefined) return { handled: true, text: '后台任务不可用。' };
+      return {
+        handled: true,
+        text: await briefCommand(background.screamHomeDir, arg, {
+          sessionKey: background.sessionKey,
+          workDir: background.workDir(),
+        }),
+      };
+    }
+
+    case '/project': {
+      const background = deps.background;
+      if (background === undefined) return { handled: true, text: '切换项目不可用。' };
+      try {
+        return {
+          handled: true,
+          text: await projectCommand(arg, {
+            current: background.workDir(),
+            recent: background.recentProjects,
+            isBusy: () => deps.isBusy(),
+            switchTo: background.switchProject,
+          }),
+        };
+      } catch (error) {
+        return { handled: true, text: `切换项目失败：${describeError(error)}` };
+      }
     }
 
     case '/cron': {
@@ -210,7 +301,7 @@ export async function runLineCommand(
         return { handled: true, prompt: expandPrompt(custom.prompt, arg) };
       }
       if (deps.runExec === undefined) {
-        return { handled: true, text: `命令 ${name} 需要桌面端执行。` };
+        return { handled: true, text: `命令 ${name} 在这里无法执行。` };
       }
       if (deps.isBusy()) return { handled: true, text: BUSY_TEXT };
       try {
@@ -253,7 +344,7 @@ async function modelText(deps: LineCommandDeps, arg: string): Promise<string> {
       const session = await deps.getSession();
       const status = await session.getStatus();
       const current = status.model ?? deps.defaultModel;
-      return `当前模型：${current}\n切换请发：/model <模型名>（可选列表在桌面端 /model 查看）`;
+      return `当前模型：${current}\n切换请发：/model <模型名>（可选列表在终端里的 scream 中用 /model 查看）`;
     } catch (error) {
       return `读取模型失败：${describeError(error)}`;
     }

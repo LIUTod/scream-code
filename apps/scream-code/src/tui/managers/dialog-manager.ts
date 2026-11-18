@@ -156,36 +156,9 @@ export class DialogManager {
         onStatus: (message: string) => {
           this.host.showStatus(message);
         },
-        onSelect: (pickerId: string) => {
-          const row = this.host.getSessions().find((s) => s.id === pickerId);
-          const isLegacyChannel = row?.metadata?.['source'] === 'cc-connect';
-          const realId = isLegacyChannel ? (row.metadata['agentSessionId'] as string) : pickerId;
-
-          void this.host.resumeSession(realId).then(async ({ switched, blocked }) => {
-            if (switched) {
-              this.hideSessionPicker();
-              return;
-            }
-            // Only create a fresh legacy-channel session when the resume failed because
-            // the session genuinely doesn't exist — never when the refusal
-            // was transient busy/replaying state (that would force-switch
-            // away from a live streaming session and soft-lock the UI).
-            if (isLegacyChannel && blocked !== true) {
-              try {
-                const session = await this.host.harness.createSession({
-                  id: realId,
-                  workDir: this.host.getCurrentWorkDir(),
-                  model: this.host.state.appState.model,
-                  permission: this.host.state.appState.permissionMode,
-                });
-                if (session) {
-                  await this.host.switchToSession(session, t('dialog.cc_session_connected', { id: session.id }));
-                  this.hideSessionPicker();
-                }
-              } catch {
-                this.host.showError(t('dialog.create_session_failed'));
-              }
-            }
+        onSelect: (sessionId: string) => {
+          void this.host.resumeSession(sessionId).then(({ switched }) => {
+            if (switched) this.hideSessionPicker();
           }).catch((error: unknown) => {
             this.host.showError(error instanceof Error ? error.message : String(error));
           });
@@ -194,7 +167,7 @@ export class DialogManager {
         onDelete: (sessionId: string) => {
           const row = this.host.getSessions().find((s) => s.id === sessionId);
           if (row !== undefined && isChannelManagedSession(row.metadata)) {
-            this.host.showStatus(t('dialog.cc_managed'));
+            this.host.showStatus(t('dialog.channel_managed'));
             return;
           }
           void this.host.deleteSession(sessionId).then(async () => {
@@ -209,8 +182,8 @@ export class DialogManager {
           });
         },
         onDeleteMany: (sessionIds: string[]) => {
-          // Channel-managed sessions (line daemon, or an externally installed
-          // channel daemon) are skipped in batch deletes; the picker
+          // Channel-managed sessions (the line daemon's) are skipped in batch
+          // deletes; the picker
           // already excludes them from selection — belt-and-suspenders guard.
           const channelIds = new Set(
             this.host
@@ -220,7 +193,7 @@ export class DialogManager {
           );
           const deletable = sessionIds.filter((id) => !channelIds.has(id));
           if (deletable.length === 0) {
-            this.host.showStatus(t('dialog.cc_managed'));
+            this.host.showStatus(t('dialog.channel_managed'));
             return;
           }
           void (async () => {

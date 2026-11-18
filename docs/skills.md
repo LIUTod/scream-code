@@ -70,6 +70,10 @@ in `config.toml` merges every discovered skill instead of the project-scoped set
 Skills are listed in the system prompt when the session starts, so a skill added
 mid-session needs a new session (or `/skill` refresh) to appear.
 
+## Change history
+
+Every change to the skills in `~/.scream-code/skills` that goes through the weekly self-review or an approved change is recorded in `~/.scream-code/evolution`, a git repository (git must be installed). Open **Change history** at the top of `/skills` (or `/memory history`) to see what each change touched and roll it back. See `host.md` for the self-review itself.
+
 ## What a skill is not
 
 - Not a subagent: no separate context, no separate tool set.

@@ -20,6 +20,11 @@ import {
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
 import { renderHookResult } from '../../session/hooks/user-prompt';
+import {
+  clearWorkRunning,
+  markWorkRunning,
+  type RunningWorkKind,
+} from '../../session/running-work';
 import { TURN_DEFAULTS } from './defaults';
 import { classifyToolResult } from './tool-failure-streak';
 
@@ -355,6 +360,7 @@ export class TurnFlow {
       this.activeTurn !== null &&
       this.activeTurn !== 'resuming' &&
       this.activeTurn.controller.signal === signal;
+    this.trackRunningWork();
     try {
       const initialGoalStatus = this.agent.goal.getGoal().goal?.status;
       if (initialGoalStatus === 'active') {
@@ -382,7 +388,34 @@ export class TurnFlow {
       if (ownsActiveTurn()) {
         this.activeTurn = null;
       }
+      this.untrackRunningWork();
     }
+  }
+
+  /**
+   * What this turn is doing, for the running-work register: an active goal
+   * and a bot-mode run continue on their own after an interruption; anything
+   * else is a conversation the person is part of.
+   */
+  private runningWorkKind(): RunningWorkKind {
+    if (this.agent.goal.getGoal().goal?.status === 'active') return 'goal';
+    if (this.agent.permission.mode === 'bot') return 'bot';
+    return 'chat';
+  }
+
+  /** Main agent only: record that this session has a turn in flight. */
+  private trackRunningWork(kind: RunningWorkKind = this.runningWorkKind()): void {
+    const home = this.agent.screamHomeDir;
+    const sessionId = this.agent.sessionId;
+    if (this.agent.type !== 'main' || home === undefined || sessionId === undefined) return;
+    markWorkRunning(home, { sessionId, workDir: this.agent.jian.getcwd(), kind });
+  }
+
+  private untrackRunningWork(): void {
+    const home = this.agent.screamHomeDir;
+    const sessionId = this.agent.sessionId;
+    if (this.agent.type !== 'main' || home === undefined || sessionId === undefined) return;
+    clearWorkRunning(home, sessionId);
   }
 
   /**
@@ -395,6 +428,8 @@ export class TurnFlow {
     origin: PromptOrigin,
     signal: AbortSignal,
   ): Promise<TurnEndResult> {
+    // A paused goal resumed mid-turn turns this turn into goal work.
+    this.trackRunningWork('goal');
     const configuredMaxGoalTurns = this.agent.screamConfig?.loopControl?.maxGoalTurns;
     const effectiveMaxGoalTurns = configuredMaxGoalTurns ?? TURN_DEFAULTS.maxGoalTurns;
 

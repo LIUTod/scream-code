@@ -156,9 +156,8 @@ presets (10M – 1B) are sized for that. The count covers the whole session: the
 main agent, every subagent (including ones still running), compaction and the
 cache warmer. Once it reaches the limit, every turn ends before its next model
 request — no wrap-up request either — and the cache warmer stops. The TUI shows
-a warning that points at `/budget`, `-p` / stream-json exit non-zero
-(stream-json uses exit code 4, like the step budget), an active goal is paused,
-and LINE replies with the reason.
+a warning that points at `/budget`, `-p` exits non-zero, an active goal is
+paused, and LINE replies with the reason.
 
 - The limit counts what this run of the session has used. Reopening (resume) or
   starting a new session starts a fresh allowance; `/usage` keeps showing the

@@ -27,6 +27,7 @@ import {
   type DeferredGroupEnableResult,
   type DeferredToolGroupContext,
   type DeferredToolGroupName,
+  jobTools,
 } from '../../tools/builtin/deferred-tools';
 import { LspTool } from '../../tools/builtin/lsp-tool';
 import { LspRegistry } from '../../lsp/registry';
@@ -1484,6 +1485,7 @@ export class ToolManager {
         !deferConstruction && this.agent.cron && new b.CronCreateTool(this.agent.cron),
         !deferConstruction && this.agent.cron && new b.CronListTool(this.agent.cron),
         !deferConstruction && this.agent.cron && new b.CronDeleteTool(this.agent.cron),
+        ...(!deferConstruction && this.agent.cron ? jobTools(this.agent) : []),
         // On-demand MCP tools stay out of the request until the model
         // enables them through this meta tool (server `exposure: on-demand`,
         // the default); see `tools/builtin/mcp/discover-mcp-tools.ts`.

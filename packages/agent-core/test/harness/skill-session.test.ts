@@ -293,30 +293,34 @@ describe('HarnessAPI session skills', () => {
     });
     await waitForEvent(first.events, (event) => event.type === 'skill.activated');
     await first.core.sessions.get(created.id)?.flushMetadata();
+    await first.rpc.closeSession({ sessionId: created.id });
 
     const second = await createTestRpc();
     const resumed = await second.rpc.resumeSession({ sessionId: created.id });
 
     expect(second.events.some((event) => event.type === 'skill.activated')).toBe(false);
     const context = await second.rpc.getContext({ sessionId: created.id, agentId: 'main' });
-    expect(context.history).toMatchObject([
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: 'Review the requested file.\n\nARGUMENTS: src/app.ts',
-          },
-        ],
-        origin: {
-          kind: 'skill_activation',
-          skillName: 'phase-one-review',
-          skillArgs: 'src/app.ts',
-          trigger: 'user-slash',
-          skillSource: 'project',
+    // The activation comes back as the first message. A close writes the
+    // session's recap, which the reopened session adds as a reminder after it.
+    expect(context.history[0]).toMatchObject({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'Review the requested file.\n\nARGUMENTS: src/app.ts',
         },
+      ],
+      origin: {
+        kind: 'skill_activation',
+        skillName: 'phase-one-review',
+        skillArgs: 'src/app.ts',
+        trigger: 'user-slash',
+        skillSource: 'project',
       },
-    ]);
+    });
+    expect(
+      context.history.filter((message) => message.origin?.kind === 'skill_activation'),
+    ).toHaveLength(1);
     const replay = resumed.agents['main']?.replay ?? [];
     expect(replay).toContainEqual(
       expect.objectContaining({

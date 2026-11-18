@@ -538,7 +538,8 @@ export interface AgentAPI {
    * listens. Returns true when firing was off. Idempotent.
    */
   startScheduledTasks: (payload: EmptyPayload) => boolean;
-  extractMemoriesOnExit: (payload: EmptyPayload) => Promise<number>;
+  /** `pending`: an unattended session — memories go to the inbox, not the store. */
+  extractMemoriesOnExit: (payload: { readonly pending?: boolean }) => Promise<number>;
   sideQuestion: (payload: SideQuestionPayload) => Promise<SideQuestionResult>;
   generateText: (payload: GenerateTextPayload) => Promise<GenerateTextResult>;
   createGoal: (payload: CreateGoalPayload) => GoalSnapshotData;
@@ -605,6 +606,16 @@ export interface PluginExtensionSummary {
   readonly active: boolean;
 }
 
+export interface HandOffSessionPayload {
+  readonly sessionId: string;
+}
+
+export interface HandOffSessionResult {
+  /** False when the session had nothing in flight to hand over. */
+  readonly handedOff: boolean;
+  readonly kind?: 'goal' | 'bot' | 'chat' | undefined;
+}
+
 export interface CoreAPI extends SessionAPIWithId {
   getCoreInfo: (payload: EmptyPayload) => CoreInfo;
   getExperimentalFlags: (payload: EmptyPayload) => ExperimentalFlagMap;
@@ -613,6 +624,17 @@ export interface CoreAPI extends SessionAPIWithId {
   removeScreamProvider: (payload: RemoveScreamProviderPayload) => ScreamConfig;
   createSession: (payload: CreateSessionPayload) => SessionSummary;
   closeSession: (payload: CloseSessionPayload) => void;
+  /**
+   * Mark the session's work for the background host before this process
+   * closes it: its running-work record survives the close and tells the host
+   * to continue it. Only meaningful with a turn in flight or an active goal.
+   */
+  handOffSession: (payload: HandOffSessionPayload) => HandOffSessionResult;
+  /**
+   * Let one exact action (an inbox `actionKey`) through the session's bot
+   * mode once: the person approved it from the inbox.
+   */
+  grantOneShotApproval: (payload: { readonly sessionId: string; readonly actionKey: string }) => boolean;
   deleteSession: (payload: DeleteSessionPayload) => void;
   resumeSession: (payload: ResumeSessionPayload) => ResumeSessionResult;
   forkSession: (payload: ForkSessionPayload) => ResumeSessionResult;

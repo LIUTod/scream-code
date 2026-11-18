@@ -23,6 +23,8 @@
  *      schedule for the model's benefit.
  */
 
+import { AGENT_JOB_MIN_INTERVAL_MS, cronIntervalMs, JobError, JobStore, type Job } from '../../jobs/store';
+import { hostRunning } from '../jobs/job-tools';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../agent/tool';
@@ -96,6 +98,12 @@ export const CronCreateInputSchema = z.object({
     .describe(
       'true = deliver nothing at all (no notice, no result). Use for maintenance runs whose value is the side effect.',
     ),
+  in_session: z
+    .boolean()
+    .optional()
+    .describe(
+      'true = keep a repeating task inside this conversation even while the background host runs. Without it, a repeating task (every 15 minutes or less often) made while the host runs becomes a background job, so it keeps running after this terminal closes.',
+    ),
 });
 
 export type CronCreateInput = z.Infer<typeof CronCreateInputSchema>;
@@ -151,7 +159,42 @@ export class CronCreateTool implements BuiltinTool<CronCreateInput> {
     CronCreateInputSchema,
   );
 
-  constructor(private readonly manager: CronManager) {}
+  /**
+   * `jobs`: where a repeating task goes instead while the background host
+   * runs (a terminal session only; chat sessions already live in the host).
+   */
+  constructor(
+    private readonly manager: CronManager,
+    private readonly jobs?: CronJobRedirect,
+  ) {}
+
+  /**
+   * A repeating task made in a terminal session would stop when the terminal
+   * closes. While the background host runs it becomes a background job
+   * instead: fresh session per run, results in /jobs. One-shots, tasks more
+   * frequent than every 15 minutes, chat sessions and `in_session` stay here.
+   */
+  private async redirectToJob(
+    input: { readonly cron: string; readonly prompt: string; readonly recurring: boolean },
+    inSession: boolean,
+  ): Promise<Job | undefined> {
+    const jobs = this.jobs;
+    if (jobs === undefined || inSession || !input.recurring) return undefined;
+    const sessionId = jobs.sessionId;
+    if (sessionId === undefined || sessionId.startsWith('line-') || sessionId.startsWith('job-run-')) return undefined;
+    const interval = cronIntervalMs(input.cron, this.manager.clocks.wallNow());
+    if (interval === undefined || interval < AGENT_JOB_MIN_INTERVAL_MS) return undefined;
+    if (!(await hostRunning(jobs.screamHomeDir))) return undefined;
+    const firstLine = input.prompt.split('\n').find((line) => line.trim() !== '') ?? input.prompt;
+    return new JobStore(jobs.screamHomeDir).add({
+      title: firstLine.trim().slice(0, 40),
+      prompt: input.prompt,
+      starts: { kind: 'cron', cron: input.cron },
+      does: 'act',
+      workDir: jobs.workDir(),
+      createdBy: 'agent',
+    });
+  }
 
   resolveExecution(received: CronCreateInput): ToolExecution {
     // Some models fill every optional string with "" instead of leaving it
@@ -258,6 +301,28 @@ export class CronCreateTool implements BuiltinTool<CronCreateInput> {
         // Cap re-check against the live store, insert, and the post-jitter
         // next-fire anchor all live in `scheduleCronTask`; it reads the clock
         // itself so an approval delay cannot backdate the schedule.
+        try {
+          const job = await this.redirectToJob(
+            { cron: finalAccepted.normalizedCron, prompt: finalInput.prompt, recurring: finalAccepted.recurring },
+            args.in_session === true,
+          );
+          if (job !== undefined) {
+            return {
+              output: [
+                `Made a background job instead of a session task: ${job.id} ("${job.title}").`,
+                `cron: ${finalAccepted.normalizedCron} (${cronToHuman(finalAccepted.parsed)})`,
+                `nextRunAt: ${job.nextRunAt === undefined ? 'null' : formatLocalIso(job.nextRunAt)}`,
+                'The background host runs it in a fresh session each time, also after this terminal closes; results show in /jobs. Manage it with JobList / JobDelete. To keep a task inside this conversation instead, call CronCreate again with in_session: true.',
+                clockLines(this.manager.clocks.wallNow()),
+              ].join('\n'),
+              isError: false,
+              message: `Made background job ${job.id}`,
+            };
+          }
+        } catch (error) {
+          // A full job list (20 on) or a store failure: keep it in the session.
+          if (!(error instanceof JobError)) throw error;
+        }
         const created = scheduleCronTask(this.manager, finalAccepted, finalInput);
         if (!created.ok) return refusal(created.error, this.manager.clocks.wallNow());
 
@@ -280,6 +345,13 @@ export class CronCreateTool implements BuiltinTool<CronCreateInput> {
       },
     };
   }
+}
+
+/** Where CronCreate puts a repeating task while the background host runs (see `redirectToJob`). */
+export interface CronJobRedirect {
+  readonly screamHomeDir: string;
+  readonly sessionId: string | undefined;
+  readonly workDir: () => string;
 }
 
 function formatOutput(o: CronCreateOutput): string {

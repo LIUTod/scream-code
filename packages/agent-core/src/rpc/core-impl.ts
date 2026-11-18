@@ -25,6 +25,14 @@ import { CrossrefPaperSource } from '#/tools/providers/paper/crossref';
 import { EuropePmcPaperSource } from '#/tools/providers/paper/europepmc';
 import { PaperFanoutProvider } from '#/tools/providers/paper/fanout';
 import { OpenAlexPaperSource } from '#/tools/providers/paper/openalex';
+import { readOrCreateControlToken } from '#/utils/control-token';
+import {
+  acquireProcessLock,
+  queryProcessLock,
+  type HeldProcessLock,
+} from '#/utils/process-lock';
+import { sessionLockName, sessionLockScope } from '#/utils/session-lock';
+import { markWorkHandedOff } from '../session/running-work';
 import type { PromisableMethods } from '#/utils/types';
 import { getCoreVersion } from '#/version';
 import { resolveThinkingLevel } from '../agent/config/thinking';
@@ -72,6 +80,8 @@ import type {
   CancelPayload,
   CancelPlanPayload,
   CloseSessionPayload,
+  HandOffSessionPayload,
+  HandOffSessionResult,
   CoreAPI,
   CoreInfo,
   CreateSessionPayload,
@@ -239,6 +249,14 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   readonly homeDir: string;
   readonly configPath: string;
   readonly sessions = new Map<string, Session>();
+  /** Process locks of the sessions this core has open (see `takeSessionLock`). */
+  private readonly sessionLocks = new Map<string, HeldProcessLock>();
+  /**
+   * Decides whether another process may take one of this core's sessions
+   * over. Only the background host sets one; without it every request is
+   * refused, so a second terminal cannot pull a session out of the first.
+   */
+  private sessionHandoverHandler: ((sessionId: string) => Promise<boolean>) | undefined;
 
   private jian: Promise<Jian>;
   private runtime: ToolServices | undefined;
@@ -349,7 +367,22 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return jian;
   }
 
+  /**
+   * Create a session, holding its process lock (see {@link takeSessionLock})
+   * for as long as this core keeps it open.
+   */
   async createSession(input: CreateSessionPayload): Promise<SessionSummary> {
+    const id = input.id ?? createSessionId();
+    await this.takeSessionLock(id);
+    try {
+      return await this.createSessionUnlocked({ ...input, id });
+    } catch (error) {
+      await this.releaseSessionLock(id);
+      throw error;
+    }
+  }
+
+  private async createSessionUnlocked(input: CreateSessionPayload): Promise<SessionSummary> {
     const options = input;
     const workDir = requiredWorkDir('createSession', options.workDir, options.exactWorkDir);
     // A pinned profile is composed once and handed to createMain; the
@@ -446,6 +479,53 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return result;
   }
 
+  /**
+   * Let another process of the same user take a session of this core over:
+   * on an authorized `handover` request the handler decides, and on yes the
+   * session is closed here so its lock comes free. In-process only (the
+   * handler is a function), like the model-binding setters.
+   */
+  setSessionHandoverHandler(handler: ((sessionId: string) => Promise<boolean>) | undefined): void {
+    this.sessionHandoverHandler = handler;
+  }
+
+  /**
+   * Hold `session:<id>` for this process. The lock is a listening socket the
+   * OS releases with the process, so a crashed holder never blocks the next
+   * open; a live one makes this throw `session.in_use`.
+   */
+  private async takeSessionLock(sessionId: string): Promise<void> {
+    if (this.sessionLocks.has(sessionId)) return;
+    const lock = await acquireProcessLock({
+      scope: sessionLockScope(this.homeDir),
+      name: sessionLockName(sessionId),
+      token: readOrCreateControlToken(this.homeDir),
+      info: { kind: 'session', sessionId },
+    });
+    if (!lock.held) throw sessionInUseError(sessionId, lock.holder?.pid);
+    lock.onRequest(async (request) => {
+      if (request.type !== 'handover') return { ok: false, error: 'unsupported' };
+      const allowed = (await this.sessionHandoverHandler?.(sessionId)) ?? false;
+      if (!allowed) return { ok: false, error: 'refused' };
+      // Close after this reply has gone out: closing releases the lock and
+      // drops every connection on it, the asker's included.
+      setTimeout(() => {
+        void this.closeSession({ sessionId }).catch((error: unknown) => {
+          log.warn('session handover: close failed', { sessionId, error: String(error) });
+        });
+      }, 50);
+      return { ok: true };
+    });
+    this.sessionLocks.set(sessionId, lock);
+  }
+
+  private async releaseSessionLock(sessionId: string): Promise<void> {
+    const lock = this.sessionLocks.get(sessionId);
+    if (lock === undefined) return;
+    this.sessionLocks.delete(sessionId);
+    await lock.release().catch(() => {});
+  }
+
   getCoreInfo(): CoreInfo {
     return { version: getCoreVersion() };
   }
@@ -473,12 +553,41 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
         // notifications. Dropping it forces the resume to build a fresh
         // Session, exactly as after a successful close.
         this.sessions.delete(sessionId);
+        await this.releaseSessionLock(sessionId);
       }
     }
   }
 
+  grantOneShotApproval({ sessionId, actionKey }: { sessionId: string; actionKey: string }): boolean {
+    const main = this.sessions.get(sessionId)?.agents.get('main');
+    if (main === undefined) return false;
+    main.permission.grantOneShotApproval(actionKey);
+    return true;
+  }
+
+  handOffSession({ sessionId }: HandOffSessionPayload): HandOffSessionResult {
+    const session = this.sessions.get(sessionId);
+    const main = session?.agents.get('main');
+    if (main === undefined) return { handedOff: false };
+    const goalActive = main.goal.getGoal().goal?.status === 'active';
+    if (!goalActive && !main.turn.hasActiveTurn) return { handedOff: false };
+    const kind = goalActive ? 'goal' : main.permission.mode === 'bot' ? 'bot' : 'chat';
+    markWorkHandedOff(this.homeDir, { sessionId, workDir: main.jian.getcwd(), kind });
+    return { handedOff: true, kind };
+  }
+
   async deleteSession({ sessionId }: DeleteSessionPayload): Promise<void> {
     const active = this.sessions.get(sessionId);
+    if (active === undefined) {
+      // Not open here: another process may have it open (another terminal,
+      // the background host). Deleting its directory under it would lose
+      // what it writes next, so refuse instead.
+      const holder = await queryProcessLock({
+        scope: sessionLockScope(this.homeDir),
+        name: sessionLockName(sessionId),
+      });
+      if (holder.held) throw sessionInUseError(sessionId, holder.holder?.pid);
+    }
     if (active) {
       try {
         await active.close();
@@ -490,6 +599,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
         // let a later resumeSession serve back a session that can never
         // deliver background task notifications again.
         this.sessions.delete(sessionId);
+        await this.releaseSessionLock(sessionId);
       }
       // Only a clean close reaches the destructive step. Deleting the store
       // removes the session directory from disk, so destroying recoverable
@@ -501,7 +611,44 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     await this.sessionStore.delete(sessionId);
   }
 
+  /**
+   * Resume a session, holding its process lock for as long as this core keeps
+   * it open. A session another process holds is refused with `session.in_use`
+   * rather than opened twice: two writers would interleave its records.
+   */
   async resumeSession(input: ResumeSessionPayload): Promise<ResumeSessionResult> {
+    const summary = await this.sessionStore.get(input.sessionId);
+    if (this.sessions.has(summary.id)) return this.resumeSessionUnlocked(input);
+    // Two opens of one session at once in this process (the host's resumer,
+    // inbox and channel share a core): the second waits for the first and gets
+    // the same session, instead of passing the lock it already holds and
+    // building a second writer, or releasing that lock if it fails.
+    const opening = this.openingSessions.get(summary.id);
+    if (opening !== undefined) {
+      await opening.catch(() => undefined);
+      return this.resumeSession(input);
+    }
+    const open = (async () => {
+      await this.takeSessionLock(summary.id);
+      try {
+        return await this.resumeSessionUnlocked(input);
+      } catch (error) {
+        await this.releaseSessionLock(summary.id);
+        throw error;
+      }
+    })();
+    this.openingSessions.set(summary.id, open);
+    try {
+      return await open;
+    } finally {
+      this.openingSessions.delete(summary.id);
+    }
+  }
+
+  /** Opens in flight, by session id (see `resumeSession`). */
+  private readonly openingSessions = new Map<string, Promise<ResumeSessionResult>>();
+
+  private async resumeSessionUnlocked(input: ResumeSessionPayload): Promise<ResumeSessionResult> {
     const summary = await this.sessionStore.get(input.sessionId);
     const active = this.sessions.get(summary.id);
     if (active !== undefined) {
@@ -946,7 +1093,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).startScheduledTasks(payload);
   }
 
-  extractMemoriesOnExit({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+  extractMemoriesOnExit({ sessionId, ...payload }: SessionAgentPayload<{ readonly pending?: boolean }>) {
     return this.sessionApi(sessionId).extractMemoriesOnExit(payload);
   }
 
@@ -1622,4 +1769,13 @@ async function warnIfLogFlushFails(
   try {
     await flush();
   } catch {}
+}
+
+function sessionInUseError(sessionId: string, holderPid: number | undefined): ScreamError {
+  const where = holderPid === undefined ? '' : ` (pid ${String(holderPid)})`;
+  return new ScreamError(
+    ErrorCodes.SESSION_IN_USE,
+    `Session ${sessionId} is open in another process${where}.`,
+    { details: { sessionId, ...(holderPid === undefined ? {} : { holderPid }) } },
+  );
 }

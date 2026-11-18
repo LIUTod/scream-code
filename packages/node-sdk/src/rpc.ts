@@ -294,6 +294,16 @@ export class SDKRpcClient {
     return rpc.listSessions(input);
   }
 
+  async grantOneShotApproval(sessionId: string, actionKey: string): Promise<boolean> {
+    const rpc = await this.getRpc();
+    return rpc.grantOneShotApproval({ sessionId, actionKey });
+  }
+
+  async handOffSession(sessionId: string): Promise<{ handedOff: boolean; kind?: 'goal' | 'bot' | 'chat' | undefined }> {
+    const rpc = await this.getRpc();
+    return rpc.handOffSession({ sessionId });
+  }
+
   async renameSession(input: RenameSessionInput): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.renameSession({
@@ -976,11 +986,12 @@ export class SDKRpcClient {
     });
   }
 
-  async extractMemoriesOnExit(input: SessionIdRpcInput): Promise<number> {
+  async extractMemoriesOnExit(input: SessionIdRpcInput & { readonly pending?: boolean }): Promise<number> {
     const rpc = await this.getRpc();
     return rpc.extractMemoriesOnExit({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
+      ...(input.pending === true ? { pending: true } : {}),
     });
   }
 

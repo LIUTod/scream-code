@@ -1,0 +1,1 @@
+List the background tasks (see `JobCreate`): id, title, schedule, whether it acts or only reports, its outcome if any, on/off, the next run, and the last run's result. Use it before changing or deleting a task, and when the person asks what runs in the background.

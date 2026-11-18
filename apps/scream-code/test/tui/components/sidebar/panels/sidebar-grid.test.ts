@@ -10,7 +10,7 @@ import {
   SIDEBAR_MARKER_COLS,
   SIDEBAR_MIN_GAP,
 } from '#/tui/utils/display-width';
-import { gitPanel } from '#/tui/components/sidebar/panels/git-panel';
+import { jobsPanel } from '#/tui/components/sidebar/panels/jobs-panel';
 import { sessionPanel } from '#/tui/components/sidebar/panels/session-panel';
 import { agentsPanel } from '#/tui/components/sidebar/panels/agents-panel';
 import { goalPanel } from '#/tui/components/sidebar/panels/goal-panel';
@@ -34,7 +34,7 @@ const palette = {
 } as unknown as ColorPalette;
 
 const ANSI = /\u001B\[[0-9;]*m/g;
-const PANELS = [gitPanel, sessionPanel, agentsPanel, goalPanel, hubPanel];
+const PANELS = [jobsPanel, sessionPanel, agentsPanel, goalPanel, hubPanel];
 
 function ctx(data: SidebarData): SidebarPanelContext {
   return { requestRender: () => {}, getData: () => data, colors: palette };
@@ -45,7 +45,15 @@ function plain(line: string): string {
 }
 
 const data: SidebarData = {
-  git: { workDir: '/home/dev/scream-code', diffAdded: 205, diffDeleted: 15, filesCount: 6 },
+  jobs: {
+    hostRunning: true,
+    waiting: 1,
+    rows: [
+      { title: '每日 CI 检查', lastOk: true, nextRunAt: Date.now() + 3_600_000 },
+      { title: 'dependency bump', lastOk: false, nextRunAt: Date.now() + 86_400_000 },
+      { title: '每周自查', lastOk: undefined, nextRunAt: undefined },
+    ],
+  },
   sessionStats: {
     turns: 2,
     toolCalls: 3,
@@ -193,7 +201,7 @@ describe('cross-panel column consistency', () => {
       for (const line of panel.build(ctx(data)).render(28)) {
         const row = plain(line);
         const startsAtMarker =
-          row.startsWith(' '.repeat(SIDEBAR_MARKER_COLS)) || /^[●○✓✗⏹⚖⏸⚠]/.test(row);
+          row.startsWith(' '.repeat(SIDEBAR_MARKER_COLS)) || /^[●○✓✗·⏹⚖⏸⚠]/.test(row);
         expect(startsAtMarker, `${panel.id}: ${row}`).toBe(true);
       }
     }
@@ -245,16 +253,20 @@ describe('cross-panel column consistency', () => {
     }
   });
 
-  it('keeps a clean git tree on the marker column like every other row', () => {
-    // The clean tree is the default state, so a missing indent would show up
-    // immediately as one panel hugging the border.
-    const clean: SidebarData = {
-      ...data,
-      git: { workDir: '/home/dev/scream-code', diffAdded: 0, diffDeleted: 0, filesCount: 0 },
-    };
-    const rows = gitPanel.build(ctx(clean)).render(28).map(plain);
-    expect(rows.length).toBeGreaterThan(1);
-    for (const row of rows) expect(row.startsWith('  ')).toBe(true);
+  it('lays the Jobs rows on the shared marker and label columns', () => {
+    const rows = jobsPanel.build(ctx(data)).render(28).map(plain);
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toMatch(/^● /);
+    expect(rows[2]).toMatch(/^✓ /);
+    expect(rows[3]).toMatch(/^✗ /);
+    expect(rows[4]).toMatch(/^· .*—$/);
+    for (const row of rows) expect(row.length).toBeLessThanOrEqual(28);
+  });
+
+  it('is hidden with no job on and nothing waiting', () => {
+    expect(jobsPanel.visible?.({ jobs: { hostRunning: false, waiting: 0, rows: [] } })).toBe(false);
+    expect(jobsPanel.visible?.({})).toBe(false);
+    expect(jobsPanel.visible?.({ jobs: { hostRunning: false, waiting: 1, rows: [] } })).toBe(true);
   });
 
   it('does not truncate labels at the default sidebar width', () => {

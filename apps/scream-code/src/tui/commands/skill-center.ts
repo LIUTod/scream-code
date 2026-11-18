@@ -17,6 +17,7 @@ import { t } from '@scream-code/config';
 import { loadPluginMarketplace, type PluginMarketplaceEntry } from '#/utils/plugin-marketplace';
 
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
+import { openEvolutionHistory } from './evolution-history';
 import type { SlashCommandHost } from './dispatch';
 import { MoonLoader } from '../components/chrome/moon-loader';
 import { getFallbackSkillMarketplace, type FallbackMarketplaceEntry } from './skill-marketplace';
@@ -222,6 +223,7 @@ function buildOptions(
     }
   }
 
+  options.push({ value: '__history__', label: t('evolution.entry'), description: t('evolution.entry_hint') });
   return options;
 }
 
@@ -232,6 +234,10 @@ async function handleSelect(
   _plugins: readonly PluginSummary[],
   _marketplace: readonly MarketplaceEntry[],
 ): Promise<void> {
+  if (value === '__history__') {
+    await openEvolutionHistory(host);
+    return;
+  }
   if (value.startsWith('__section')) {
     // Selecting a section header just refreshes the panel.
     await openSkillCenter(host);

@@ -151,14 +151,14 @@ export class SessionPickerComponent extends Container implements Focusable {
           return;
         }
         if (session.metadata !== undefined && isChannelManagedSession(session.metadata)) {
-          this.onStatus(t('session_picker.cc_restricted'));
+          this.onStatus(t('session_picker.channel_restricted'));
           return;
         }
         void this.onDelete?.(session.id);
         return;
       }
       if (session.metadata !== undefined && isChannelManagedSession(session.metadata)) {
-        this.onStatus(t('session_picker.cc_restricted'));
+        this.onStatus(t('session_picker.channel_restricted'));
         return;
       }
       this.onSelect(session.id);
@@ -181,7 +181,7 @@ export class SessionPickerComponent extends Container implements Focusable {
       const session = this.sessions[this.selectedIndex];
       if (!session) return;
       if (session.metadata !== undefined && isChannelManagedSession(session.metadata)) {
-        this.onStatus(t('session_picker.cc_restricted'));
+        this.onStatus(t('session_picker.channel_restricted'));
         return;
       }
       if (session.id !== this.currentSessionId) {
@@ -194,7 +194,7 @@ export class SessionPickerComponent extends Container implements Focusable {
       // so they are excluded from batch selection up front.
       if (!session || session.id === this.currentSessionId) return;
       if (session.metadata !== undefined && isChannelManagedSession(session.metadata)) {
-        this.onStatus(t('session_picker.cc_restricted'));
+        this.onStatus(t('session_picker.channel_restricted'));
         return;
       }
       if (this.selectedIds.has(session.id)) this.selectedIds.delete(session.id);

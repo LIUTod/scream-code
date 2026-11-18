@@ -26,7 +26,7 @@ import {
   type RuntimeMarkerInfo,
 } from './utils/runtime-marker';
 import { getDataDir } from '../utils/paths';
-import { ScreamHarness } from '@scream-code/scream-code-sdk';
+import { listInbox, ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t, setLocale } from '@scream-code/config';
 import type { CLIOptions } from '#/cli/options';
 import { autoStartLineDaemonIfConfigured } from '#/line/auto-start';
@@ -94,6 +94,11 @@ import { detectTmuxKeyboardWarning } from './utils/tmux-keyboard';
 import { SessionManager, type SessionsPrefetch } from './managers/session-manager';
 import { DialogManager } from './managers/dialog-manager';
 import { refreshProviderBalance, supportsBalance } from './api-balance';
+import { ChoicePickerComponent } from './components/dialogs/choice-picker';
+import { isStreaming } from './utils/app-state';
+import { peekHostSession, startHostDetached, wakeHost } from '#/host/control';
+import { readLastSeen, writeLastSeen } from '#/host/activity';
+import { readAwayEntries, renderAwaySummary } from './utils/jobs-status';
 
 export type { TUIState } from './tui-state';
 export { createTUIState } from './tui-state';
@@ -286,7 +291,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.transcriptController = new TranscriptController(this);
     this.lifecycleController = new LifecycleController(this);
     // The footer's line-1 git badge reads through the controller's git cache
-    // (same snapshot as the sidebar Git panel, no extra spawns).
+    // (TTL-cached, read off the render path).
     this.state.footer.setGitDiffProvider(() =>
       this.lifecycleController.getGitDiffStats(this.state.appState.workDir),
     );
@@ -346,7 +351,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
         // shut down. Both are advisory: a marker problem must never block the UI.
         this.refreshRuntimeMarker();
         this.reportStaleSessions();
+        this.reportWhileAway();
         this.lifecycleController.startLinePolling();
+        this.lifecycleController.startJobsPolling();
         void autoStartLineDaemonIfConfigured();
         this.startBalancePolling();
       } catch (error) {
@@ -501,7 +508,12 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   async stop(exitCode?: number): Promise<void> {
     if (this.isShuttingDown) return;
+    // SIGTERM (143) is an OS shutdown or a kill: nobody is there to ask.
+    const handoff = await this.decideExitHandoff(exitCode === 143);
+    if (handoff === 'stay') return;
+    if (this.isShuttingDown) return;
     this.isShuttingDown = true;
+    writeLastSeen();
     this.lifecycleController.stopLinePolling();
     this.lifecycleController.stopGitDiffRefresh();
     // The pulse wave re-schedules itself every 80ms — stop it with the rest.
@@ -530,9 +542,124 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     clearRuntimeMarker(getDataDir());
     await this.closeSession();
     await this.harness.close();
+    const handedOffNote = handoff === 'handoff' ? await this.startHostForHandoff() : undefined;
     this.state.ui.stop();
+    if (handedOffNote !== undefined) process.stdout.write(`${handedOffNote}\n`);
     if (this.onExit) {
       await this.onExit(exitCode);
+    }
+  }
+
+  /**
+   * Exiting with work in flight (an active goal, a running turn): hand it to
+   * the background host, stop it, or stay. Asked in a picker; from a signal
+   * nobody can answer, so goal and bot-mode work is handed over and a plain
+   * turn stops, as it always did. Marks the session before it closes — the
+   * close cancels the turn, and the mark keeps its running-work record.
+   */
+  private async decideExitHandoff(fromSignal: boolean): Promise<'handoff' | 'stop' | 'stay'> {
+    const session = this.session;
+    if (session === undefined) return 'stop';
+    const goal = this.state.appState.goal;
+    const goalActive = goal?.status === 'active';
+    if (!goalActive && !isStreaming(this.state.appState)) return 'stop';
+    let choice: 'handoff' | 'stop' | 'stay';
+    if (fromSignal) {
+      choice = goalActive || this.state.appState.permissionMode === 'bot' ? 'handoff' : 'stop';
+    } else {
+      choice = await new Promise((resolve) => {
+        const picker = new ChoicePickerComponent({
+          title:
+            goal !== null && goalActive
+              ? t('exit.handoff_goal', { objective: goal.objective, turns: String(goal.turnsUsed) })
+              : t('exit.handoff_turn'),
+          hint: t('exit.handoff_hint'),
+          options: [
+            { value: 'handoff', label: t('exit.handoff_yes') },
+            { value: 'stop', label: t('exit.handoff_stop'), tone: 'danger' },
+          ],
+          colors: this.state.theme.colors,
+          onSelect: (value: string) => {
+            this.restoreEditor();
+            resolve(value === 'handoff' ? 'handoff' : 'stop');
+          },
+          onCancel: () => {
+            this.restoreEditor();
+            resolve('stay');
+          },
+          onDispose: () => {
+            resolve('stay');
+          },
+        });
+        this.mountEditorReplacement(picker);
+      });
+    }
+    if (choice !== 'handoff') return choice;
+    try {
+      const result = await session.handOff();
+      return result.handedOff ? 'handoff' : 'stop';
+    } catch {
+      return 'stop';
+    }
+  }
+
+  /** After a handoff: make sure a host runs to pick the session up, and say where it went. */
+  private async startHostForHandoff(): Promise<string> {
+    try {
+      await startHostDetached();
+      await wakeHost();
+      return t('exit.handed_off');
+    } catch (error) {
+      return t('exit.handoff_failed', { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /**
+   * The background host is working on a session the person opened: take it
+   * over, just watch (a snapshot from the host, refreshed on demand; the host
+   * keeps the session), or go back.
+   */
+  async confirmTakeover(sessionId: string): Promise<boolean> {
+    let details: string[] = [];
+    for (;;) {
+      const shown = details;
+      const choice = await new Promise<string>((resolve) => {
+        const picker = new ChoicePickerComponent({
+          title: t('session.takeover_title'),
+          details: shown,
+          options: [
+            { value: 'take', label: t('session.takeover_yes') },
+            { value: 'watch', label: shown.length === 0 ? t('session.takeover_watch') : t('session.takeover_refresh') },
+            { value: 'back', label: t('session.takeover_back') },
+          ],
+          colors: this.state.theme.colors,
+          onSelect: (value: string) => {
+            this.restoreEditor();
+            resolve(value);
+          },
+          onCancel: () => {
+            this.restoreEditor();
+            resolve('back');
+          },
+          onDispose: () => {
+            resolve('back');
+          },
+        });
+        this.mountEditorReplacement(picker);
+      });
+      if (choice !== 'watch') return choice === 'take';
+      const peek = await peekHostSession(sessionId).catch(() => undefined);
+      details =
+        peek === undefined
+          ? [t('session.watch_unavailable')]
+          : [
+              peek.running ? t('session.watch_running') : t('session.watch_idle'),
+              ...(peek.goal === undefined
+                ? []
+                : [t('session.watch_goal', { objective: peek.goal.objective.split('\n')[0]!.slice(0, 80), status: peek.goal.status })]),
+              '',
+              ...(peek.lastReply === '' ? [t('session.watch_no_reply')] : peek.lastReply.split('\n').slice(-20)),
+            ];
     }
   }
 
@@ -562,7 +689,51 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.applyTheme('auto', resolved);
   }
 
+  /**
+   * The terminal went away: closing the window is the most common way to quit
+   * and nobody is left to ask. A goal or a bot run in progress is handed to
+   * the background (started if it is not running), within a few seconds,
+   * then the process exits. Anything else just stops, as on any hang-up.
+   */
+  onHangup(): void {
+    if (this.isShuttingDown) return;
+    this.isShuttingDown = true;
+    const handOver = (async () => {
+      const handoff = await this.decideExitHandoff(true);
+      if (handoff !== 'handoff') return;
+      await startHostDetached();
+      await wakeHost();
+    })().catch(() => {});
+    // Windows ends a process whose console closed after about 10 seconds.
+    const deadline = new Promise<void>((resolve) => {
+      setTimeout(resolve, 4_000).unref();
+    });
+    void Promise.race([handOver, deadline]).finally(() => {
+      this.onEmergencyExit();
+    });
+  }
+
+  /**
+   * What background work did since a terminal was last open: job runs,
+   * handed-over work finished, what waits. Shown once, here, so nobody needs
+   * a chat channel to learn it. The first launch only starts the clock.
+   */
+  private reportWhileAway(): void {
+    try {
+      const since = readLastSeen();
+      writeLastSeen();
+      const entries = readAwayEntries(since);
+      const waiting = listInbox(getDataDir()).filter((item) => item.status === 'pending' && item.expiresAt > Date.now()).length;
+      if (entries.length === 0 && (since <= 0 || waiting === 0)) return;
+      const lines = renderAwaySummary(entries, waiting);
+      if (lines.length > 0) this.showNotice(t('away.title'), lines.join('\n'));
+    } catch {
+      // Advisory only.
+    }
+  }
+
   onEmergencyExit(exitCode = 129): never {
+    writeLastSeen();
     this.isShuttingDown = true;
     this.lifecycleController.uninstallSignalHandlers();
     // A SIGHUP means the terminal went away, not that the process crashed:

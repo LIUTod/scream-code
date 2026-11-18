@@ -15,6 +15,7 @@ function permissionStub(mode: string): Record<string, unknown> {
     taintedPrivateReads: [],
     hasPendingPrivateReads: () => false,
     sessionApprovalRulePatterns: [],
+    consumeOneShotApproval: () => false,
   };
 }
 
@@ -68,7 +69,7 @@ describe('BotModePermissionPolicy', () => {
 
   it('keeps a Windows workspace writable through a drive and UNC base', () => {
     const drivePolicy = new BotModePermissionPolicy({
-      permission: { mode: 'bot' },
+      permission: { mode: 'bot', consumeOneShotApproval: () => false },
       config: { cwd: String.raw`C:\work` },
     } as unknown as Agent);
     expect(drivePolicy.evaluate(ctx('Write', { path: String.raw`C:\work\sub\f.ts` }))?.kind).toBe('approve');
@@ -77,7 +78,7 @@ describe('BotModePermissionPolicy', () => {
     expect(drivePolicy.evaluate(ctx('Write', { path: String.raw`C:\outside\f.ts` }))?.kind).toBe('deny');
 
     const uncPolicy = new BotModePermissionPolicy({
-      permission: { mode: 'bot' },
+      permission: { mode: 'bot', consumeOneShotApproval: () => false },
       config: { cwd: String.raw`\\server\share` },
     } as unknown as Agent);
     expect(uncPolicy.evaluate(ctx('Edit', { path: String.raw`\\server\share\f.ts` }))?.kind).toBe('approve');

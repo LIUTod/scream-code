@@ -10,6 +10,7 @@ import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
 import { CHROME_GUTTER } from '#/tui/constant/rendering';
 import { ScreamTUI } from '#/tui/index';
 import { detectTerminalTheme } from '#/tui/theme/detect';
+import { refreshServiceLauncher } from '#/host/service';
 import { legacyUserAssetsNotice } from '#/utils/legacy-user-assets';
 
 import type { CLIOptions } from './options';
@@ -68,6 +69,9 @@ export async function runShell(
 
   // Preflight validates the host environment (e.g. Git Bash on Windows)
   await harness.preflight();
+  // An installed resident service must keep pointing at the scream and node
+  // that run now (an upgrade or a node version switch moves them).
+  void refreshServiceLauncher().catch(() => {});
 
   // Scan the workDir session list once, before the TUI takes over. The
   // TUI's SessionManager uses it only to enumerate candidates for the

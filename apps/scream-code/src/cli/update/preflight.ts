@@ -2,6 +2,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { t } from '@scream-code/config';
 
 import { killProcessTree } from '@scream-code/jian';
+
+import { restartHostInBackground } from '#/host/control';
 import { npmLaunchPlan } from '#/utils/exec/npm';
 
 import { globalPrefixForScream, installLatestArgs } from './prefix';
@@ -158,6 +160,8 @@ export async function runUpdatePreflight(
     try {
       await installUpdate();
       stdout.write(renderInstallSuccessMessage(target));
+      // The background host still runs the old version: restart it.
+      await restartHostInBackground().catch(() => false);
       return 'exit';
     } catch (error) {
       stderr.write(

@@ -72,6 +72,7 @@ describe('HarnessAPI session model aliases', () => {
       agentId: 'main',
       model: 'scream-code/scream-for-coding',
     });
+    await rpc.closeSession({ sessionId: created.id });
 
     const freshRpc = await createTestRpc();
     await freshRpc.resumeSession({ sessionId: created.id });
@@ -201,6 +202,7 @@ reason = "no rm"
         },
       ],
     });
+    await rpc.closeSession({ sessionId: created.id });
 
     const freshRpc = await createTestRpc();
     await freshRpc.resumeSession({ sessionId: created.id });

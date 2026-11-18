@@ -1,11 +1,11 @@
 /**
  * Line daemon liveness + configured-channel probe for the TUI footer
- * (pidfile- and config-based, mirrors the channel-managed session guards for
+ * (lock- and config-based, mirrors the channel-managed session guards for
  * the same liveness semantics).
  */
 
 import { loadLineConfig } from '#/line/config';
-import { readLineDaemonStatus } from '#/line/pidfile';
+import { readHostStatus } from '#/host/control';
 
 export type LinePlatform = 'lark' | 'wechat';
 
@@ -32,7 +32,7 @@ export async function readLinePlatform(): Promise<LinePlatform | null> {
 
 export async function checkLineDaemonActive(): Promise<boolean> {
   try {
-    const status = await readLineDaemonStatus();
+    const status = await readHostStatus();
     return status.running;
   } catch {
     return false;

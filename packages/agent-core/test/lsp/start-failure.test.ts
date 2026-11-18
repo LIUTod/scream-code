@@ -22,3 +22,16 @@ describe('lspStartFailureHint', () => {
     expect(lspStartFailureHint('')).toBeUndefined();
   });
 });
+
+describe('missing language servers', () => {
+  it('names the command that installs a known server', async () => {
+    const { lspMissingServerHint, lspStartFailureHint } = await import('../../src/lsp/start-failure');
+    expect(lspMissingServerHint('gopls')).toContain('go install golang.org/x/tools/gopls@latest');
+    expect(lspMissingServerHint('pyright-langserver')).toContain('npm i -g pyright');
+    expect(lspStartFailureHint('spawn rust-analyzer ENOENT', 'rust-analyzer')).toContain('rustup component add rust-analyzer');
+    expect(lspStartFailureHint("'gopls' is not recognized as an internal or external command", 'gopls')).toContain('go install');
+    expect(lspMissingServerHint('some-ls')).toContain('must be on PATH');
+    expect(lspStartFailureHint('crashed with code 1', 'gopls')).toBeUndefined();
+  });
+});
+

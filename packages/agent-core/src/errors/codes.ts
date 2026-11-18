@@ -32,6 +32,7 @@ export const ErrorCodes = {
   SESSION_APPROVAL_HANDLER_ERROR: 'session.approval_handler_error',
   SESSION_QUESTION_HANDLER_ERROR: 'session.question_handler_error',
   SESSION_INIT_FAILED: 'session.init_failed',
+  SESSION_IN_USE: 'session.in_use',
 
   AGENT_NOT_FOUND: 'agent.not_found',
   TURN_AGENT_BUSY: 'turn.agent_busy',
@@ -223,6 +224,12 @@ export const SCREAM_ERROR_INFO = {
     retryable: false,
     public: true,
     action: 'Inspect the SDK approval handler for an unhandled exception.',
+  },
+  'session.in_use': {
+    title: 'Session is open in another process',
+    retryable: true,
+    public: true,
+    action: 'Close it there (another terminal, or the background host), or take it over, then retry.',
   },
   'session.question_handler_error': {
     title: 'Question handler threw',

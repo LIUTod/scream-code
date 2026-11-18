@@ -19,7 +19,8 @@ import {
   type LineConfig,
   type WeixinPlatformConfig,
 } from '#/line/config';
-import { readLineDaemonStatus, startLineDaemonDetached, stopLineDaemon } from '#/line/pidfile';
+import { readHostStatus, startHostDetached, stopHost } from '#/host/control';
+import { offerServiceOnce } from './service';
 import { validateFeishuCredentials } from '#/line/feishu/client';
 import { validateWeixinToken } from '#/line/weixin/client';
 import { beginWeixinQRLogin, pollWeixinQRStatus, WeixinLoginError } from '#/line/weixin/qrcode';
@@ -41,7 +42,7 @@ export async function handleLineCommand(host: SlashCommandHost): Promise<void> {
     }
     throw error;
   }
-  const status = await readLineDaemonStatus();
+  const status = await readHostStatus();
   const stateLabel = status.running
     ? t('line.state_running', { pid: `${status.pid ?? '?'}` })
     : t('line.state_stopped');
@@ -395,10 +396,14 @@ function askStartNow(host: SlashCommandHost): void {
     colors: host.state.theme.colors,
     onSelect: (value) => {
       host.restoreEditor();
-      if (value === 'now') void doStart(host);
+      // A chat channel is the moment the resident service obviously helps:
+      // offer it once, after the start-now answer.
+      const started = value === 'now' ? doStart(host) : Promise.resolve();
+      void started.then(() => offerServiceOnce(host));
     },
     onCancel: () => {
       host.restoreEditor();
+      void offerServiceOnce(host);
     },
   });
   host.mountEditorReplacement(picker);
@@ -414,7 +419,7 @@ async function doStart(host: SlashCommandHost): Promise<void> {
   }
   host.showStatus(t('line.starting'));
   try {
-    const { pid, alreadyRunning } = await startLineDaemonDetached();
+    const { pid, alreadyRunning } = await startHostDetached();
     host.showStatus(alreadyRunning ? t('line.already_running', { pid: `${pid}` }) : t('line.started', { pid: `${pid}` }));
     host.setAppState({
       lineActive: true,
@@ -430,7 +435,7 @@ async function doStart(host: SlashCommandHost): Promise<void> {
 
 async function doStop(host: SlashCommandHost): Promise<void> {
   host.showStatus(t('line.stopping'));
-  const stopped = await stopLineDaemon();
+  const stopped = await stopHost();
   host.showStatus(stopped ? t('line.stopped') : t('line.not_running'));
   host.setAppState({ lineActive: false });
     // Stand the 30s poll down: a stale read must not flip the dot back on.
@@ -439,7 +444,7 @@ async function doStop(host: SlashCommandHost): Promise<void> {
 
 async function doRestart(host: SlashCommandHost): Promise<void> {
   host.showStatus(t('line.restarting'));
-  await stopLineDaemon();
+  await stopHost();
   await doStart(host);
 }
 
@@ -467,7 +472,7 @@ async function doUninstall(host: SlashCommandHost): Promise<void> {
   if (!confirmed) return;
 
   const spinner = host.showProgressSpinner(t('line.uninstalling'));
-  await stopLineDaemon().catch(() => {});
+  await stopHost().catch(() => {});
   try {
     await removeLineDir();
     spinner.stop({ ok: true, label: t('line.uninstalled') });

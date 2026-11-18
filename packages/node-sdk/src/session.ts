@@ -610,10 +610,13 @@ export class Session {
     });
   }
 
-  /** Fire-and-forget: extract memory memos on session exit. */
-  async extractMemoriesOnExit(): Promise<number> {
+  /**
+   * Extract memory memos on session exit. `pending`: nobody watched this
+   * session, so the memories wait in the inbox until the person saves them.
+   */
+  async extractMemoriesOnExit(options: { readonly pending?: boolean } = {}): Promise<number> {
     this.ensureOpen();
-    return this.rpc.extractMemoriesOnExit({ sessionId: this.id });
+    return this.rpc.extractMemoriesOnExit({ sessionId: this.id, ...(options.pending === true ? { pending: true } : {}) });
   }
 
   async sideQuestion(question: string): Promise<string> {
@@ -696,13 +699,32 @@ export class Session {
     return this.rpc.setGoalBudget({ sessionId: this.id, value, unit });
   }
 
-  async close(options: { extractMemories?: boolean } = {}): Promise<void> {
+  /**
+   * Mark this session's work for the background host, then close it here as
+   * usual: the host continues it once this process lets go of the session.
+   * Returns false when nothing was in flight to hand over.
+   */
+  /** Let one exact action (an inbox `actionKey`) through bot mode once: the person approved it. */
+  async grantOneShotApproval(actionKey: string): Promise<boolean> {
+    return this.rpc.grantOneShotApproval(this.id, actionKey);
+  }
+
+  async handOff(): Promise<{ handedOff: boolean; kind?: 'goal' | 'bot' | 'chat' | undefined }> {
+    return this.rpc.handOffSession(this.id);
+  }
+
+  /**
+   * Close the session. Memories are extracted first unless `extractMemories`
+   * is false; `unattended` (nobody watched: a background job, continued work)
+   * puts them in the inbox for the person to save instead of the store.
+   */
+  async close(options: { extractMemories?: boolean; unattended?: boolean } = {}): Promise<void> {
     if (this.closed) return;
     if (options.extractMemories !== false) {
       // NOTE: the 30s timer wins the race but extractMemoriesOnExit continues
       // in the background. There is no AbortSignal plumbing across RPC layers
       // to cancel an in-flight LLM extraction call. This is a known limitation.
-      const extract = this.extractMemoriesOnExit();
+      const extract = this.extractMemoriesOnExit({ pending: options.unattended === true });
       await Promise.race([
         extract.catch(() => {}),
         new Promise<void>((r) => setTimeout(r, 30_000)),

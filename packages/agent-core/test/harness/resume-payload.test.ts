@@ -91,6 +91,9 @@ describe('resume payload', () => {
     const { id: subagentId } = await live!.createAgent({ type: 'sub' });
     expect(subagentId).not.toBe('main');
     await live!.flushMetadata();
+    // One process holds a session at a time; the first closes it so the
+    // second can open it, as a real restart would.
+    await first.rpc.closeSession({ sessionId: created.id });
 
     const second = await createTestRpc();
     const resumed = await second.rpc.resumeSession({ sessionId: created.id });

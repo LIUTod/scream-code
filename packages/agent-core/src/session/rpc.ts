@@ -314,7 +314,7 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.getAgent(agentId).startScheduledTasks(payload);
   }
 
-  extractMemoriesOnExit({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+  extractMemoriesOnExit({ agentId, ...payload }: AgentScopedPayload<{ readonly pending?: boolean }>) {
     return this.getAgent(agentId).extractMemoriesOnExit(payload);
   }
 

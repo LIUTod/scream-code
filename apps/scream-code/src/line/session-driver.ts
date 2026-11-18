@@ -1,16 +1,15 @@
 /**
- * Line session driver — maps Feishu chats to scream agent sessions.
+ * Line session driver — maps Feishu and WeChat chats to scream agent sessions.
  *
- * Uses the same headless layer as `scream stream-json` (`ScreamHarness`),
- * including the create/resume/repair session lifecycle (ported from
- * `run-stream-json.ts` L659-726) and the approval-handler mapping. Turns are
+ * Runs on the SDK's headless layer (`ScreamHarness`), with its own
+ * create/resume/repair session lifecycle and approval-handler mapping. Turns are
  * serialized per session (one FIFO chain each) and run in parallel across
  * sessions; a bounded queue rejects new work with a friendly busy reply
  * instead of growing unbounded.
  */
 
 import { execFile } from 'node:child_process';
-import { readdir, realpath, rm, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -26,12 +25,14 @@ import {
   type ToolCallResponse,
 } from '@scream-code/scream-code-sdk';
 
-import { mapStreamJsonMode } from '#/cli/run-stream-json';
+import { quickInboxReply } from './background-commands';
 import { buildChannelPrompt } from './channel-prompt';
-import type { LineCustomCommand } from './config';
+import { enginePermissionFor } from './permission-mode';
+import { getLineDir, type LineCustomCommand } from './config';
 import type { LineImageAttachment } from './media';
 import { isLineCommand, runLineCommand, type LineCommandResult } from './command-router';
 import { createScreamCodeHostIdentity } from '#/cli/version';
+import { readHostStatus } from '#/host/control';
 import { describeVoiceSupport, probeVoiceSupport, type VoiceSupport } from './voice-support';
 import { buildCronFailureNotice, buildCronReminderChip } from '../tui/utils/cron-chip';
 import type { ProactiveDelivery } from './proactive';
@@ -127,6 +128,12 @@ export interface LineSessionDriverOptions {
    * bounded by policy rather than by a hardcoded 15 minutes.
    */
   turnTimeoutMs?: number;
+  /**
+   * The harness to run sessions on. The host passes its own, so the channel
+   * and the work it continues share one engine; its `onToolCall` must route
+   * to {@link LineSessionDriver.handleHostToolCall}.
+   */
+  harness?: ScreamHarness;
 }
 
 interface SessionQueue {
@@ -134,7 +141,7 @@ interface SessionQueue {
   pending: number;
 }
 
-type MappedMode = ReturnType<typeof mapStreamJsonMode>;
+type MappedMode = { readonly permission: ReturnType<typeof enginePermissionFor>; readonly planMode: boolean };
 
 export class LineSessionDriver {
   private harness: ScreamHarness | undefined;
@@ -183,20 +190,31 @@ export class LineSessionDriver {
   /** Wall-clock cap for one turn; see `turnDeadline`. */
   private readonly turnTimeoutMs: number;
   private closed = false;
+  /** Per-chat project folders chosen with `/project` (sessionKey → workDir). */
+  private projects: Record<string, string> = {};
+  /** The chat the person last wrote from: where news from other sessions goes. */
+  private lastChat: string | undefined;
+  /** Set by the host: an inbox item was just answered from a chat. */
+  onInboxDecided: (() => void) | undefined;
 
   constructor(private readonly options: LineSessionDriverOptions) {
     this.turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
   }
 
   async init(): Promise<void> {
-    const harness = new ScreamHarness({
-      homeDir: resolveScreamHome(),
-      identity: createScreamCodeHostIdentity(),
-      uiMode: 'print',
-      // Host tool calls (the `line_send_media` bridge) are answered here.
-      onToolCall: (request) => this.handleHostToolCall(request),
-    });
+    // The host shares its harness (one engine per process); a driver built
+    // on its own makes one, answering the `line_send_media` bridge here.
+    const harness =
+      this.options.harness ??
+      new ScreamHarness({
+        homeDir: resolveScreamHome(),
+        identity: createScreamCodeHostIdentity(),
+        uiMode: 'print',
+        onToolCall: (request) => this.handleHostToolCall(request),
+      });
     await harness.ensureConfigFile();
+    this.projects = await loadProjects();
+    this.lastChat = await loadLastChat();
     const config = await harness.getConfig();
     this.defaultModel = config.defaultModel ?? '';
     this.harness = harness;
@@ -311,6 +329,10 @@ export class LineSessionDriver {
    * resolves with the turn outcome (final text or a friendly error).
    */
   async submit(job: LineTurnJob): Promise<TurnOutcome> {
+    if (this.lastChat !== job.sessionKey) {
+      this.lastChat = job.sessionKey;
+      void saveLastChat(job.sessionKey).catch(() => {});
+    }
     if (this.closed) {
       return { ok: false, text: 'line 守护进程正在关闭，请稍后再试。' };
     }
@@ -333,6 +355,14 @@ export class LineSessionDriver {
         effectiveJob = { ...job, text: result.prompt };
       } else if (result.handled) {
         return { ok: true, text: result.text };
+      }
+    }
+    // "同意" / "拒绝" answers what was pushed to the chat (see quickInboxReply).
+    if (!hasAttachments && effectiveJob === job) {
+      const quick = quickInboxReply(resolveScreamHome(), job.sessionKey, job.text);
+      if (quick !== undefined) {
+        this.onInboxDecided?.();
+        return { ok: true, text: quick };
       }
     }
     const queue = this.queues.get(effectiveJob.sessionKey) ?? { chain: Promise.resolve(), pending: 0 };
@@ -467,6 +497,56 @@ export class LineSessionDriver {
     return opened;
   }
 
+  /**
+   * Continue a chat session whose turn was cut off (the host restarted after
+   * a crash or a shutdown): run `text` as a turn and send the result to the
+   * chat, since no inbound message is waiting for a reply.
+   */
+  async continueInterrupted(sessionKey: string, text: string): Promise<void> {
+    const outcome = await this.submit({ sessionKey, text });
+    if (outcome.silent === true || outcome.text.trim() === '') return;
+    const delivery = await this.proactiveSender?.(sessionKey, outcome.text);
+    if (delivery !== undefined && delivery !== 'sent') {
+      log.warn('line: could not deliver a continued turn to its chat', { sessionKey, delivery });
+    }
+  }
+
+  /** The chat the person last wrote from, if any. */
+  ownerChat(): string | undefined {
+    return this.lastChat;
+  }
+
+  /**
+   * Deliver an inbox decision to a chat session: let the approved action
+   * through once, run `text` as a turn and send the result to the chat.
+   */
+  async deliverDecision(sessionKey: string, text: string, actionKey?: string): Promise<void> {
+    if (actionKey !== undefined) {
+      const session = await this.resolveSession(sessionKey);
+      await session.grantOneShotApproval(actionKey);
+    }
+    await this.continueInterrupted(sessionKey, text);
+  }
+
+  /** Send `text` to a chat with no inbound message to reply to (a background task's result). */
+  async sendToChat(sessionKey: string, text: string): Promise<void> {
+    const delivery = await this.proactiveSender?.(sessionKey, text);
+    if (delivery !== undefined && delivery !== 'sent') {
+      log.warn('line: could not deliver to a chat', { sessionKey, delivery });
+    }
+  }
+
+  /**
+   * Host shutdown: mark the chat sessions with a turn in flight as handed
+   * over, so their running-work records survive the close and the next host
+   * continues them.
+   */
+  async handOffActive(): Promise<void> {
+    for (const sessionKey of this.activeTurns.keys()) {
+      await this.sessions.get(sessionKey)?.handOff().catch(() => {});
+    }
+  }
+
   /** Close all sessions and the harness (daemon shutdown). */
   async close(): Promise<void> {
     this.closed = true;
@@ -487,7 +567,7 @@ export class LineSessionDriver {
     this.harness = undefined;
   }
 
-  // ─── Turn execution (port of run-stream-json event collection) ──────────
+  // ─── Turn execution ─────────────────────────────────────────────────────
 
   private async runTurn(job: LineTurnJob): Promise<TurnOutcome> {
     const harness = this.harness;
@@ -553,7 +633,7 @@ export class LineSessionDriver {
     }
 
     // Orphaned tool calls in history — reset the session so the next message
-    // starts fresh (port of the run-stream-json reset path).
+    // starts fresh.
     if (promptError !== undefined && isOrphanedToolCallError(promptError)) {
       log.warn('line: resetting session after tool call mismatch', {
         sessionKey: job.sessionKey,
@@ -807,7 +887,49 @@ export class LineSessionDriver {
       resetSession: () => this.resetSession(sessionKey),
       commands: this.options.commands ?? [],
       runExec: (command, arg) => this.runCustomExec(command, arg),
+      background: {
+        screamHomeDir: resolveScreamHome(),
+        sessionKey,
+        workDir: () => this.workDirFor(sessionKey),
+        hostRunning: async () => (await readHostStatus()).running,
+        recentProjects: () => this.recentProjects(),
+        switchProject: (workDir) => this.switchProject(sessionKey, workDir),
+        onInboxDecided: () => this.onInboxDecided?.(),
+      },
     });
+  }
+
+  /** The folder this chat works in: its `/project` choice, else the channel's workDir. */
+  private workDirFor(sessionKey: string): string {
+    return this.projects[sessionKey] ?? this.options.workDir ?? process.cwd();
+  }
+
+  /** Recent project folders of the person's own sessions (not chats, not task runs), newest first. */
+  private async recentProjects(): Promise<readonly string[]> {
+    const harness = this.harness;
+    if (harness === undefined) return [];
+    const sessions = await harness.listSessions({});
+    const seen = new Set<string>();
+    const dirs: string[] = [];
+    for (const summary of [...sessions].toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))) {
+      const source = (summary.metadata as { source?: unknown } | undefined)?.source;
+      if (source === 'line' || source === 'job') continue;
+      if (seen.has(summary.workDir)) continue;
+      seen.add(summary.workDir);
+      dirs.push(summary.workDir);
+      if (dirs.length >= 9) break;
+    }
+    return dirs;
+  }
+
+  /** `/project <dir>`: remember the folder for this chat and start a fresh session there. */
+  private async switchProject(sessionKey: string, workDir: string): Promise<void> {
+    if (!isAbsolute(workDir)) throw new Error(`需要绝对路径：${workDir}`);
+    const resolved = await realpath(workDir).catch(() => undefined);
+    if (resolved === undefined || !(await stat(resolved)).isDirectory()) throw new Error(`不是一个存在的文件夹：${workDir}`);
+    this.projects = { ...this.projects, [sessionKey]: resolved };
+    await saveProjects(this.projects);
+    await this.resetSession(sessionKey);
   }
 
   /**
@@ -870,9 +992,9 @@ export class LineSessionDriver {
   ): Promise<Session> {
     const harness = this.harness;
     if (!harness) throw new Error('LineSessionDriver 未初始化');
-    const workDir = this.options.workDir ?? process.cwd();
-    const { permission, planMode } = mapStreamJsonMode(this.options.permissionMode);
-    const session = await this.getOrCreateSession(harness, sessionKey, workDir, permission, planMode, options);
+    const workDir = this.workDirFor(sessionKey);
+    const permission = enginePermissionFor(this.options.permissionMode);
+    const session = await this.getOrCreateSession(harness, sessionKey, workDir, permission, false, options);
     this.sessions.set(sessionKey, session);
     this.sessionKeyBySessionId.set(session.id, sessionKey);
     this.attachCronForwarder(sessionKey, session);
@@ -996,7 +1118,8 @@ export class LineSessionDriver {
   }
 
   /** Host tool dispatch for `line_send_media`. */
-  private async handleHostToolCall(request: ToolCallRequest): Promise<ToolCallResponse> {
+  /** Answers the channel's host tools (`line_send_media`) for this driver's sessions. */
+  async handleHostToolCall(request: ToolCallRequest): Promise<ToolCallResponse> {
     const toolName = request.name ?? '';
     if (toolName !== LINE_SEND_MEDIA_TOOL) {
       return { output: `未知的宿主工具：${toolName}`, isError: true };
@@ -1058,7 +1181,7 @@ export class LineSessionDriver {
     return { kind: toSenderKind(explicitKind) ?? inferMediaKind(real), path: real };
   }
 
-  // ─── Session lifecycle (port of run-stream-json repair path) ────────────
+  // ─── Session lifecycle (create, resume, repair) ─────────────────────────
 
   private async getOrCreateSession(
     harness: ScreamHarness,
@@ -1088,7 +1211,7 @@ export class LineSessionDriver {
         if (!repair) throw error;
         // Inconsistent state: directory without index entry, or a stale index
         // entry pointing to a missing directory. Clean up BOTH before
-        // createSession (port of run-stream-json L676-712).
+        // createSession.
         log.warn('line: resume failed, repairing session', { sessionKey, error: String(error) });
         await harness.deleteSession(sessionKey).catch(() => {});
         const orphanDir = existing[0]?.sessionDir;
@@ -1157,7 +1280,7 @@ export class LineSessionDriver {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-/** Map provider error codes to friendly chat text (port of stream-json codes). */
+/** Map provider error codes to friendly chat text. */
 export function friendlyProviderError(code: string, message: string): string {
   if (
     code === 'provider.auth_error' ||
@@ -1255,4 +1378,44 @@ async function hasScheduledTasks(sessionDir: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function projectsFile(): string {
+  return join(getLineDir(), 'projects.json');
+}
+
+async function loadProjects(): Promise<Record<string, string>> {
+  try {
+    const parsed = JSON.parse(await readFile(projectsFile(), 'utf8')) as unknown;
+    if (parsed === null || typeof parsed !== 'object') return {};
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string') out[key] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+async function saveProjects(projects: Record<string, string>): Promise<void> {
+  await writeFile(projectsFile(), `${JSON.stringify(projects, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+}
+
+function lastChatFile(): string {
+  return join(getLineDir(), 'last-chat.json');
+}
+
+/** The chat the person last wrote from (kept across restarts), if any. */
+export async function loadLastChat(): Promise<string | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(lastChatFile(), 'utf8')) as { sessionKey?: unknown };
+    return typeof parsed.sessionKey === 'string' ? parsed.sessionKey : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function saveLastChat(sessionKey: string): Promise<void> {
+  await writeFile(lastChatFile(), `${JSON.stringify({ sessionKey })}\n`, { encoding: 'utf8', mode: 0o600 });
 }

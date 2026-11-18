@@ -4,6 +4,15 @@ import { isPathInside } from '#/utils/path-safety';
 
 import type { Agent } from '../..';
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import {
+  actionKey,
+  addApprovalItem,
+  alwaysActionKey,
+  addQuestionItem,
+  readApprovedActions,
+  readSessionApprovedActions,
+} from '../../../session/inbox';
+import { JobStore } from '../../../jobs/store';
 import { assessPrivateReadEgress } from './private-read-egress-ask';
 
 /**
@@ -49,6 +58,13 @@ const REVERSIBLE_TOOLS = new Set([
   'CronCreate',
   'CronList',
   'CronDelete',
+  // Background tasks, for the same reason: standing work that must go on
+  // without the person. What a task the agent makes may do is bounded by the
+  // store (repeats at most every 15 minutes, at most 20 on, switched off after
+  // 10 failed runs), and every run is bot mode again. Deleting is judged in
+  // `decide`: only a task the agent made goes without the person.
+  'JobCreate',
+  'JobList',
   'TaskList',
   'TaskOutput',
   'ContactParent',
@@ -173,8 +189,84 @@ export class BotModePermissionPolicy implements PermissionPolicy {
     return true;
   }
 
+  /**
+   * Bot mode's decision, plus the inbox: an exact action the person approved
+   * (once, or always) goes through; a refusal of the main agent is also put in
+   * the "waiting for you" inbox — an action for approval, a question for an
+   * answer — and the model is told so, and to carry on with the rest.
+   */
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     if (this.agent.permission.mode !== 'bot') return;
+    const tool = context.toolCall.name;
+    const home = this.agent.screamHomeDir;
+    const result = this.decide(context);
+    // What the person approved only matters for an action bot mode would
+    // refuse, so the approval files are read for refusals alone, not on the
+    // many calls that pass anyway.
+    if (result?.kind !== 'deny') return result;
+    const key = actionKey(tool, context.args);
+    if (tool !== 'AskUserQuestion' && this.approvedByPerson(key, tool, context.args, home)) {
+      return { kind: 'approve', reason: { reason: 'bot: approved by the person' } };
+    }
+    const sessionId = this.agent.sessionId;
+    if (home === undefined || sessionId === undefined || this.agent.type !== 'main') {
+      return result;
+    }
+    const workDir = this.agent.config?.cwd ?? '.';
+    try {
+      if (tool === 'AskUserQuestion') {
+        const questions = (context.args as { questions?: { question?: unknown; options?: { label?: unknown }[] }[] } | undefined)
+          ?.questions;
+        const text = (value: unknown): string => (typeof value === 'string' ? value : '');
+        const item = addQuestionItem(home, {
+          sessionId,
+          workDir,
+          items: (questions ?? []).map((q) => ({
+            question: text(q.question),
+            options: (q.options ?? []).map((o) => text(o.label)),
+          })),
+        });
+        return {
+          ...result,
+          message:
+            `Nobody is here to answer right now, so your question was sent to the person (inbox ${item.id}). ` +
+            'Do not wait for it: decide what you safely can, carry on with the rest, and list what depends on the answer. ' +
+            'Their answer arrives later as a message in this session.',
+        };
+      }
+      const item = addApprovalItem(home, {
+        sessionId,
+        workDir,
+        tool,
+        action: describeAction(tool, context.args),
+        key,
+        alwaysKey: alwaysActionKey(tool, context.args),
+        reason: String(result.reason?.['reason'] ?? 'bot mode'),
+      });
+      return {
+        ...result,
+        message:
+          `Refused in bot mode (${String(result.reason?.['reason'] ?? 'not reversible')}). It is waiting for the person's approval (inbox ${item.id}). ` +
+          'Do not retry it now and do not work around it: carry on with the rest of the work and list it in your final report. ' +
+          'If they approve, you will be asked to do exactly this again, and it will be allowed once.',
+      };
+    } catch {
+      // The inbox is a convenience; a refusal must never fail over it.
+      return result;
+    }
+  }
+
+  /** Approved once (in memory), always (exact or general key), or for this session. */
+  private approvedByPerson(key: string, tool: string, args: unknown, home: string | undefined): boolean {
+    if (this.agent.permission.consumeOneShotApproval(key)) return true;
+    if (home === undefined) return false;
+    const always = readApprovedActions(home);
+    if (always.has(key) || always.has(alwaysActionKey(tool, args))) return true;
+    const sessionId = this.agent.sessionId;
+    return sessionId !== undefined && readSessionApprovedActions(home, sessionId).has(key);
+  }
+
+  private decide(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     const tool = context.toolCall.name;
     if (tool === 'Bash') {
       const command = (context.args as { command?: string } | undefined)?.command ?? '';
@@ -202,6 +294,19 @@ export class BotModePermissionPolicy implements PermissionPolicy {
         };
       }
       return { kind: 'approve', reason: { reason: 'bot: in-workspace reversible edit' } };
+    }
+    if (tool === 'JobDelete') {
+      // A task the agent made may go again unattended; one the person set up
+      // in /jobs is theirs, and its runs and notes cannot be brought back, so
+      // deleting it waits for their approval (refused here, so it lands in
+      // the inbox like any other refusal).
+      const id = (context.args as { id?: unknown } | undefined)?.id;
+      const home = this.agent.screamHomeDir;
+      const job = typeof id === 'string' && home !== undefined ? new JobStore(home).get(id) : undefined;
+      if (job === undefined || job.createdBy === 'agent') {
+        return { kind: 'approve', reason: { reason: 'bot: deleting a task the agent made' } };
+      }
+      return { kind: 'deny', reason: { reason: 'bot: deleting a task the person set up needs their approval' } };
     }
     if (tool === 'AskUserQuestion') {
       // Nobody is there to answer: a question would hold the run until someone
@@ -231,4 +336,13 @@ export class BotModePermissionPolicy implements PermissionPolicy {
     }
     return { kind: 'deny', reason: { reason: `bot: tool '${tool}' not in the reversible allowlist` } };
   }
+}
+
+/** One line saying what the action is, for the person reading the inbox. */
+function describeAction(tool: string, args: unknown): string {
+  const record = (args ?? {}) as Record<string, unknown>;
+  if (tool === 'Bash' && typeof record['command'] === 'string') return record['command'];
+  if ((tool === 'Write' || tool === 'Edit') && typeof record['path'] === 'string') return `${tool} ${record['path']}`;
+  const json = JSON.stringify(args) ?? '';
+  return `${tool} ${json.length > 300 ? `${json.slice(0, 300)}…` : json}`;
 }

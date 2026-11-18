@@ -1,0 +1,1 @@
+Delete a background task by the id `JobCreate` or `JobList` gave (`job-` and 8 hex characters). Its past runs stay listed nowhere afterwards. Deleting is the way to stop a task for good; a task switched off by repeated failures can be turned back on by the person in `/jobs`.

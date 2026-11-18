@@ -259,7 +259,7 @@ describe('CLI options parsing', () => {
       const commandNames: string[] = program.commands
         .filter((command) => !command.name().startsWith('__'))
         .map((command) => command.name());
-      expect(commandNames).toEqual(['export', 'stream-json', 'line']);
+      expect(commandNames).toEqual(['export', 'report', 'line', 'host', 'service']);
     });
   });
 

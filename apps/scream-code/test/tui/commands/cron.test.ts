@@ -344,11 +344,11 @@ describe('/cron add wizard', () => {
 });
 
 describe('/cron guards', () => {
-  it('is registered so it shows up in the command palette', () => {
+  it('is reached as /jobs, with /cron and /crontab as its other names', () => {
     expect(findBuiltInSlashCommand('cron')).toMatchObject({
-      name: 'cron',
-      aliases: ['crontab'],
-      description: 'registry.cron_desc',
+      name: 'jobs',
+      aliases: ['cron', 'crontab'],
+      description: 'registry.jobs_desc',
     });
   });
 

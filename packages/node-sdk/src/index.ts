@@ -57,9 +57,9 @@ export { resolveMcpJsonPaths } from '@scream-code/agent-core';
 // predicate is exported here instead of being reimplemented in the TUI.
 export { REPLAY_TURN_LIMIT, isRealUserPrompt } from '@scream-code/agent-core';
 
-// RLM recursion-cap grammar shared with the core setter and the web REST
-// route: the TUI `/rlm-max-depth` command validates through the same helpers
-// so the command surfaces cannot drift apart.
+// RLM recursion-cap grammar shared with the core setter: the TUI
+// `/rlm-max-depth` command validates through the same helpers so the two
+// cannot drift apart.
 export { normalizeRlmMaxDepth, parseRlmMaxDepthArg } from '@scream-code/agent-core';
 export type { RlmMaxDepthParseResult } from '@scream-code/agent-core';
 
@@ -104,6 +104,57 @@ export {
   normalizeWorkDir,
   readSessionIndex,
   removeSessionIndexEntry,
+} from '@scream-code/agent-core';
+
+// Process locks: one live process per name (the resident host, a session),
+// held by a listening socket for exactly the holder's lifetime.
+export {
+  acquireProcessLock,
+  queryProcessLock,
+  readOrCreateControlToken,
+  requestProcessLock,
+  requestSessionHandover,
+  sessionLockHolder,
+  sessionLockScope,
+} from '@scream-code/agent-core';
+// The running-work register: sessions with a turn in flight, which the
+// background host continues after an interruption or a handoff.
+export { listRunningWork, readRunningWork, removeRunningWork } from '@scream-code/agent-core';
+export type { RunningWorkKind, RunningWorkRecord } from '@scream-code/agent-core';
+// Background tasks (jobs): standing instructions the background host runs.
+export {
+  JOB_FATIGUE_LIMIT,
+  JOB_RUNS_KEPT,
+  JobError,
+  JobStore,
+  MAX_ENABLED_JOBS,
+} from '@scream-code/agent-core';
+export type { Job, JobDoes, JobRun, JobStarts, JobUntil, NewJob } from '@scream-code/agent-core';
+// The "waiting for you" inbox: what unattended work could not decide alone.
+export {
+  decideInboxItem,
+  listInbox,
+  patchInboxItem,
+  readInboxItem,
+  saveInboxMemories,
+} from '@scream-code/agent-core';
+export type { InboxDecision, InboxItem } from '@scream-code/agent-core';
+// Self-evolution: the change history of skills and memories, and tool friction.
+export {
+  collectFriction,
+  evolutionDir,
+  listEvolution,
+  renderFrictionBlock,
+  rollbackEvolution,
+  showEvolutionChange,
+  snapshotEvolution,
+} from '@scream-code/agent-core';
+export type { EvolutionChange, EvolutionResult, FrictionReport, ToolFriction } from '@scream-code/agent-core';
+export type {
+  BusyProcessLock,
+  HeldProcessLock,
+  ProcessLockIdentity,
+  ProcessLockRequest,
 } from '@scream-code/agent-core';
 
 export * from '#/events';

@@ -1,43 +1,76 @@
 /**
- * `scream line [run|start|stop|status]` — CLI control surface for the line
- * daemon. The daemon itself is `runLineDaemon()`; start/stop/status operate
- * on the pidfile (`src/line/pidfile.ts`). The `/line` TUI command calls the
+ * `scream host [run|start|stop|status]` and its older name `scream line` — CLI
+ * control surface for the background host (`src/host/run.ts`), which also
+ * serves the chat channel. start/stop/status go through its process lock
+ * (`src/host/control.ts`). The `/line` TUI command calls the
  * same functions directly (no subprocess), this module exists for scripted
  * and terminal use.
  */
 
 import { LineConfigError, getLineConfigPath, loadLineConfig } from '#/line/config';
 import { t } from '@scream-code/config';
-import { runLineDaemon } from '#/line/daemon';
-import { readLineDaemonStatus, startLineDaemonDetached, stopLineDaemon } from '#/line/pidfile';
+import { runHost } from '#/host/run';
+import { getHostLogFile, readHostStatus, startHostDetached, stopHost } from '#/host/control';
+import { pauseAllBackgroundWork } from '#/host/pause-all';
+import { readServiceStatus, restartService } from '#/host/service';
 
-export type LineAction = 'run' | 'start' | 'stop' | 'status';
+export type LineAction = 'run' | 'start' | 'stop' | 'status' | 'restart' | 'pause';
 
 function out(message: string): void {
   process.stdout.write(`${message}\n`);
 }
 
-export async function runLineCommand(action: LineAction): Promise<void> {
+/**
+ * `surface` is the command it was typed as: `line` (start requires a
+ * configured channel, as it always did) or `host` (the host runs without one,
+ * continuing interrupted work).
+ */
+export async function runLineCommand(action: LineAction, surface: 'line' | 'host' = 'line'): Promise<void> {
   switch (action) {
     case 'run':
-      await runLineDaemon();
+      await runHost();
       return;
     case 'start': {
-      const config = await loadLineConfig();
-      if (!config?.feishu && !config?.weixin) {
-        out(t('cli.line.not_configured'));
-        return;
+      if (surface === 'line') {
+        const config = await loadLineConfig();
+        if (!config?.feishu && !config?.weixin) {
+          out(t('cli.line.not_configured'));
+          return;
+        }
       }
-      const { pid, alreadyRunning } = await startLineDaemonDetached();
+      const { pid, alreadyRunning } = await startHostDetached();
       out(
         alreadyRunning
           ? t('cli.line.already_running', { pid: String(pid) })
-          : t('cli.line.started', { pid: String(pid) }),
+          : t('cli.line.started', { pid: String(pid), log: getHostLogFile() }),
       );
       return;
     }
+    case 'pause': {
+      const result = await pauseAllBackgroundWork();
+      out(t('jobs.paused_all', { count: String(result.paused) }));
+      return;
+    }
+    case 'restart': {
+      // A service-managed host is restarted by its service manager, so it
+      // stays under it; otherwise stop the running host and start a new one.
+      if ((await readServiceStatus()).installed) {
+        const result = await restartService();
+        out(result.ok ? t('service.restarted') : t('service.failed', { error: result.error ?? '' }));
+        if (!result.ok) process.exitCode = 1;
+        return;
+      }
+      await stopHost();
+      const { pid } = await startHostDetached();
+      out(t('cli.line.started', { pid: String(pid), log: getHostLogFile() }));
+      return;
+    }
     case 'stop': {
-      const stopped = await stopLineDaemon();
+      const stopped = await stopHost({
+        onWaiting: () => {
+          out(t('cli.line.stopping'));
+        },
+      });
       out(stopped ? t('cli.line.stopped') : t('cli.line.not_running'));
       return;
     }
@@ -60,7 +93,7 @@ export async function runLineCommand(action: LineAction): Promise<void> {
         }
         throw error;
       }
-      const status = await readLineDaemonStatus();
+      const status = await readHostStatus();
       const state = status.running
         ? t('cli.line.state_running', { pid: String(status.pid) })
         : t('cli.line.state_stopped');

@@ -16,13 +16,13 @@ import {
 } from '@scream-code/scream-code-sdk';
 
 import { createProgram } from './cli/commands';
+import { runServiceCommand } from './cli/service-command';
 
 import type { CLIOptions } from './cli/options';
 import { OptionConflictError, validateOptions } from './cli/options';
 import { runLineCommand } from './cli/line-command';
 import { PROMPT_TIMEOUT_EXIT_CODE, PromptTimeoutError, runPrompt } from './cli/run-prompt';
 import { runShell } from './cli/run-shell';
-import { runStreamJson } from './cli/run-stream-json';
 import { formatStartupError } from './cli/startup-error';
 import { runPluginNodeEntry } from './cli/sub/plugin-run-node';
 import { getVersion } from './cli/version';
@@ -92,16 +92,16 @@ export function main(): void {
         process.exit(1);
       });
     },
-    (opts) => {
-      void runStreamJson(opts).catch(async (error: unknown) => {
-        await logStartupFailure('run stream-json', error);
+    (action, surface) => {
+      void runLineCommand(action, surface).catch(async (error: unknown) => {
+        await logStartupFailure('run line command', error);
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
         process.exit(1);
       });
     },
     (action) => {
-      void runLineCommand(action).catch(async (error: unknown) => {
-        await logStartupFailure('run line command', error);
+      void runServiceCommand(action).catch(async (error: unknown) => {
+        await logStartupFailure('run service command', error);
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
         process.exit(1);
       });

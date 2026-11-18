@@ -289,9 +289,9 @@ describe('LifecycleController', () => {
       (host.state as unknown as { ui: typeof ui }).ui = ui;
       const controller = new LifecycleController(host);
       const internals = controller as unknown as {
-        readSidebarGit: (workDir: string) => unknown;
+        readGitStatus: (workDir: string) => unknown;
       };
-      const readSpy = vi.spyOn(internals, 'readSidebarGit').mockReturnValue({
+      const readSpy = vi.spyOn(internals, 'readGitStatus').mockReturnValue({
         workDir: '/repo',
         diffAdded: 7,
         diffDeleted: 2,
@@ -322,9 +322,9 @@ describe('LifecycleController', () => {
       (host.state as unknown as { ui: typeof ui }).ui = ui;
       const controller = new LifecycleController(host);
       const internals = controller as unknown as {
-        readSidebarGit: (workDir: string) => unknown;
+        readGitStatus: (workDir: string) => unknown;
       };
-      const readSpy = vi.spyOn(internals, 'readSidebarGit').mockReturnValue(undefined);
+      const readSpy = vi.spyOn(internals, 'readGitStatus').mockReturnValue(undefined);
 
       for (let i = 0; i < 30; i += 1) {
         expect(controller.getGitDiffStats('/not-a-repo')).toBeNull();

@@ -29,6 +29,7 @@ import type { McpConnectionManager } from '../mcp';
 import { systemPromptForRequest } from '../profile';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { LspProcessSupervisor } from '../lsp/process-supervisor';
+import { addMemoryItem } from '../session/inbox';
 import { normalizeRlmMaxDepth } from '../session/rlm-settings';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
@@ -1264,8 +1265,8 @@ export class Agent {
       },
       removeCronTasks: (payload) => this.requireCron().removeTasks(payload.ids),
       startScheduledTasks: () => this.requireCron().enableFiring(),
-      extractMemoriesOnExit: async () => {
-        return this.extractMemoriesOnExit();
+      extractMemoriesOnExit: async (payload) => {
+        return this.extractMemoriesOnExit({ pending: payload.pending === true });
       },
       sideQuestion: async (payload) => {
         const answer = await this.sideQuestion(payload.question);
@@ -1356,7 +1357,13 @@ export class Agent {
   }
 
   /** Extract memory memos from the full conversation history on session exit. */
-  async extractMemoriesOnExit(): Promise<number> {
+  /**
+   * Extract what the session learned. `pending` (an unattended session: a
+   * background job, continued work) puts the memories in the "waiting for
+   * you" inbox instead of the store, so nothing learned without the person
+   * reaches later sessions until they save it.
+   */
+  async extractMemoriesOnExit(options: { readonly pending?: boolean } = {}): Promise<number> {
     if (!this.memoStore) return 0;
     await this.memoStore.init();
 
@@ -1405,16 +1412,19 @@ export class Agent {
       const memos = parseMemoryMemos(summary);
       if (memos.length === 0) return 0;
 
+      for (const memo of memos) {
+        memo.sourceSessionId = sessionId;
+        memo.sourceSessionTitle = sessionTitle ?? '';
+        memo.extractionSource = 'exit';
+        memo.projectDir = this.config.cwd;
+      }
+      if (options.pending === true && this.screamHomeDir !== undefined) {
+        addMemoryItem(this.screamHomeDir, { sessionId, workDir: this.config.cwd, memories: memos });
+        this.log.info('Unattended session memories wait for confirmation', { count: memos.length, sessionId });
+        return memos.length;
+      }
       const store = this.memoStore;
-      const results = await Promise.allSettled(
-        memos.map((memo) => {
-          memo.sourceSessionId = sessionId;
-          memo.sourceSessionTitle = sessionTitle ?? '';
-          memo.extractionSource = 'exit';
-          memo.projectDir = this.config.cwd;
-          return store.append(memo);
-        }),
-      );
+      const results = await Promise.allSettled(memos.map((memo) => store.append(memo)));
       const failed = results.filter((r) => r.status === 'rejected').length;
       if (failed > 0) {
         this.log.warn('Some memory memos failed to store from exit extraction', {

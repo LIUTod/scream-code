@@ -1,29 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapStreamJsonMode } from '#/cli/run-stream-json';
+import { enginePermissionFor } from '#/line/permission-mode';
 import { friendlyProviderError } from '#/line/session-driver';
 
-describe('permission mapping (reuse of run-stream-json mapStreamJsonMode)', () => {
-  it('maps yolo/bypassPermissions to permission yolo', () => {
-    expect(mapStreamJsonMode('yolo')).toEqual({ permission: 'yolo', planMode: false });
-    expect(mapStreamJsonMode('bypassPermissions')).toEqual({ permission: 'yolo', planMode: false });
+describe('enginePermissionFor (line config permissionMode)', () => {
+  it('maps yolo to yolo and dontAsk to bot', () => {
+    expect(enginePermissionFor('yolo')).toBe('yolo');
+    expect(enginePermissionFor('dontAsk')).toBe('bot');
   });
 
-  it('maps dontAsk to bot (irreversible calls deny and park)', () => {
-    expect(mapStreamJsonMode('dontAsk')).toEqual({ permission: 'bot', planMode: false });
-  });
-
-  it('maps auto to permission auto (channel parity)', () => {
-    expect(mapStreamJsonMode('auto')).toEqual({ permission: 'auto', planMode: false });
-  });
-
-  it('maps unknown values to auto (fail-open default parity)', () => {
-    expect(mapStreamJsonMode(undefined)).toEqual({ permission: 'auto', planMode: false });
-    expect(mapStreamJsonMode('nonsense')).toEqual({ permission: 'auto', planMode: false });
-  });
-
-  it('maps plan to plan mode under yolo so the review still reaches the handler', () => {
-    expect(mapStreamJsonMode('plan')).toEqual({ permission: 'yolo', planMode: true });
+  it('maps auto, a missing value and an unknown value to auto', () => {
+    expect(enginePermissionFor('auto')).toBe('auto');
+    expect(enginePermissionFor(undefined)).toBe('auto');
+    expect(enginePermissionFor('nonsense')).toBe('auto');
   });
 });
 

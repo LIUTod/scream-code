@@ -125,8 +125,7 @@
         "**/*.spec.ts",
         "**/*.spec.tsx",
         "**/test/**/*.ts",
-        "**/test/**/*.tsx",
-        "apps/scream-code/src/cli/run-stream-json.ts"
+        "**/test/**/*.tsx"
       ],
       "plugins": ["vitest"],
       "rules": {
@@ -160,8 +159,7 @@
         "**/*.spec.ts",
         "**/*.spec.tsx",
         "**/test/**/*.ts",
-        "**/test/**/*.tsx",
-        "apps/scream-code/src/cli/run-stream-json.ts"
+        "**/test/**/*.tsx"
       ],
       "plugins": ["vitest"],
       "rules": {

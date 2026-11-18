@@ -9,6 +9,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 
 import { t } from '@scream-code/config';
 import { killProcessTree } from '@scream-code/jian';
+
+import { restartHostInBackground } from '#/host/control';
 import { installLatestArgs } from '#/cli/update/prefix';
 import { readUpdateCache } from '#/cli/update/cache';
 import { refreshUpdateCache } from '#/cli/update/refresh';
@@ -196,4 +198,6 @@ export async function handleUpdateCommand(host: SlashCommandHost): Promise<void>
     host.state.theme.colors.success,
   );
   host.setAppState({ hasNewVersion: false, latestVersion: null });
+  // The background host still runs the old version: restart it.
+  await restartHostInBackground().catch(() => false);
 }

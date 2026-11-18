@@ -5,33 +5,24 @@ import { CLI_COMMAND_NAME } from '#/constant/app';
 
 import type { CLIOptions } from './options';
 import { registerExportCommand } from './sub/export';
+import { registerReportCommand } from './sub/report';
 import { parseDurationMs } from './duration';
 
 export type MainCommandHandler = (opts: CLIOptions) => void;
+export type ServiceCommandHandler = (action: 'install' | 'uninstall' | 'status' | 'restart' | 'logs') => void;
 export type PluginNodeRunnerHandler = (entry: string, args: readonly string[]) => void;
-export type StreamJsonHandler = (opts: {
-  resume?: string;
-  model?: string;
-  permissionMode?: string;
-  skillsDirs: string[];
-  appendSystemPrompt?: string;
-  appendSystemPromptFile?: string;
-  systemPrompt?: string;
-  allowedTools?: string;
-  disallowedTools?: string;
-  effort?: string;
-  maxContextTokens?: string;
-  pluginDirs: string[];
-}) => void;
 
-export type LineCommandHandler = (action: 'run' | 'start' | 'stop' | 'status') => void;
+export type LineCommandHandler = (
+  action: 'run' | 'start' | 'stop' | 'status' | 'restart' | 'pause',
+  surface?: 'line' | 'host',
+) => void;
 
 export function createProgram(
   version: string,
   onMain: MainCommandHandler,
   onPluginNodeRunner: PluginNodeRunnerHandler = () => {},
-  onStreamJson: StreamJsonHandler = () => {},
   onLine: LineCommandHandler = () => {},
+  onService: ServiceCommandHandler = () => {},
 ): Command {
   const program = new Command(CLI_COMMAND_NAME)
     .description(t('cli.help.description'))
@@ -98,62 +89,7 @@ export function createProgram(
     .option('--wolfpack', t('cli.opt.wolfpack'), false);
 
   registerExportCommand(program);
-
-  // Hidden subcommand for the stream-json protocol stream-json protocol.
-  // the external client spawns: scream stream-json --output-format stream-json --input-format stream-json
-  //   --permission-prompt-tool stdio --replay-user-messages --verbose ...
-  // Flag set mirrors the external client's agent invocation (v1.3.2+); keep it in sync
-  // so Commander never rejects a flag the external client may pass.
-  // Flags we actually use: --input-format, --output-format, --resume, --model, --permission-mode,
-  //   --append-system-prompt, --append-system-prompt-file, --system-prompt, --skills-dir,
-  //   --allowedTools, --disallowedTools, --effort.
-  // Flags accepted but no-op: --permission-prompt-tool, --replay-user-messages, --verbose,
-  //   --max-context-tokens, --plugin-dir (scream-code manages MCP via config.toml).
-  program
-    .command('stream-json', { hidden: true })
-    .option('--input-format <fmt>', 'stream-json')
-    .option('--output-format <fmt>', 'stream-json')
-    .option('--resume <id>', 'resume a previous session')
-    .option('--model <model>', 'model to use')
-    .option('--permission-mode <mode>', 'permission mode')
-    .option('--permission-prompt-tool <mode>', '(ignored for compatibility)')
-    .option('--replay-user-messages', '(ignored for compatibility)')
-    .option('--verbose', '(ignored for compatibility)')
-    .option('--system-prompt <text>', '(passed through to agent system prompt)')
-    .option('--append-system-prompt <text>', '(passed through to agent)')
-    .option('--append-system-prompt-file <path>', '(passed through to agent; file contents are read and merged)')
-    .option('--allowedTools <list>', '(comma-separated tool whitelist)')
-    .option('--disallowedTools <list>', '(comma-separated tool blacklist)')
-    .option('--effort <value>', '(reasoning effort: low/medium/high/max)')
-    .option('--max-context-tokens <N>', '(ignored for compatibility)')
-    .option(
-      '--skills-dir <dir>',
-      'additional skills directory (repeatable)',
-      (value: string, previous: string[]) => [...(previous ?? []), value],
-      [] as string[],
-    )
-    .option(
-      '--plugin-dir <dir>',
-      '(ignored, compatibility flag; repeatable)',
-      (value: string, previous: string[]) => [...(previous ?? []), value],
-      [] as string[],
-    )
-    .action((subOpts: Record<string, unknown>) => {
-      onStreamJson({
-        resume: subOpts['resume'] as string | undefined,
-        model: subOpts['model'] as string | undefined,
-        permissionMode: subOpts['permissionMode'] as string | undefined,
-        skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
-        appendSystemPrompt: subOpts['appendSystemPrompt'] as string | undefined,
-        appendSystemPromptFile: subOpts['appendSystemPromptFile'] as string | undefined,
-        systemPrompt: subOpts['systemPrompt'] as string | undefined,
-        allowedTools: subOpts['allowedTools'] as string | undefined,
-        disallowedTools: subOpts['disallowedTools'] as string | undefined,
-        effort: subOpts['effort'] as string | undefined,
-        maxContextTokens: subOpts['maxContextTokens'] as string | undefined,
-        pluginDirs: (subOpts['pluginDir'] as string[]) ?? [],
-      });
-    });
+  registerReportCommand(program);
 
   // `scream line` - native IM channel daemon (configured via /line in the TUI).
   const lineCmd = program
@@ -186,6 +122,54 @@ export function createProgram(
     .action(() => {
       onLine('status');
     });
+
+  // `scream host` - the background host itself (the line daemon is the same
+  // process; it also runs without a chat channel).
+  const hostCmd = program
+    .command('host')
+    .description(t('cli.host.description'))
+    .action(() => {
+      onLine('run', 'host');
+    });
+  const hostActions = [
+    ['run', t('cli.line.cmd_run')],
+    ['start', t('cli.line.cmd_start')],
+    ['stop', t('cli.line.cmd_stop')],
+    ['status', t('cli.line.cmd_status')],
+    ['restart', t('cli.line.cmd_restart')],
+    ['pause', t('cli.host.cmd_pause')],
+  ] as const;
+  for (const [action, description] of hostActions) {
+    hostCmd
+      .command(action)
+      .description(description)
+      .action(() => {
+        onLine(action, 'host');
+      });
+  }
+
+  // `scream service` - install the background host as a per-user service.
+  const serviceCmd = program
+    .command('service')
+    .description(t('cli.service.description'))
+    .action(() => {
+      onService('status');
+    });
+  const serviceActions = [
+    ['install', t('cli.service.cmd_install')],
+    ['uninstall', t('cli.service.cmd_uninstall')],
+    ['status', t('cli.service.cmd_status')],
+    ['restart', t('cli.service.cmd_restart')],
+    ['logs', t('cli.service.cmd_logs')],
+  ] as const;
+  for (const [action, description] of serviceActions) {
+    serviceCmd
+      .command(action)
+      .description(description)
+      .action(() => {
+        onService(action);
+      });
+  }
 
   program
     .command('__plugin_run_node', { hidden: true })

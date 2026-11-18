@@ -12,6 +12,13 @@ import { getLlmNotSetMessage, MAIN_AGENT_ID, getNoActiveSessionMessage } from '.
 import { formatErrorMessage } from '../utils/event-payload';
 import { isBusy } from '../utils/app-state';
 import { sessionRowsForPicker } from '../utils/session-picker-rows';
+import { isChannelManagedSession, isContinuableSession } from '../utils/channel-sessions';
+import {
+  consumeInterruptedTurn,
+  isSessionInUse,
+  sessionHolder,
+  takeOverFromHost,
+} from '../utils/session-takeover';
 import { syncDiagramCapabilityPrompt } from '../utils/terminal-diagram-prompt';
 import { refreshProviderBalance } from '../api-balance';
 import { createApprovalRequestHandler } from '../reverse-rpc/approval/handler';
@@ -101,6 +108,11 @@ export interface SessionManagerHost {
   hideQuestionDialog(): void;
   hasSessionContent(): boolean;
   stopMemoryIdleTimer(): void;
+  /**
+   * Ask whether to take a session over from the background host, which is
+   * working on it. Absent (tests, headless hosts): never take over.
+   */
+  confirmTakeover?(sessionId: string): Promise<boolean>;
 }
 
 /**
@@ -146,6 +158,11 @@ export class SessionManager {
         if (target === undefined) {
           throw new Error(t('session.not_found', { sessionId: startup.sessionFlag }));
         }
+        // The picker refuses channel sessions; `-r <id>` must not be a way around
+        // it, because the line daemon may be writing that session right now.
+        if (isChannelManagedSession(target.metadata)) {
+          throw new Error(t('dialog.channel_managed'));
+        }
         // Indexed workDir values are stored normalized (nearest .git/
         // package.json root); normalize both sides so a nested cwd still
         // matches its own project instead of reporting a false wrong_dir.
@@ -155,14 +172,19 @@ export class SessionManager {
           );
         }
         // Held: see startScheduledTasks.
-        session = await this.host.harness.resumeSession({ id: startup.sessionFlag, scheduledTasks: false });
+        session = await this.openSessionNamed(startup.sessionFlag);
+        this.noteOpenedSession(session.id, 'startup');
         shouldReplayHistory = true;
       } else {
+        // Most recent first; channel sessions are the line daemon's, not the
+        // person's, so `-C` skips them rather than opening a session another
+        // process is writing.
         const sessions = await this.host.harness.listSessions({ workDir });
-        const target = sessions[0];
+        const target = sessions.find((summary) => isContinuableSession(summary.metadata));
         if (target !== undefined) {
           // Held: see startScheduledTasks.
-          session = await this.host.harness.resumeSession({ id: target.id, scheduledTasks: false });
+          session = await this.openSessionNamed(target.id);
+          this.noteOpenedSession(session.id, 'startup');
           shouldReplayHistory = true;
         } else {
           session = await this.host.harness.createSession(createSessionOptions);
@@ -428,9 +450,8 @@ export class SessionManager {
     }
     if (isBusy(this.host.state.appState)) {
       this.host.showError(t('session.switch_streaming'));
-      // blocked: the refusal is transient state, not "session missing" —
-      // callers (the channel picker) must not treat it as a reason to create
-      // and force-switch to a new session mid-stream.
+      // blocked: the refusal is transient state, not "session missing" — a
+      // caller must not treat it as a reason to create a replacement session.
       return { switched: false, blocked: true };
     }
     if (this.host.state.appState.isReplaying) {
@@ -438,18 +459,74 @@ export class SessionManager {
       return { switched: false, blocked: true };
     }
 
-    let session: Session;
+    let session: Session | undefined;
     try {
       // Held: see startScheduledTasks.
-      session = await this.host.harness.resumeSession({ id: targetSessionId, scheduledTasks: false });
+      session = await this.openSession(targetSessionId, { interactive: true });
     } catch (error) {
       const msg = formatErrorMessage(error);
       this.host.showError(t('session.resume_failed', { sessionId: targetSessionId, msg }));
       return { switched: false };
     }
+    if (session === undefined) return { switched: false, blocked: true };
 
     await this.switchToSession(session, t('session.resumed', { sessionId: session.id }));
+    this.noteOpenedSession(session.id, 'switch');
     return { switched: true };
+  }
+
+  /** Set when the last `openSession` took its session over from the host. */
+  private tookOver = false;
+
+  /**
+   * Open a session (scheduled tasks held; see `startScheduledTasks`). When
+   * another process holds it: the background host hands it over — after the
+   * person agreed, when `interactive` — and another terminal is reported, never
+   * taken from. Resolves undefined when the person chose not to take over.
+   */
+  private async openSession(
+    sessionId: string,
+    options: { readonly interactive: boolean },
+  ): Promise<Session | undefined> {
+    this.tookOver = false;
+    try {
+      return await this.host.harness.resumeSession({ id: sessionId, scheduledTasks: false });
+    } catch (error) {
+      if (!isSessionInUse(error)) throw error;
+    }
+    const holder = await sessionHolder(sessionId);
+    if (holder.kind === 'other') {
+      throw new Error(t('session.in_use_other', { pid: holder.pid === undefined ? '?' : String(holder.pid) }));
+    }
+    if (holder.kind === 'host') {
+      // `scream -r` / `-C` name the session outright: that is the decision.
+      if (options.interactive && !((await this.host.confirmTakeover?.(sessionId)) ?? false)) return undefined;
+      if (!(await takeOverFromHost(sessionId))) throw new Error(t('session.takeover_failed'));
+      this.tookOver = true;
+    }
+    return this.host.harness.resumeSession({ id: sessionId, scheduledTasks: false });
+  }
+
+  /** `openSession` for a session the person named at startup (never declined). */
+  private async openSessionNamed(sessionId: string): Promise<Session> {
+    const session = await this.openSession(sessionId, { interactive: false });
+    if (session === undefined) throw new Error(t('session.takeover_failed'));
+    return session;
+  }
+
+  /** Tell the person what they opened into: a take-over, or a turn that was cut off. */
+  private noteOpenedSession(sessionId: string, when: 'startup' | 'switch'): void {
+    const notes: string[] = [];
+    if (this.tookOver) notes.push(t('session.taken_over'));
+    else if (consumeInterruptedTurn(sessionId)) notes.push(t('session.interrupted_notice'));
+    this.tookOver = false;
+    if (notes.length === 0) return;
+    const text = notes.join('\n');
+    if (when === 'startup') {
+      this.host.startupNotice = this.host.startupNotice !== undefined ? `${this.host.startupNotice}\n${text}` : text;
+    } else {
+      this.host.showStatus(text);
+    }
   }
 
   /**

@@ -25,13 +25,12 @@ export function getLineConfigPath(): string {
   return join(getLineDir(), 'config.json');
 }
 
+/** Pidfile written by releases before the daemon lock; read only to stop such a daemon. */
 export function getLinePidFile(): string {
   return join(getLineDir(), 'daemon.pid');
 }
 
-export function getLineLogFile(): string {
-  return join(getLineDir(), 'daemon.log');
-}
+
 
 /** Per-platform state dir for the weixin long-poll cursor and context tokens. */
 export function getWeixinStateDir(): string {

@@ -1,6 +1,6 @@
 /**
- * Cached git branch + working-tree status (sidebar Git panel; previously
- * also the footer git badge, which the sidebar now replaces).
+ * Cached git branch + working-tree status, behind the footer's git badge
+ * (the working tree is shown there; the sidebar has no Git panel).
  *
  * Branch name refreshes every 5s, porcelain status every 15s. Branch
  * and status reads stay synchronous with short timeouts. Spawn failures
@@ -29,7 +29,7 @@ export interface GitStatus {
   readonly diffAdded: number;
   readonly diffDeleted: number;
   /** Working-tree file entries from `git status --porcelain -b` (excluding the
-   * `## branch` header). Consumed by the sidebar Git panel. */
+   * `## branch` header). */
   readonly files: readonly GitFileEntry[];
 }
 

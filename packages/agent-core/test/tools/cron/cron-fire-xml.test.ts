@@ -6,9 +6,23 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CronJobOrigin } from '../../../src/agent/context/types';
-import { renderCronFireXml } from '../../../src/tools/cron/cron-fire-xml';
+import { FIRING_INSTRUCTION, renderCronFireXml } from '../../../src/tools/cron/cron-fire-xml';
 
 describe('renderCronFireXml', () => {
+  it('frames every fire as work to do now, before the prompt', () => {
+    const origin: CronJobOrigin = {
+      kind: 'cron_job',
+      jobId: 'feedface',
+      cron: '0 9 * * *',
+      recurring: true,
+      coalescedCount: 1,
+      stale: false,
+    };
+    const lines = renderCronFireXml(origin, 'every run, append the date to notes.md').split('\n');
+    expect(lines[1]).toBe(`<instruction>${FIRING_INSTRUCTION}</instruction>`);
+    expect(lines[2]).toBe('<prompt>');
+  });
+
   it('recurring origin renders all 5 attributes in order with prompt wrapped', () => {
     const origin: CronJobOrigin = {
       kind: 'cron_job',
@@ -21,6 +35,7 @@ describe('renderCronFireXml', () => {
     const out = renderCronFireXml(origin, 'check the deploy');
     expect(out).toMatchInlineSnapshot(`
       "<cron-fire jobId="deadbeef" cron="*/5 * * * *" recurring="true" coalescedCount="3" stale="false">
+      <instruction>This is a scheduled task firing now. Do the work in the prompt below in this turn. Do not list, recreate or reschedule the task unless the prompt asks for that.</instruction>
       <prompt>
       check the deploy
       </prompt>

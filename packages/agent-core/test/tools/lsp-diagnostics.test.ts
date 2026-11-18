@@ -245,7 +245,9 @@ describe('formatDiagnosticsHint: server started but typescript is missing', () =
     const registry = fakeRegistry({ clientError: new Error('spawn typescript-language-server ENOENT') });
     const result = await fetchDiagnostics(registry, createFakeJian(), '/ws/a.ts', '/ws');
 
-    expect(formatDiagnosticsHint(result)).toContain('install the language server `typescript-language-server`');
+    const hint = formatDiagnosticsHint(result);
+    expect(hint).toContain('`typescript-language-server` is not installed');
+    expect(hint).toContain('`npm i -g typescript-language-server typescript`');
   });
 });
 
@@ -282,8 +284,8 @@ describe('formatDiagnosticsHint', () => {
       serverCommand: 'typescript-language-server',
     };
     const hint = formatDiagnosticsHint(result);
-    expect(hint).toContain('Hint: install the language server');
-    expect(hint).toContain('typescript-language-server');
+    expect(hint).toContain('Hint: The language server `typescript-language-server` is not installed');
+    expect(hint).toContain('npm i -g typescript-language-server typescript');
     expect(hint.startsWith('\n')).toBe(true);
   });
 

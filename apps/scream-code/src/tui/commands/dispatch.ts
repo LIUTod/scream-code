@@ -67,13 +67,14 @@ import { handleSnapTimerCommand } from './snaptimer';
 import { handleHighlightCommand } from './hl';
 import { handleBlockRowsCommand } from './blockrows';
 import { handleCodeBgCommand } from './codebg';
-import { handleCronCommand } from './cron';
+import { handleJobsCommand } from './jobs';
 import { handleMermaidCommand } from './mermaid';
 import { handleCopyCommand } from './copy';
 import { handleLikeCommand } from './like';
 import { handleKnowledgeCommand } from './knowledge';
 import { handleGrantsCommand } from './grants';
 import { handleBudgetCommand } from './budget';
+import { handleServiceCommand } from './service';
 import { runEvalCommand } from './eval';
 
 // ---------------------------------------------------------------------------
@@ -299,8 +300,8 @@ async function handleBuiltInSlashCommand(
     case 'mermaid':
       await handleMermaidCommand(host, args);
       return;
-    case 'cron':
-      await handleCronCommand(host, args);
+    case 'jobs':
+      await handleJobsCommand(host, args);
       return;
     case 'mcp':
       await handleMcpCommand(host, args);
@@ -325,6 +326,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'budget':
       await handleBudgetCommand(host, args);
+      return;
+    case 'service':
+      await handleServiceCommand(host);
       return;
     case 'settings':
       showSettingsSelector(host);

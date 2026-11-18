@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as hostControl from '#/host/control';
 import { ScreamTUI, type ScreamTUIStartupInput } from '#/tui/scream-tui';
+
+vi.mock('#/host/control', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#/host/control')>()),
+  startHostDetached: vi.fn(async () => ({ pid: 1, alreadyRunning: false })),
+  wakeHost: vi.fn(async () => true),
+}));
 
 interface SignalDriver {
   registerSignalHandlers(): void;
@@ -150,7 +157,7 @@ describe('ScreamTUI signal handlers', () => {
     expect(exitSpy).toHaveBeenCalledWith(129);
   });
 
-  it('registers SIGTERM and SIGHUP on POSIX, only SIGTERM on Windows', () => {
+  it('registers SIGTERM and SIGHUP on POSIX and on Windows (console window closed)', () => {
     // POSIX
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
     const posix = makeDriver();
@@ -165,12 +172,12 @@ describe('ScreamTUI signal handlers', () => {
     const win = makeDriver();
     const winCaptured = captureHandlers(win.driver);
     expect(winCaptured.signalHandlers.has('SIGTERM')).toBe(true);
-    expect(winCaptured.signalHandlers.has('SIGHUP')).toBe(false);
+    expect(winCaptured.signalHandlers.has('SIGHUP')).toBe(true);
     winCaptured.restore();
     win.driver.unregisterSignalHandlers();
   });
 
-  it('SIGHUP handler calls emergencyTerminalExit (process.exit(129)) without going through stop()', () => {
+  it('SIGHUP with nothing running exits 129 without going through stop() or starting the host', async () => {
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
     const { driver, tui } = makeDriver();
     const stopSpy = vi.spyOn(tui, 'stop').mockResolvedValue(undefined);
@@ -180,10 +187,32 @@ describe('ScreamTUI signal handlers', () => {
     expect(sighup).toBeDefined();
     sighup?.();
 
-    expect(exitSpy).toHaveBeenCalledWith(129);
+    await vi.waitFor(() => {
+      expect(exitSpy).toHaveBeenCalledWith(129);
+    });
     expect(stopSpy).not.toHaveBeenCalled();
+    expect(hostControl.startHostDetached).not.toHaveBeenCalled();
 
     stopSpy.mockRestore();
+    captured.restore();
+    driver.unregisterSignalHandlers();
+  });
+
+  it('SIGHUP with a goal or bot run in progress hands it to the background, then exits', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    const { driver, tui } = makeDriver();
+    const decide = vi
+      .spyOn(tui as unknown as { decideExitHandoff(fromSignal: boolean): Promise<string> }, 'decideExitHandoff')
+      .mockResolvedValue('handoff');
+    const captured = captureHandlers(driver);
+    captured.signalHandlers.get('SIGHUP')?.();
+    await vi.waitFor(() => {
+      expect(exitSpy).toHaveBeenCalledWith(129);
+    });
+    expect(decide).toHaveBeenCalledWith(true);
+    expect(hostControl.startHostDetached).toHaveBeenCalled();
+    expect(hostControl.wakeHost).toHaveBeenCalled();
+    decide.mockRestore();
     captured.restore();
     driver.unregisterSignalHandlers();
   });

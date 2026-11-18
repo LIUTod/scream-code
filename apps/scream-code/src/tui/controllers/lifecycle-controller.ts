@@ -6,14 +6,21 @@ import { GutterContainer } from '../components/chrome/gutter-container';
 import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
 import { SESSION_TIPS, TIP_ROTATION_INTERVAL_MS } from '../constant/scream-tui';
 import { StatusBarPaneComponent } from '../components/panes/status-bar-pane';
-import { SIDEBAR_MIN_VIEWPORT_WIDTH, type SidebarData, type SidebarGitData, type SidebarGoalData, type SidebarHubData, type SidebarSessionStats } from '../components/sidebar/sidebar-panel';
-import { gitPanel } from '../components/sidebar/panels/git-panel';
+import {
+  SIDEBAR_MIN_VIEWPORT_WIDTH,
+  type SidebarData,
+  type SidebarGoalData,
+  type SidebarHubData,
+  type SidebarJobsData,
+  type SidebarSessionStats,
+} from '../components/sidebar/sidebar-panel';
+import { jobsPanel } from '../components/sidebar/panels/jobs-panel';
+import { createGitStatusCache, type GitStatusCache } from '#/utils/git/git-status';
 import { sessionPanel } from '../components/sidebar/panels/session-panel';
 import { agentsPanel } from '../components/sidebar/panels/agents-panel';
 import { goalPanel } from '../components/sidebar/panels/goal-panel';
 import { hubPanel } from '../components/sidebar/panels/hub-panel';
 import { buildHubSamples, createHubProbe } from '../utils/hub-probe';
-import { createGitStatusCache, type GitStatusCache } from '#/utils/git/git-status';
 import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
@@ -26,6 +33,7 @@ import type { ResolvedTheme } from '../theme/colors';
 import type { Theme } from '../theme/index';
 import type { AppState, ScreamTUIOptions } from '../types';
 import type { TUIState } from '../tui-state';
+import { ensureBackgroundForJobs, readJobsFooterStatus, type JobsFooterStatus } from '../utils/jobs-status';
 import { readLineFooterStatus } from '../utils/line-status';
 import { isDeadTerminalError } from '../utils/dead-terminal';
 import { isStreaming } from '../utils/app-state';
@@ -79,6 +87,12 @@ export interface LifecycleControllerHost {
   syncRuntimeState(session?: Session): Promise<void>;
   closeSession(): Promise<void>;
   stop(exitCode?: number): Promise<void>;
+  /**
+   * The terminal went away (its window closed, an SSH link dropped): hand
+   * running goal or bot work to the background, then exit. Falls back to an
+   * immediate emergency exit when absent.
+   */
+  onHangup?(): void;
   showStatus(message: string, color?: string): void;
   showNotice(title: string, detail?: string): void;
   applyResolvedAutoTheme(resolved: ResolvedTheme): void;
@@ -162,13 +176,13 @@ export class LifecycleController {
 
   private tipRotationTimer: ReturnType<typeof setInterval> | undefined;
   private currentTipIndex = pickTipIndex(SESSION_TIPS, undefined);
-  /** Sidebar-only git cache (the footer owns its own). Rebuilt when the
-   * workDir changes; `getStatus()` is TTL-cached so polling is cheap. */
-  private sidebarGitCache: GitStatusCache | undefined;
   /** Sidebar Hub probe: read-through TTL, no timer — probing happens because a
    *  frame asked, so a closed sidebar produces no traffic. */
   private readonly hubProbe = createHubProbe();
-  private sidebarGitCacheWorkDir = '';
+  /** Git status cache behind the footer's working-tree diff. Rebuilt when the
+   * workDir changes; `getStatus()` is TTL-cached so polling is cheap. */
+  private gitStatusCache: GitStatusCache | undefined;
+  private gitStatusCacheWorkDir = '';
   /** Memo for the session-stats aggregation: recomputed only when the
    * transcript's ingest counter/length, compaction count or usage object
    * changes. */
@@ -193,15 +207,16 @@ export class LifecycleController {
   installSignalHandlers(): void {
     this.uninstallSignalHandlers();
 
-    const signals: NodeJS.Signals[] = ['SIGTERM'];
-    if (process.platform !== 'win32') {
-      signals.push('SIGHUP');
-    }
+    // SIGHUP: the terminal window was closed or the SSH link dropped. Node
+    // raises it on Windows too when the console window closes (Windows then
+    // ends the process about 10 seconds later, whatever it is doing).
+    const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGHUP'];
 
     for (const signal of signals) {
       const handler = (): void => {
         if (signal === 'SIGHUP') {
-          this.host.onEmergencyExit();
+          if (this.host.onHangup !== undefined) this.host.onHangup();
+          else this.host.onEmergencyExit();
           return;
         }
       this.host.stop(143).then(
@@ -267,6 +282,40 @@ export class LifecycleController {
       clearInterval(this.linePollTimer);
       this.linePollTimer = undefined;
     }
+    if (this.jobsPollTimer !== undefined) {
+      clearInterval(this.jobsPollTimer);
+      this.jobsPollTimer = undefined;
+    }
+  }
+
+  private jobsPollTimer: ReturnType<typeof setInterval> | undefined;
+  /** The Jobs panel's last snapshot, refreshed by the jobs poll. */
+  private sidebarJobs: SidebarJobsData | undefined;
+
+  /**
+   * Jobs: the footer counts (on, waiting, whether the background runs), and
+   * the background is started when jobs are on and it is not up — so jobs
+   * run without /service, until the computer restarts.
+   */
+  startJobsPolling(): void {
+    const POLL_INTERVAL_MS = 30_000;
+    const apply = (status: JobsFooterStatus): void => {
+      this.sidebarJobs = { hostRunning: status.hostRunning, waiting: status.waiting, rows: status.jobs ?? [] };
+      this.host.setAppState({ jobsEnabled: status.enabled, jobsWaiting: status.waiting, jobsHostRunning: status.hostRunning });
+    };
+    const sync = (): void => {
+      void readJobsFooterStatus().then(async (status) => {
+        apply(status);
+        if (await ensureBackgroundForJobs(status)) {
+          setTimeout(() => {
+            void readJobsFooterStatus().then(apply);
+          }, 3_000).unref?.();
+        }
+      });
+    };
+    sync();
+    this.jobsPollTimer = setInterval(sync, POLL_INTERVAL_MS);
+    this.jobsPollTimer.unref?.();
   }
 
   refreshLineStatus(): void {
@@ -405,13 +454,14 @@ export class LifecycleController {
       },
     ]);
     // Register the sidebar panels once (idempotent). The stacked sidebar
-    // renders all visible panels top-to-bottom: Git (working tree), Session
-    // (aggregated counters) and Goal (only in goal-driven sessions). Panels
-    // read their data from the provider below.
+    // renders all visible panels top-to-bottom: Jobs (background jobs and what
+    // waits for the person; only when there is any), Session (aggregated
+    // counters), Agents, Goal, Hub. The working tree is in the footer, so the
+    // sidebar has no Git panel. Panels read their data from the provider below.
     {
       const m = this.host.state.sidebarManager;
-      if (!m.allPanels.some((p) => p.id === 'git')) {
-        m.register(gitPanel);
+      if (!m.allPanels.some((p) => p.id === 'jobs')) {
+        m.register(jobsPanel);
       }
       if (!m.allPanels.some((p) => p.id === 'session')) {
         m.register(sessionPanel);
@@ -467,7 +517,7 @@ export class LifecycleController {
   private buildSidebarData(): SidebarData {
     const appState = this.host.state.appState;
     return {
-      git: this.readSidebarGit(appState.workDir),
+      ...(this.sidebarJobs === undefined ? {} : { jobs: this.sidebarJobs }),
       sessionStats: this.readSidebarSessionStats(appState),
       agents: this.host.sessionEventHandler.getSubagentSlots(),
       hub: this.readSidebarHub(),
@@ -516,7 +566,7 @@ export class LifecycleController {
     this.gitDiffRefreshTimer = setTimeout(() => {
       this.gitDiffRefreshTimer = undefined;
       if (this.gitTimersStopped) return;
-      const diff = this.readSidebarGit(workDir);
+      const diff = this.readGitStatus(workDir);
       this.gitDiffSnapshot =
         diff === undefined ? null : { workDir, added: diff.diffAdded, deleted: diff.diffDeleted };
       this.gitDiffReadWorkDir = workDir;
@@ -543,20 +593,15 @@ export class LifecycleController {
     this.lineStateManualWriteAt = Date.now();
   }
 
-  private readSidebarGit(workDir: string): SidebarGitData | undefined {
-    if (this.sidebarGitCache === undefined || this.sidebarGitCacheWorkDir !== workDir) {
-      this.sidebarGitCache = createGitStatusCache(workDir);
-      this.sidebarGitCacheWorkDir = workDir;
+  private readGitStatus(workDir: string): { diffAdded: number; diffDeleted: number } | undefined {
+    if (this.gitStatusCache === undefined || this.gitStatusCacheWorkDir !== workDir) {
+      this.gitStatusCache = createGitStatusCache(workDir);
+      this.gitStatusCacheWorkDir = workDir;
     }
-    const status = this.sidebarGitCache.getStatus();
-    // null = workDir is not a git repo; the Git panel shows its empty state.
+    const status = this.gitStatusCache.getStatus();
+    // null = workDir is not a git repo.
     if (status === null) return undefined;
-    return {
-      workDir,
-      diffAdded: status.diffAdded,
-      diffDeleted: status.diffDeleted,
-      filesCount: status.files.length,
-    };
+    return { diffAdded: status.diffAdded, diffDeleted: status.diffDeleted };
   }
 
   private readSidebarSessionStats(appState: AppState): SidebarSessionStats {

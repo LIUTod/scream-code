@@ -44,6 +44,8 @@ export interface ChoicePickerOptions {
   readonly hint?: string;
   readonly formatHint?: (text: string, colors: ColorPalette) => string;
   readonly notice?: string;
+  /** Muted lines under the title, one per entry (a status block, say). */
+  readonly details?: readonly string[];
   readonly options: readonly ChoiceOption[];
   readonly currentValue?: string;
   readonly colors: ColorPalette;
@@ -168,6 +170,9 @@ export class ChoicePickerComponent extends Container implements Focusable {
       chalk.hex(colors.primary)('─'.repeat(width)),
       chalk.hex(colors.primary).bold(` ${this.opts.title}`) + titleSuffix,
     ];
+    for (const detail of this.opts.details ?? []) {
+      lines.push(chalk.hex(colors.textDim)(` ${truncateToWidth(detail, Math.max(1, width - 1))}`));
+    }
     if (searchable && view.query.length > 0) {
       lines.push(chalk.hex(colors.primary)(` Search: `) + chalk.hex(colors.text)(view.query));
     }

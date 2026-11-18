@@ -635,6 +635,26 @@ export class FooterComponent implements Component {
       ],
     };
 
+    // Jobs: only what needs the person now — something waiting, or jobs that
+    // nothing runs. A healthy background stays out of the footer (the
+    // sidebar's Jobs panel has the details). Next to the channel, in the same
+    // dot + label form, in the warning colour.
+    const jobsOn = state.jobsEnabled ?? 0;
+    const jobsWaiting = state.jobsWaiting ?? 0;
+    const jobsStopped = jobsOn > 0 && state.jobsHostRunning === false;
+    const attention: FitItem[] = [];
+    if (jobsWaiting > 0 || jobsStopped) {
+      const warn = chalk.hex(colors.warning);
+      const label =
+        jobsWaiting > 0 ? t('footer.jobs_waiting', { count: String(jobsWaiting) }) : t('footer.jobs_stopped');
+      attention.push({
+        id: 'jobs',
+        rank: 5.5,
+        dropRank: 1.6,
+        variants: [`${warn('◆')} ${warn(label)}`],
+      });
+    }
+
     // Work status stays put on the right of line 2; only its elapsed clock
     // can be shed.
     const status: FitItem = {
@@ -650,6 +670,6 @@ export class FooterComponent implements Component {
       }).map((text) => dim(text)),
     };
 
-    return [fitRow(identity, [gauge], width), fitRow(runStrip, [channel, status], width)];
+    return [fitRow(identity, [gauge], width), fitRow(runStrip, [...attention, channel, status], width)];
   }
 }

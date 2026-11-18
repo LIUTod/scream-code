@@ -130,10 +130,11 @@ describe('runLineCommand', () => {
     expect(d.resetSession).toHaveBeenCalledTimes(1);
   });
 
-  it('points desktop-only commands at the desktop client', async () => {
+  it('points terminal-only commands at the terminal', async () => {
     const { deps: d } = deps();
     const result = await runLineCommand('/theme', d);
-    expect(textOf(result)).toContain('桌面端');
+    expect(textOf(result)).toContain('终端');
+    expect(textOf(result)).not.toContain('桌面');
   });
 
   it('falls through for an unknown command (reference behaviour)', async () => {

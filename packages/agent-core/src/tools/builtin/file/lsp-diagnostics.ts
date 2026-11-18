@@ -19,7 +19,7 @@ import type { Jian } from '@scream-code/jian';
 
 import type { LspRegistry } from '../../../lsp/registry';
 import { formatDiagnostic, type LspDiagnostic } from '../../../lsp/client';
-import { lspStartFailureHint } from '../../../lsp/start-failure';
+import { lspMissingServerHint, lspStartFailureHint } from '../../../lsp/start-failure';
 import {
   diagnosticsSignatures,
   type EditRecoveryQueue,
@@ -147,7 +147,7 @@ export function formatDiagnosticsHint(result: DiagnosticsResult): string {
   if (specific !== undefined) return `\nHint: ${specific}`;
   const cmd = result.serverCommand;
   if (cmd === undefined) return '';
-  return `\nHint: install the language server \`${cmd}\` to get type and syntax diagnostics after edits.`;
+  return `\nHint: ${lspMissingServerHint(cmd)}`;
 }
 
 /**

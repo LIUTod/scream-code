@@ -27,6 +27,19 @@ vi.mock('../../../src/tui/api-balance.js', () => ({
   refreshProviderBalance: vi.fn(),
 }));
 
+// Who holds a session is asked of real process locks; tests decide it.
+const takeover = vi.hoisted(() => ({
+  sessionHolder: vi.fn(async (): Promise<unknown> => ({ kind: 'none' })),
+  takeOverFromHost: vi.fn(async (): Promise<boolean> => true),
+  consumeInterruptedTurn: vi.fn((): boolean => false),
+}));
+vi.mock('#/tui/utils/session-takeover', () => ({
+  isSessionInUse: (error: unknown) => (error as { code?: unknown } | undefined)?.code === 'session.in_use',
+  sessionHolder: takeover.sessionHolder,
+  takeOverFromHost: takeover.takeOverFromHost,
+  consumeInterruptedTurn: takeover.consumeInterruptedTurn,
+}));
+
 function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     id: 'ses-old',
@@ -192,6 +205,37 @@ describe('SessionManager.init — startup decision tree', () => {
     expect(sessionEventHandler.startSubscription).toHaveBeenCalledTimes(1);
     // wolfpack flag on a resume startup must NOT be re-applied.
     expect(resumed.setWolfpackMode).not.toHaveBeenCalled();
+  });
+
+  it('--session refuses a channel session the line daemon owns', async () => {
+    const harness = makeMockHarness({
+      listSessions: vi.fn(async () => [summary({ id: 'ses-line', metadata: { source: 'line' } } as never)]),
+    });
+    const { manager } = makeHost({ harness });
+    await expect(
+      manager.init({
+        startup: { sessionFlag: 'ses-line', continueLast: false, yolo: false, auto: false, plan: false, wolfpack: false },
+        workDir: '/tmp/scream-test',
+      }),
+    ).rejects.toThrow(t('dialog.channel_managed'));
+    expect(harness.resumeSession).not.toHaveBeenCalled();
+  });
+
+  it('continue-last skips channel sessions and resumes the newest own session', async () => {
+    const harness = makeMockHarness({
+      listSessions: vi.fn(async () => [
+        summary({ id: 'ses-line', metadata: { source: 'line' } } as never),
+        summary({ id: 'ses-mine' }),
+      ]),
+    });
+    const resumed = makeMockSession({ id: 'ses-mine' });
+    harness.resumeSession.mockResolvedValue(resumed);
+    const { manager } = makeHost({ harness });
+    await manager.init({
+      startup: { continueLast: true, yolo: false, auto: false, plan: false, wolfpack: false },
+      workDir: '/tmp/scream-test',
+    });
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-mine', scheduledTasks: false });
   });
 
   it('continue-last without history creates a session and records a startup notice', async () => {
@@ -506,7 +550,7 @@ describe('SessionManager.init — prefetched session listing (prune candidates o
     expect(host.showStatus).toHaveBeenCalledWith(expect.stringContaining('Session cleanup skipped'));
   });
 });
-describe('SessionManager.resumeSession — guards (cc-connect contract)', () => {
+describe('SessionManager.resumeSession — guards', () => {
   it('same session id is a no-op switch', async () => {
     const { manager, host, harness } = makeHost({ appState: { sessionId: 'ses-mine' } });
     const res = await manager.resumeSession('ses-mine');
@@ -546,8 +590,8 @@ describe('SessionManager.resumeSession — guards (cc-connect contract)', () => 
     });
     const { manager, host } = makeHost({ harness });
     const res = await manager.resumeSession('ses-gone');
-    // The picker relies on `blocked` being absent here to allow creating a
-    // replacement session — only genuinely missing sessions lack the flag.
+    // `blocked` marks a transient refusal (busy, replaying); a genuinely
+    // missing session is a failure, not a refusal, so it lacks the flag.
     expect(res).toStrictEqual({ switched: false });
     expect('blocked' in res).toBe(false);
     expect(host.showError).toHaveBeenCalledWith(
@@ -894,5 +938,63 @@ describe('SessionManager session swap / reset bookkeeping', () => {
     const { manager, state } = makeHost({ harness });
     await expect(manager.fetchSessions()).resolves.toBeUndefined();
     expect(state.loadingSessions).toBe(false);
+  });
+});
+
+describe('SessionManager.resumeSession — a session another process holds', () => {
+  const inUse = Object.assign(new Error('Session ses-held is open in another process.'), {
+    code: 'session.in_use',
+  });
+
+  it('takes it over from the background host once the person agrees', async () => {
+    const resumed = makeMockSession({ id: 'ses-held' });
+    const harness = makeMockHarness({
+      resumeSession: vi.fn().mockRejectedValueOnce(inUse).mockResolvedValueOnce(resumed),
+    });
+    const { manager, host } = makeHost({ harness });
+    host.confirmTakeover = vi.fn(async () => true);
+    takeover.sessionHolder.mockResolvedValueOnce({ kind: 'host', pid: 4242 });
+
+    const result = await manager.resumeSession('ses-held');
+
+    expect(host.confirmTakeover).toHaveBeenCalledTimes(1);
+    expect(takeover.takeOverFromHost).toHaveBeenCalledWith('ses-held');
+    expect(result).toMatchObject({ switched: true });
+    expect(host.showStatus).toHaveBeenCalledWith(t('session.taken_over'));
+  });
+
+  it('stays put when the person declines the take-over', async () => {
+    const harness = makeMockHarness({ resumeSession: vi.fn().mockRejectedValue(inUse) });
+    const { manager, host } = makeHost({ harness });
+    host.confirmTakeover = vi.fn(async () => false);
+    takeover.sessionHolder.mockResolvedValueOnce({ kind: 'host', pid: 4242 });
+
+    expect(await manager.resumeSession('ses-held')).toEqual({ switched: false, blocked: true });
+    expect(takeover.takeOverFromHost).not.toHaveBeenCalled();
+  });
+
+  it('never takes a session from another terminal, and says where it is open', async () => {
+    const harness = makeMockHarness({ resumeSession: vi.fn().mockRejectedValue(inUse) });
+    const { manager, host } = makeHost({ harness });
+    host.confirmTakeover = vi.fn(async () => true);
+    takeover.sessionHolder.mockResolvedValueOnce({ kind: 'other', pid: 777 });
+
+    expect(await manager.resumeSession('ses-held')).toEqual({ switched: false });
+    expect(host.confirmTakeover).not.toHaveBeenCalled();
+    expect(takeover.takeOverFromHost).not.toHaveBeenCalled();
+    expect(host.showError).toHaveBeenCalledWith(
+      t('session.resume_failed', { sessionId: 'ses-held', msg: t('session.in_use_other', { pid: '777' }) }),
+    );
+  });
+
+  it('says so when the session it opened had its last turn cut off', async () => {
+    const resumed = makeMockSession({ id: 'ses-cut' });
+    const harness = makeMockHarness({ resumeSession: vi.fn(async () => resumed) });
+    const { manager, host } = makeHost({ harness });
+    takeover.consumeInterruptedTurn.mockReturnValueOnce(true);
+
+    await manager.resumeSession('ses-cut');
+
+    expect(host.showStatus).toHaveBeenCalledWith(t('session.interrupted_notice'));
   });
 });

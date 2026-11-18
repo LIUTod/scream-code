@@ -2,8 +2,14 @@ import type { MemoryMemoSummary } from '@scream-code/memory';
 
 import { t } from '@scream-code/config';
 import type { SlashCommandHost } from './dispatch';
+import { openEvolutionHistory } from './evolution-history';
 
-export async function handleMemoryCommand(host: SlashCommandHost, _args: string): Promise<void> {
+export async function handleMemoryCommand(host: SlashCommandHost, args: string): Promise<void> {
+  // `/memory history`: what Scream changed about its memories and skills.
+  if (args.trim() === 'history') {
+    await openEvolutionHistory(host);
+    return;
+  }
   host.showMemoryPicker();
 }
 

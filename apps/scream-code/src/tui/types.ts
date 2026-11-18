@@ -146,6 +146,12 @@ export interface AppState {
    * is not configured. Drives the footer's channel label.
    */
   linePlatform: 'lark' | 'wechat' | null;
+  /** Background jobs switched on (footer `jobs` item; hidden at 0 with nothing waiting). */
+  jobsEnabled?: number;
+  /** Items waiting for the person ("waiting for you"). */
+  jobsWaiting?: number;
+  /** Whether the background runs to carry the jobs out. */
+  jobsHostRunning?: boolean;
   wolfpackMode: boolean;
   /** RLM (persistent-python) mode is active. */
   rlmEnabled: boolean;

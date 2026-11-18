@@ -104,6 +104,15 @@ export class ScreamHarness {
     this.rpc.core.setModelTierBindings(getter);
   }
 
+  /**
+   * Let other scream processes of this user take this harness's sessions
+   * over (see `requestSessionHandover`). The background host sets one; a
+   * terminal does not, so one terminal cannot pull a session out of another.
+   */
+  setSessionHandoverHandler(handler: ((sessionId: string) => Promise<boolean>) | undefined): void {
+    this.rpc.core.setSessionHandoverHandler(handler);
+  }
+
   async createSession(options: CreateSessionOptions): Promise<Session> {
     const { planMode, ...coreOptions } = options;
     const summary = await this.rpc.createSession(coreOptions);

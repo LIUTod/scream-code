@@ -1,5 +1,5 @@
 /**
- * /cron — 定时任务面板：查看、新建、删除。
+ * 本会话提醒的面板：查看、新建、删除（`/jobs` 里的「本会话的提醒」、`/jobs remind`、`/jobs rm <id>`）。
  *
  * 后端一直存在（`CronManager` + 模型侧的 CronCreate / CronList / CronDelete
  * 工具），但用户没有任何入口：任务只在「触发之后」往会话里注入一条消息时才
@@ -247,7 +247,7 @@ async function deleteTask(
 // Create wizard
 // ---------------------------------------------------------------------------
 
-function promptTextInput(
+export function promptTextInput(
   host: SlashCommandHost,
   title: string,
   opts?: { subtitle?: string; placeholder?: string },
@@ -269,7 +269,7 @@ function promptTextInput(
   return promise;
 }
 
-function pickFrom(host: SlashCommandHost, title: string, hint: string, options: ChoiceOption[]): Promise<string | undefined> {
+export function pickFrom(host: SlashCommandHost, title: string, hint: string, options: ChoiceOption[]): Promise<string | undefined> {
   const { promise, resolve } = Promise.withResolvers<string | undefined>();
   host.mountEditorReplacement(
     new ChoicePickerComponent({
@@ -291,7 +291,7 @@ function pickFrom(host: SlashCommandHost, title: string, hint: string, options: 
 }
 
 /** Step 1: pick a cadence, or type an expression. */
-async function pickSchedule(host: SlashCommandHost): Promise<string | undefined> {
+export async function pickSchedule(host: SlashCommandHost): Promise<string | undefined> {
   const value = await pickFrom(
     host,
     t('cron.wizard_schedule_title'),

@@ -5,17 +5,6 @@ import type { GoalJudgeState, GoalStatus } from '#/tui/types';
 import type { SubagentSlot } from '#/tui/utils/subagent-slots';
 import type { HubSample } from '#/tui/utils/hub-probe';
 
-/** Summary working-tree snapshot for the sidebar Git panel (摘要式):
- * workdir name + added/deleted line counts + changed-file count. */
-export interface SidebarGitData {
-  readonly workDir: string;
-  readonly diffAdded: number;
-  readonly diffDeleted: number;
-  readonly filesCount: number;
-}
-
-/** Aggregated counters for the current session (computed from the transcript
- * and app state). */
 export interface SidebarSessionStats {
   readonly turns: number;
   readonly toolCalls: number;
@@ -72,8 +61,19 @@ export interface SidebarGoalData {
  * they need is injected here, so a panel stays a pure view over a
  * snapshot and never reaches into controller state directly.
  */
+/** Background jobs for the Jobs panel (see `utils/jobs-status.ts`). */
+export interface SidebarJobsData {
+  readonly hostRunning: boolean;
+  readonly waiting: number;
+  readonly rows: readonly {
+    readonly title: string;
+    readonly lastOk: boolean | undefined;
+    readonly nextRunAt: number | undefined;
+  }[];
+}
+
 export interface SidebarData {
-  readonly git?: SidebarGitData;
+  readonly jobs?: SidebarJobsData;
   readonly sessionStats?: SidebarSessionStats;
   readonly agents?: readonly SubagentSlot[];
   readonly hub?: SidebarHubData;

@@ -23,7 +23,7 @@ depend on the RPC contract rather than on engine internals.
 | Area | Path | Role |
 |---|---|---|
 | Agent loop | `agent/index.ts` | turn lifecycle, tool dispatch, subagents |
-| Tools | `tools/builtin/*` (registered in `agent/tool/index.ts`) | 57 built-in tools; some only for the main agent or when a service is configured |
+| Tools | `tools/builtin/*` (registered in `agent/tool/index.ts`) | 60 built-in tools; some only for the main agent or when a service is configured |
 | Permissions | `agent/permission/` | mode policy, rules, egress allowlist |
 | Injection | `agent/injection/` | dynamic reminders (goal, permission mode, plan mode, user prefs, wolfpack, todo, working set, MCP guides) |
 | Prompts | `profile/` | `default/system.md` template, conditional parts, self-asset map |

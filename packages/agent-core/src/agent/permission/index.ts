@@ -171,6 +171,19 @@ export class PermissionManager {
     return this.modeOverride ?? this.parent?.mode ?? 'yolo';
   }
 
+  /** Exact actions (see `actionKey`) the person approved once from the inbox. */
+  private readonly oneShotApprovals = new Set<string>();
+
+  /** Let one exact action through bot mode once (the person approved it). */
+  grantOneShotApproval(key: string): void {
+    this.oneShotApprovals.add(key);
+  }
+
+  /** Whether `key` was approved once, using the approval up. */
+  consumeOneShotApproval(key: string): boolean {
+    return this.oneShotApprovals.delete(key);
+  }
+
   set mode(mode: PermissionMode) {
     this.modeOverride = normalizePermissionMode(mode);
   }

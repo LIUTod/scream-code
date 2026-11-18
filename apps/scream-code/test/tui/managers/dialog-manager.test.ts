@@ -223,63 +223,7 @@ describe('DialogManager — session picker callbacks', () => {
     expect(state.activeDialog).toBeNull();
   });
 
-  it('onSelect (cc-connect row) resumes the AGENT session id, not the row id', async () => {
-    const { manager, host } = makeHost({
-      rows: [row('cc-row', { source: 'cc-connect', agentSessionId: 'agent-9' })],
-    });
-    await manager.showSessionPicker();
-    (caps.picker[0]!.onSelect as (id: string) => void)('cc-row');
-    await settle();
-    expect(host.resumeSession).toHaveBeenCalledWith('agent-9');
-  });
-
-  it('cc-connect + blocked:true must NOT create a replacement session', async () => {
-    const { manager, host, harness } = makeHost({
-      rows: [row('cc-row', { source: 'cc-connect', agentSessionId: 'agent-9' })],
-    });
-    vi.mocked(host.resumeSession).mockResolvedValueOnce({ switched: false, blocked: true });
-    await manager.showSessionPicker();
-    (caps.picker[0]!.onSelect as (id: string) => void)('cc-row');
-    await settle();
-    // cc-connect contract: transient busy/replaying refusals never force a
-    // new session mid-stream (paired with SessionManager.resumeSession).
-    expect(harness.createSession).not.toHaveBeenCalled();
-    expect(host.switchToSession).not.toHaveBeenCalled();
-  });
-
-  it('cc-connect + genuinely-missing session creates it and switches', async () => {
-    const created = makeMockSession({ id: 'agent-9' });
-    const { manager, host, harness, state } = makeHost({
-      rows: [row('cc-row', { source: 'cc-connect', agentSessionId: 'agent-9' })],
-    });
-    vi.mocked(host.resumeSession).mockResolvedValueOnce({ switched: false });
-    vi.mocked(harness.createSession).mockResolvedValueOnce(created);
-    await manager.showSessionPicker();
-    (caps.picker[0]!.onSelect as (id: string) => void)('cc-row');
-    await settle();
-    expect(harness.createSession).toHaveBeenCalledWith({
-      id: 'agent-9',
-      workDir: '/tmp/scream-test',
-      model: 'gpt-test',
-      permission: host.state.appState.permissionMode,
-    });
-    expect(host.switchToSession).toHaveBeenCalledWith(created, t('dialog.cc_session_connected', { id: 'agent-9' }));
-    expect(state.activeDialog).toBeNull();
-  });
-
-  it('cc-connect replacement failure reports create_session_failed', async () => {
-    const { manager, host, harness } = makeHost({
-      rows: [row('cc-row', { source: 'cc-connect', agentSessionId: 'agent-9' })],
-    });
-    vi.mocked(host.resumeSession).mockResolvedValueOnce({ switched: false });
-    vi.mocked(harness.createSession).mockRejectedValueOnce(new Error('disk full'));
-    await manager.showSessionPicker();
-    (caps.picker[0]!.onSelect as (id: string) => void)('cc-row');
-    await settle();
-    expect(host.showError).toHaveBeenCalledWith(t('dialog.create_session_failed'));
-  });
-
-  it('non-cc missing session does not auto-create', async () => {
+  it('a missing session does not auto-create', async () => {
     const { manager, host, harness } = makeHost({ rows: [row('ses-a')] });
     vi.mocked(host.resumeSession).mockResolvedValueOnce({ switched: false });
     await manager.showSessionPicker();
@@ -289,12 +233,12 @@ describe('DialogManager — session picker callbacks', () => {
     expect(host.showStatus).not.toHaveBeenCalled();
   });
 
-  it('onDelete exempts cc-connect rows', async () => {
-    const { manager, host } = makeHost({ rows: [row('cc-row', { source: 'cc-connect' })] });
+  it('onDelete exempts channel rows', async () => {
+    const { manager, host } = makeHost({ rows: [row('line-row', { source: 'line' })] });
     await manager.showSessionPicker();
-    (caps.picker[0]!.onDelete as (id: string) => void)('cc-row');
+    (caps.picker[0]!.onDelete as (id: string) => void)('line-row');
     await settle();
-    expect(host.showStatus).toHaveBeenCalledWith(t('dialog.cc_managed'));
+    expect(host.showStatus).toHaveBeenCalledWith(t('dialog.channel_managed'));
     expect(host.deleteSession).not.toHaveBeenCalled();
   });
 
@@ -323,26 +267,26 @@ describe('DialogManager — session picker callbacks', () => {
     expect(caps.picker[1]!.sessions).toEqual([row('ses-b')]);
   });
 
-  it('onDeleteMany strips cc ids and deletes the rest', async () => {
+  it('onDeleteMany strips channel ids and deletes the rest', async () => {
     const { manager, host, rowsBox } = makeHost({
-      rows: [row('cc-1', { source: 'cc-connect' }), row('a'), row('b')],
+      rows: [row('line-1', { source: 'line' }), row('a'), row('b')],
     });
     await manager.showSessionPicker();
     vi.mocked(host.fetchSessions).mockImplementation(async () => {
-      rowsBox.rows = [row('cc-1', { source: 'cc-connect' })];
+      rowsBox.rows = [row('line-1', { source: 'line' })];
     });
-    (caps.picker[0]!.onDeleteMany as (ids: string[]) => void)(['cc-1', 'a', 'b']);
+    (caps.picker[0]!.onDeleteMany as (ids: string[]) => void)(['line-1', 'a', 'b']);
     await settle();
     expect(vi.mocked(host.deleteSession).mock.calls.map(([id]) => id)).toEqual(['a', 'b']);
     expect(caps.picker.length).toBe(2); // re-mounted, not auto-closed
   });
 
-  it('onDeleteMany with only cc ids reports cc_managed and deletes nothing', async () => {
-    const { manager, host } = makeHost({ rows: [row('cc-1', { source: 'cc-connect' })] });
+  it('onDeleteMany with only channel ids reports channel_managed and deletes nothing', async () => {
+    const { manager, host } = makeHost({ rows: [row('line-1', { source: 'line' })] });
     await manager.showSessionPicker();
-    (caps.picker[0]!.onDeleteMany as (ids: string[]) => void)(['cc-1']);
+    (caps.picker[0]!.onDeleteMany as (ids: string[]) => void)(['line-1']);
     await settle();
-    expect(host.showStatus).toHaveBeenCalledWith(t('dialog.cc_managed'));
+    expect(host.showStatus).toHaveBeenCalledWith(t('dialog.channel_managed'));
     expect(host.deleteSession).not.toHaveBeenCalled();
   });
 

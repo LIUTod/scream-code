@@ -274,7 +274,7 @@ export class LspTool implements BuiltinTool<LspInput> {
       client = await this.lspRegistry.getClient(safePath, this.workspace.workspaceDir);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const hint = lspStartFailureHint(message);
+      const hint = lspStartFailureHint(message, this.lspRegistry.commandForPath(safePath)?.[0]);
       return {
         isError: true,
         output: `The language server for ${args.path ?? safePath} could not start: ${message}${hint === undefined ? '' : `\n${hint}`}`,

@@ -4,9 +4,9 @@
  *
  * Why this exists: every declared tool costs its JSON schema on every model
  * request (see `discover-mcp-tools.ts` for the MCP-side version of the same
- * argument). Nine low-frequency built-in groups — cron, memory, knowledge,
- * goal, image, make-skill, manage-plugin, inspect, debug — are removed from
- * the default tool table (about 20 schemas) and offered through this one portal
+ * argument). Ten low-frequency built-in groups — cron, jobs, memory,
+ * knowledge, goal, image, make-skill, manage-plugin, inspect, debug — are
+ * removed from the default tool table (about 23 schemas) and offered through this one portal
  * tool instead. A group's tools are NOT constructed while deferred; enabling
  * a group constructs its instances and puts their names into the enabled
  * set, so they are callable from the model's next turn (the turn loop
@@ -31,6 +31,7 @@ import type { BuiltinTool, ToolManager } from '#/agent/tool';
 import { CronCreateTool } from '../cron/cron-create';
 import { CronDeleteTool } from '../cron/cron-delete';
 import { CronListTool } from '../cron/cron-list';
+import { JobCreateTool, JobDeleteTool, JobListTool, type JobToolContext } from '../jobs/job-tools';
 import type { WorkspaceConfig } from '../support/workspace';
 import { toInputJsonSchema } from '../support/input-schema';
 import { DebugTool } from './debug';
@@ -66,6 +67,7 @@ export const DEFERRED_PORTAL_TOOL_NAME = 'DiscoverTools';
  */
 export const DEFAULT_DEFERRED_GROUP_NAMES = [
   'cron',
+  'jobs',
   'memory',
   'knowledge',
   'goal',
@@ -143,11 +145,27 @@ export const DEFERRED_GROUPS: readonly DeferredToolGroup[] = [
     construct: (context) =>
       context.agent.cron
         ? [
-            new CronCreateTool(context.agent.cron),
+            new CronCreateTool(
+              context.agent.cron,
+              context.agent.type === 'main' && context.agent.screamHomeDir !== undefined
+                ? {
+                    screamHomeDir: context.agent.screamHomeDir,
+                    sessionId: context.agent.sessionId,
+                    workDir: () => context.agent.jian.getcwd(),
+                  }
+                : undefined,
+            ),
             new CronListTool(context.agent.cron),
             new CronDeleteTool(context.agent.cron),
           ]
         : [],
+  },
+  {
+    name: 'jobs',
+    toolNames: ['JobCreate', 'JobList', 'JobDelete'],
+    useWhen:
+      'set up standing background work that runs without the person and outlives this session: every weekday check CI, tonight upgrade dependencies until the tests pass',
+    construct: (context) => jobTools(context.agent),
   },
   {
     name: 'memory',
@@ -312,4 +330,17 @@ export class DiscoverToolsTool implements BuiltinTool<DiscoverToolsInput> {
       },
     };
   }
+}
+
+/** Background-task tools (main agent with a Scream home only). */
+export function jobTools(agent: Agent): BuiltinTool<any>[] {
+  const home = agent.screamHomeDir;
+  if (agent.type !== 'main' || home === undefined) return [];
+  const context: JobToolContext = {
+    screamHomeDir: home,
+    workDir: () => agent.jian.getcwd(),
+    sessionId: agent.sessionId,
+    now: () => Date.now(),
+  };
+  return [new JobCreateTool(context), new JobListTool(context), new JobDeleteTool(context)];
 }

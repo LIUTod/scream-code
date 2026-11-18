@@ -90,15 +90,10 @@ describe('SidebarManager', () => {
 
   it('getData proxies the dataProvider', () => {
     const provider = () => ({
-      git: {
-        workDir: '/home/acme/project',
-        diffAdded: 0,
-        diffDeleted: 0,
-        filesCount: 0,
-      },
+      jobs: { hostRunning: true, waiting: 2, rows: [] },
     });
     const m = new SidebarManager(() => {}, { dataProvider: provider });
-    expect(m.getData().git?.workDir).toBe('/home/acme/project');
+    expect(m.getData().jobs?.waiting).toBe(2);
   });
 
   it('reads widthStore on construction and writes on setWidth', () => {

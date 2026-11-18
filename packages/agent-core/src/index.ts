@@ -27,6 +27,64 @@ export {
   resolveGlobalLogPath,
 } from './logging/logger';
 export { resolveLoggingConfig } from './logging/resolve-config';
+export {
+  acquireProcessLock,
+  processLockAddress,
+  queryProcessLock,
+  requestProcessLock,
+} from './utils/process-lock';
+export {
+  requestSessionHandover,
+  sessionLockHolder,
+  sessionLockName,
+  sessionLockScope,
+} from './utils/session-lock';
+export { readOrCreateControlToken } from './utils/control-token';
+export {
+  listRunningWork,
+  readRunningWork,
+  removeRunningWork,
+  runningWorkDir,
+} from './session/running-work';
+export type { RunningWorkKind, RunningWorkRecord } from './session/running-work';
+export {
+  AGENT_JOB_MIN_INTERVAL_MS,
+  JOB_FATIGUE_LIMIT,
+  JOB_RUNS_KEPT,
+  JobError,
+  JobStore,
+  MAX_ENABLED_JOBS,
+  jobsPath,
+  nextJobRun,
+} from './jobs/store';
+export type { Job, JobDoes, JobRun, JobStarts, JobUntil, NewJob } from './jobs/store';
+export {
+  decideInboxItem,
+  INBOX_EXPIRY_MS,
+  patchInboxItem,
+  saveInboxMemories,
+  listInbox,
+  readInboxItem,
+} from './session/inbox';
+export type { InboxDecision, InboxItem } from './session/inbox';
+export {
+  evolutionDir,
+  listEvolution,
+  rollbackEvolution,
+  showEvolutionChange,
+  snapshotEvolution,
+} from './evolution/history';
+export type { EvolutionChange, EvolutionResult } from './evolution/history';
+export { collectFriction, renderFrictionBlock } from './evolution/friction';
+export type { FrictionReport, ToolFriction } from './evolution/friction';
+export type {
+  BusyProcessLock,
+  HeldProcessLock,
+  ProcessLockIdentity,
+  ProcessLockOptions,
+  ProcessLockRequest,
+  ProcessLockRequestHandler,
+} from './utils/process-lock';
 export type { ResolveLoggingInput } from './logging/resolve-config';
 export type {
   LogContext,
