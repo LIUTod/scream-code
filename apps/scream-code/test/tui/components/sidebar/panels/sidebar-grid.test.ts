@@ -263,10 +263,14 @@ describe('cross-panel column consistency', () => {
     for (const row of rows) expect(row.length).toBeLessThanOrEqual(28);
   });
 
-  it('is hidden with no job on and nothing waiting', () => {
-    expect(jobsPanel.visible?.({ jobs: { hostRunning: false, waiting: 0, rows: [] } })).toBe(false);
-    expect(jobsPanel.visible?.({})).toBe(false);
-    expect(jobsPanel.visible?.({ jobs: { hostRunning: false, waiting: 1, rows: [] } })).toBe(true);
+  it('is always shown, with a resting line when no job is on and nothing waits', () => {
+    expect(jobsPanel.visible).toBeUndefined();
+    for (const empty of [{}, { jobs: { hostRunning: false, waiting: 0, rows: [] } }] as SidebarData[]) {
+      const rows = jobsPanel.build(ctx(empty)).render(28).map(plain);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatch(/^○ /);
+      expect(rows[0]).toContain('/jobs');
+    }
   });
 
   it('does not truncate labels at the default sidebar width', () => {

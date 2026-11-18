@@ -4,7 +4,7 @@
  *
  * Why this exists: every declared tool costs its JSON schema on every model
  * request (see `discover-mcp-tools.ts` for the MCP-side version of the same
- * argument). Ten low-frequency built-in groups — cron, jobs, memory,
+ * argument). Nine low-frequency built-in groups — cron, memory,
  * knowledge, goal, image, make-skill, manage-plugin, inspect, debug — are
  * removed from the default tool table (about 23 schemas) and offered through this one portal
  * tool instead. A group's tools are NOT constructed while deferred; enabling
@@ -67,7 +67,6 @@ export const DEFERRED_PORTAL_TOOL_NAME = 'DiscoverTools';
  */
 export const DEFAULT_DEFERRED_GROUP_NAMES = [
   'cron',
-  'jobs',
   'memory',
   'knowledge',
   'goal',
@@ -159,13 +158,6 @@ export const DEFERRED_GROUPS: readonly DeferredToolGroup[] = [
             new CronDeleteTool(context.agent.cron),
           ]
         : [],
-  },
-  {
-    name: 'jobs',
-    toolNames: ['JobCreate', 'JobList', 'JobDelete'],
-    useWhen:
-      'set up standing background work that runs without the person and outlives this session: every weekday check CI, tonight upgrade dependencies until the tests pass',
-    construct: (context) => jobTools(context.agent),
   },
   {
     name: 'memory',

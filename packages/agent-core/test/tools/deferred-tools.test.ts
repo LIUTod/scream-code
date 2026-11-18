@@ -80,7 +80,6 @@ describe('deferred group table', () => {
   it('lists the default groups in the documented order', () => {
     expect(DEFERRED_GROUPS.map((group) => group.name)).toEqual([
       'cron',
-      'jobs',
       'memory',
       'knowledge',
       'goal',
@@ -162,9 +161,8 @@ describe('DiscoverTools portal tool', () => {
     expect(tool.description).toContain(
       'cron (CronCreate, CronList, CronDelete; schedule your own follow-up: a later check while waiting on CI, a deploy or a review',
     );
-    expect(tool.description).toContain(
-      'jobs (JobCreate, JobList, JobDelete; set up standing background work that runs without the person',
-    );
+    // Jobs are not behind the portal: they are always declared.
+    expect(tool.description).not.toContain('jobs (JobCreate');
     // Groups without a hint keep the bare form.
     expect(tool.description).toMatch(/memory \([A-Za-z, ]+\)/);
   });
@@ -366,7 +364,7 @@ describe('tool portal in the registry (default mode)', () => {
     const outcome = tools.enableDeferredToolGroup('everything');
     expect(outcome.status).toBe('error');
     expect(outcome.status === 'error' && outcome.message).toBe(
-      "Unknown tool group 'everything'. Available groups: cron, jobs, memory, knowledge, goal, image, make-skill, manage-plugin, inspect, debug.",
+      "Unknown tool group 'everything'. Available groups: cron, memory, knowledge, goal, image, make-skill, manage-plugin, inspect, debug.",
     );
   });
 

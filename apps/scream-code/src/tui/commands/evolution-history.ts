@@ -42,12 +42,12 @@ function choose(
         options,
         colors: host.state.theme.colors,
         onSelect: (value: string) => {
-          host.restoreEditor();
           resolve(value);
+          host.restoreEditor();
         },
         onCancel: () => {
-          host.restoreEditor();
           resolve(undefined);
+          host.restoreEditor();
         },
         onDispose: () => {
           resolve(undefined);

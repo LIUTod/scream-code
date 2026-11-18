@@ -133,6 +133,7 @@ export const zh: Record<string, string> = {
   'sidebar.jobs_waiting': '待处理',
   'sidebar.jobs_waiting_value': '{count} 件 /jobs',
   'sidebar.jobs_more': '还有 {count} 个，输 /jobs',
+  'sidebar.jobs_none': '没有后台任务 · /jobs 新建',
   'sidebar.jobs_today': '今天 {time}',
   'sidebar.jobs_tomorrow': '明天 {time}',
   'sidebar.jobs_weekday': '{day} {time}',

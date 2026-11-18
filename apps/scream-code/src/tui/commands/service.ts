@@ -74,12 +74,12 @@ export async function handleServiceCommand(host: SlashCommandHost): Promise<void
       options,
       colors: host.state.theme.colors,
       onSelect: (value: string) => {
-        host.restoreEditor();
         resolve(value as ServiceChoice);
+        host.restoreEditor();
       },
       onCancel: () => {
-        host.restoreEditor();
         resolve(undefined);
+        host.restoreEditor();
       },
       onDispose: () => {
         resolve(undefined);
@@ -175,12 +175,12 @@ export async function offerServiceOnce(host: SlashCommandHost): Promise<void> {
       ],
       colors: host.state.theme.colors,
       onSelect: (value: string) => {
-        host.restoreEditor();
         resolve(value === 'yes');
+        host.restoreEditor();
       },
       onCancel: () => {
-        host.restoreEditor();
         resolve(false);
+        host.restoreEditor();
       },
       onDispose: () => {
         resolve(false);
@@ -220,12 +220,12 @@ async function offerBriefOnce(host: SlashCommandHost): Promise<void> {
       ],
       colors: host.state.theme.colors,
       onSelect: (value: string) => {
-        host.restoreEditor();
         resolve(value === 'yes');
+        host.restoreEditor();
       },
       onCancel: () => {
-        host.restoreEditor();
         resolve(false);
+        host.restoreEditor();
       },
       onDispose: () => {
         resolve(false);
@@ -257,12 +257,12 @@ async function offerSelfReview(host: SlashCommandHost, home: string): Promise<vo
       ],
       colors: host.state.theme.colors,
       onSelect: (value: string) => {
-        host.restoreEditor();
         resolve(value === 'yes');
+        host.restoreEditor();
       },
       onCancel: () => {
-        host.restoreEditor();
         resolve(false);
+        host.restoreEditor();
       },
       onDispose: () => {
         resolve(false);

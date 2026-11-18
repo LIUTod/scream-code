@@ -192,12 +192,12 @@ async function openJobsPanel(host: SlashCommandHost): Promise<void> {
         options,
         colors: host.state.theme.colors,
         onSelect: (value: string) => {
-          host.restoreEditor();
           resolve(value);
+          host.restoreEditor();
         },
         onCancel: () => {
-          host.restoreEditor();
           resolve(undefined);
+          host.restoreEditor();
         },
         onDispose: () => {
           resolve(undefined);
@@ -258,12 +258,12 @@ async function openJob(host: SlashCommandHost, job: Job): Promise<void> {
         ],
         colors: host.state.theme.colors,
         onSelect: (value: string) => {
-          host.restoreEditor();
           resolve(value);
+          host.restoreEditor();
         },
         onCancel: () => {
-          host.restoreEditor();
           resolve(undefined);
+          host.restoreEditor();
         },
         onDispose: () => {
           resolve(undefined);
@@ -312,12 +312,12 @@ async function choose(host: SlashCommandHost, title: string, details: string[], 
         options,
         colors: host.state.theme.colors,
         onSelect: (value: string) => {
-          host.restoreEditor();
           resolve(value);
+          host.restoreEditor();
         },
         onCancel: () => {
-          host.restoreEditor();
           resolve(undefined);
+          host.restoreEditor();
         },
         onDispose: () => {
           resolve(undefined);

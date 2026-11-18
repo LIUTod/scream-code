@@ -27,9 +27,10 @@ export function formatNextRun(at: number, now: number = Date.now()): string {
 }
 
 /**
- * Background jobs, first in the sidebar: whether the background runs them,
- * what waits for the person, then each job (last result, name, next run),
- * soonest first. Shown only when a job is on or something waits.
+ * Background jobs, first in the sidebar and always shown: whether the
+ * background runs them, what waits for the person, then each job (last
+ * result, name, next run), soonest first. With nothing on and nothing
+ * waiting it says so and how to make one.
  */
 class JobsPanelContent {
   constructor(
@@ -41,8 +42,10 @@ class JobsPanelContent {
 
   render(width: number): string[] {
     const jobs = this.ctx.getData().jobs;
-    if (jobs === undefined) return [];
     const dim = (s: string): string => chalk.hex(this.colors.textDim)(s);
+    if (jobs === undefined || (jobs.rows.length === 0 && jobs.waiting === 0)) {
+      return [dim(`○ ${t('sidebar.jobs_none')}`)];
+    }
     const text = (s: string): string => chalk.hex(this.colors.text)(s);
     const warn = (s: string): string => chalk.hex(this.colors.warning)(s);
 
@@ -100,9 +103,6 @@ export const jobsPanel: SidebarPanel = {
     return 'Jobs';
   },
   width: 30,
-  visible(data) {
-    return data.jobs !== undefined && (data.jobs.rows.length > 0 || data.jobs.waiting > 0);
-  },
   build(ctx) {
     return new JobsPanelContent(ctx, ctx.colors);
   },

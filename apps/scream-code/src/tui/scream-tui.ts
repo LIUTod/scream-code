@@ -580,12 +580,12 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
           ],
           colors: this.state.theme.colors,
           onSelect: (value: string) => {
-            this.restoreEditor();
             resolve(value === 'handoff' ? 'handoff' : 'stop');
+            this.restoreEditor();
           },
           onCancel: () => {
-            this.restoreEditor();
             resolve('stay');
+            this.restoreEditor();
           },
           onDispose: () => {
             resolve('stay');
@@ -634,12 +634,12 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
           ],
           colors: this.state.theme.colors,
           onSelect: (value: string) => {
-            this.restoreEditor();
             resolve(value);
+            this.restoreEditor();
           },
           onCancel: () => {
-            this.restoreEditor();
             resolve('back');
+            this.restoreEditor();
           },
           onDispose: () => {
             resolve('back');

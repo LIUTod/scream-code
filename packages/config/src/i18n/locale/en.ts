@@ -133,6 +133,7 @@ export const en: Record<string, string> = {
   'sidebar.jobs_waiting': 'Waiting',
   'sidebar.jobs_waiting_value': '{count} · /jobs',
   'sidebar.jobs_more': '{count} more, see /jobs',
+  'sidebar.jobs_none': 'No background jobs · /jobs to add',
   'sidebar.jobs_today': 'today {time}',
   'sidebar.jobs_tomorrow': 'tmrw {time}',
   'sidebar.jobs_weekday': '{day} {time}',

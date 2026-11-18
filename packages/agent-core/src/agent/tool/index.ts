@@ -1485,7 +1485,9 @@ export class ToolManager {
         !deferConstruction && this.agent.cron && new b.CronCreateTool(this.agent.cron),
         !deferConstruction && this.agent.cron && new b.CronListTool(this.agent.cron),
         !deferConstruction && this.agent.cron && new b.CronDeleteTool(this.agent.cron),
-        ...(!deferConstruction && this.agent.cron ? jobTools(this.agent) : []),
+        // Background jobs are a headline feature: always declared to the main
+        // agent (not behind the portal), so it knows it can make one.
+        ...jobTools(this.agent),
         // On-demand MCP tools stay out of the request until the model
         // enables them through this meta tool (server `exposure: on-demand`,
         // the default); see `tools/builtin/mcp/discover-mcp-tools.ts`.

@@ -66,3 +66,42 @@ describe('/jobs', () => {
     expect(host.showError).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('/jobs panel selection', () => {
+  /** A host whose editor swap disposes the mounted panel, like the real one. */
+  function realisticHost() {
+    let mounted: { dispose?: () => void; handleInput?: (data: string) => void; constructor: { name: string } } | undefined;
+    const host = {
+      showStatus: vi.fn(),
+      showError: vi.fn(),
+      state: { theme: { colors: { textDim: '#777', warning: '#fa0', text: '#fff', primary: '#0af', border: '#555' } }, appState: { workDir: '/w' } },
+      session: undefined,
+      mountEditorReplacement(panel: typeof mounted) {
+        mounted?.dispose?.();
+        mounted = panel;
+      },
+      restoreEditor() {
+        mounted?.dispose?.();
+        mounted = undefined;
+      },
+      get mounted() {
+        return mounted;
+      },
+    };
+    return host as unknown as SlashCommandHost & typeof host;
+  }
+
+  it('opens the new-job wizard when "new" is picked (the pick is not lost to the panel closing)', async () => {
+    const host = realisticHost();
+    const done = handleJobsCommand(host, '');
+    await vi.waitFor(() => {
+      expect(host.mounted?.constructor.name).toBe('ChoicePickerComponent');
+    });
+    host.mounted?.handleInput?.('\r');
+    await vi.waitFor(() => {
+      expect(host.mounted?.constructor.name).toBe('TextInputDialogComponent');
+    });
+    host.mounted?.handleInput?.('\u001B');
+    await done;
+  });
+});

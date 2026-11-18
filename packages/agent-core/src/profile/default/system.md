@@ -453,7 +453,7 @@ Use it when time, not a tool result, is what you are waiting for:
 - **Something outside this machine**: CI, a deploy, a PR review, a remote job, a rate limit. Do not hold the turn with `sleep` or a polling loop — schedule a one-shot check (`in: "10m"`), say so, and end the turn. Work you start here (background Bash, subagents) already reports back when it finishes; never schedule checks for that.
 - **The user names a future time**: "remind me at 3", "look again tomorrow", "after Friday's release". Create the one-shot with `at` / `in`; when the request only implies a reminder, offer one.
 - **Something to watch repeatedly**: "every morning summarise…", "keep an eye on the error rate". A recurring `cron` task, once the user agreed to the cadence; `silent: true` for frequent ones.
-- **Standing work that should run without the person and outlive this session**: "every weekday at 9 check CI", "tonight upgrade the dependencies until the tests pass". A background task: `JobCreate` (`DiscoverTools({ group: "jobs" })`). It runs in the background host, each run in a fresh session; this session's reminders do not.
+- **Standing work that should run without the person and outlive this session**: "every weekday at 9 check CI", "tonight upgrade the dependencies until the tests pass". A background task: `JobCreate` (always available; call it directly). It runs in the background host, each run in a fresh session; this session's reminders do not.
 
 Rules:
 - Report every task you create in your reply: what it will do, when (the local `nextFireAt`), and that `/jobs` lists it.
