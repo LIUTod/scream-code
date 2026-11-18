@@ -114,7 +114,7 @@ and isolated are refused rather than saved as inert switches.
 The `chrome-devtools-mcp` package ships seven official Agent-Skills (a11y,
 cookie and memory-leak debugging, LCP optimization, troubleshooting, CLI, and the
 general Chrome DevTools playbook). The same submenu installs them into
-`~/.scream-code/skills/` and keeps a manifest of what it put there, so removal and
+`~/.scream-code/skills/` (the `skills/` folder of your Scream home) and keeps a manifest of what it put there, so removal and
 updates only ever touch its own directories — a same-named skill of yours is
 skipped, never overwritten. Skills load when a session starts, so restart
 (`/new`) after installing.

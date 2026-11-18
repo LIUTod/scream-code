@@ -191,12 +191,15 @@ When generating a changeset (`.changeset/*.md`), never decide on a `major` bump 
 
 ### Releasing
 
-**Lockstep versioning**: all 10 packages share one version; every release bumps them together. 9 packages are private (not published to npm); only `apps/scream-code` (`scream-code`) is published.
+Releases are manual.
 
-- The release pipeline runs through changesets: record changes with `pnpm changeset add`, push to `main`, and the GitHub Actions workflow (`release.yml`) opens a "ci: release packages" version PR that bumps all fixed-group packages and generates their `CHANGELOG.md`. Merge the version PR, then publish manually (`pnpm publish`) — the workflow currently has no `publish` step; add one only if npm trusted publishing is configured.
-- `.changeset/config.json` defines the 9-package fixed group (`@scream-code/*` + `scream-code`) so any bump keeps them in sync. The **root `package.json` is not a workspace and changesets never touches it** — sync its `version` manually when releasing (one line; the other 9 packages are automatic).
-- Tag releases as `vX.Y.Z` (with the `v` prefix). Never edit released `CHANGELOG.md` sections.
-- **Never hand-edit the 9 packages' `package.json` versions to release** — that bypasses the lockstep group and skips CHANGELOG generation. Exceptions require an explicit user request (e.g. a hotfix bump with a follow-up changeset).
+- **Lockstep versioning**: the root `package.json`, the 8 `packages/*` and `apps/scream-code` (10 files) carry one version. Only `apps/scream-code` (`scream-code`) is published to npm; the other 9 are private.
+- **Steps**:
+  1. Bump: one commit `chore(release): bump packages to X.Y.Z` that sets `version` to `X.Y.Z` in all 10 `package.json` files.
+  2. Publish `scream-code` to npm (`pnpm publish` in `apps/scream-code`, or the root `pnpm run publish`, which runs every check first and then `changeset publish`). The package's `prepublishOnly` (`scripts/verify-publish.mjs`) syncs the README and product docs into the package, rebuilds, and checks the built version.
+  3. Tag the release commit `vX.Y.Z` (with the `v` prefix).
+  4. Delete the `.changeset/*.md` files that shipped; the ones left describe unreleased changes (`.changeset/README.md`).
+- Every push to `main` runs the pre-release checks in `release.yml`; its "Create Release Pull Request" job runs only on manual dispatch and is not part of the flow. There are no `CHANGELOG.md` files.
 
 ### Git
 
@@ -407,7 +410,7 @@ ScreamCode has a built-in MCP client. Agents can call external tools (browser au
   instead of saving a switch that describes nothing.
 - **Upstream skills** (`commands/mcp-skills.ts`): the npm package ships seven
   official Agent-Skills (`skills/<name>/SKILL.md` + `references/`). The menu
-  copies them into `~/.scream-code/skills/` and records
+  copies them into `<scream home>/skills/` and records
   `.chrome-devtools-skills.json` (source + version + owned dir names). Ownership
   rule: a directory the manifest does not list is never overwritten or deleted —
   a same-named local skill is reported as a conflict and skipped, and removal only
@@ -531,7 +534,7 @@ The completion grader returns `{pass, reason, issues}`; each issue carries `kind
 
 ### Bot Mode (`/bot`)
 
-Unattended permission mode: reversible actions auto-approve; everything else is denied and parked for human review (fail-closed — when in doubt, stop).
+Unattended permission mode: reversible actions auto-approve; everything else is denied outright (fail-closed). Nothing is queued for review: the denial reason goes back to the model, which skips that part, finishes the rest and lists it in its final report, and `permission.record_decision` keeps an audit trail on the wire.
 
 - **Entry**: `/bot` toggles; `/bot on|off` explicit.
 - **Policy**: `packages/agent-core/src/agent/permission/policies/bot-mode-permission.ts` — `BotModePermissionPolicy`, installed after user-configured deny rules (an explicit user deny always wins). Reversible allowlist → approve: reads/lookups (memory reads only — `MemoryWrite`/`MemoryEdit`/`MemoryConsolidateApply` are denied because a memo persists into later sessions), in-workspace `Write`/`Edit` (sensitive-file regex guard, `~` rejected, separator-boundary path check, and no deferred-execution paths: `.git`, `.husky`/`.githooks`, CI dirs and files such as `.github`/`.gitlab-ci.yml`, `.vscode`/`.idea`/`.devcontainer`, `.envrc`), read-only Bash (metacharacter exclusions block chaining/substitution/redirection/newlines; mutable git subcommands and `find`/`sort` are absent), plus goal, collaboration and cron tools and `DiscoverTools` (see "Cron / Scheduled Tasks"). `AskUserQuestion` is denied with a decide-yourself message. Everything else → deny.
@@ -947,12 +950,11 @@ Key files: `packages/agent-core/src/agent/context/index.ts`,
 `run-stream-json` encodes the standard session event stream as a line-based JSON dialect (for external bridges/pipes); the channel bridge re-broadcasts events into IM channels.
 
 - **Dialect**: `apps/scream-code/src/cli/run-stream-json.ts` — `StreamJsonWriter` (`emitSystem(sessionId, model?)` / `emitResult(subtype, summary, usage?)` / `writeAssistantDelta` + `flushAssistant` / `writeToolCall` / `writeToolResult`; assistant events carry no usage; merged tool deltas have string input), `mapStreamJsonMode` (default/acceptEdits→auto, plan→yolo + planMode, auto→auto, bypassPermissions/yolo→yolo, dontAsk→bot, unset→auto), `extractUserText` (joined with `\n`)
-- **EPIPE guard**: `installStdoutEpipeGuard()` factory — catches EPIPE on both the stdout `error` event and `write` throws → `process.exit(0)` (quiet exit, no crash); regression tests `test/cli/run-stream-json.test.ts` (31 cases)
-- **Bridge**: session events (assistant deltas / tool calls / status / approvals / questions) go out over the two read-only WebSockets `/api/events.mux` and `/api/events.host`; approvals and questions reply via `POST /api/respond` echoing the original `rpcId`
+- **EPIPE guard**: `installStdoutEpipeGuard()` factory — catches EPIPE on both the stdout `error` event and `write` throws → `process.exit(0)` (quiet exit, no crash); regression tests in `test/cli/run-stream-json.test.ts`
 
 ### Service Manifest & Extension Contracts
 
-- **Manifest**: plugin packages carry `manifest.json` (incl. `entryPoint`), parsed/validated by `packages/agent-core/src/plugin/manifest.ts`; the 117-package set is the manifest publish/parse closure, not the browser-runtime or TS-import closure
+- **Manifest**: plugin packages carry `scream.plugin.json` (incl. `entryPoint`; the other accepted locations are listed in `parseManifest`), parsed/validated by `packages/agent-core/src/plugin/manifest.ts`
 - **Registration model**: manifest hooks register in bulk via `session/hooks/engine.ts:registerAll`, shared with the `/extension` runtime
 
 ### Output-Truncation Recovery
@@ -1218,7 +1220,7 @@ The main agent ships with `RunScript` **enabled by default**: one JavaScript pro
 `prepareSystemPromptContext()` (`packages/agent-core/src/profile/context.ts`) merges every discovered `AGENTS.md` into `SCREAM_AGENTS_MD`, and the whole merge is capped at `AGENTS_MD_MAX_BYTES` (32 KiB) — everything else would be paid on every request (the repo guide at 148 KB is ~37k tokens by itself).
 
 - **Precedence vs budget**: files render shallow → deep; the budget is allocated deep → shallow, so a deeper file overrides its ancestors in the prompt.
-- **Per-file floor**: `AGENTS_MD_MIN_BYTES` (2 KiB) is reserved for every file before deeper files take the remainder. Without it one oversized project guide zeroed every user-level file, and the user's `~/.scream-code/AGENTS.md` conventions disappeared from the prompt with no trace.
+- **Per-file floor**: `AGENTS_MD_MIN_BYTES` (2 KiB) is reserved for every file before deeper files take the remainder. Without it one oversized project guide zeroed every user-level file, and the user's `<scream home>/AGENTS.md` conventions disappeared from the prompt with no trace.
 - **Never silent**: a cut file ends with `[... N bytes truncated; read <path> for the rest]`, so the model knows to open it; a file that cannot fit at all gets an omission marker. Silent truncation left the model believing it had read the whole guide, TOC included.
 - **Cost**: `truncateUtf8` is one encode plus a UTF-8 boundary walk, never a per-character re-measure — it runs on every agent start and every subagent spawn.
 - **Tests**: `test/profile/context.test.ts` (floor, marker, budget ceiling, multi-byte boundary, quadratic regression).
@@ -1227,7 +1229,7 @@ The main agent ships with `RunScript` **enabled by default**: one JavaScript pro
 
 The base system prompt carries a **Self Assets** section that tells the main agent where its own persistent configuration and data live, and what it must never touch. The accompanying `InspectOwnAssets` tool lets the agent actually inspect those assets — read-only, no write path.
 
-- **Self Assets injection**: `buildSelfMap()` (`packages/agent-core/src/profile/self-map.ts`) renders the map (config.toml / tui.toml / user-prefs.md / mcp.json / AGENTS.md / skills / plugins / memory / knowledge, plus core-code and runtime-artifact boundaries). It is injected as the `SCREAM_SELF_ASSETS` template variable in `buildTemplateVars` (`profile/resolve.ts`) and rendered in the `# Self Assets` section of `profile/default/system.md`. Paths are anchored deliberately: user-level AGENTS.md and skills resolve against the OS home (`~/.scream-code/...`) regardless of `SCREAM_CODE_HOME`; everything else against the scream home. `buildSelfMap` must stay pure and synchronous (no async path lookups — `resolveSkillInstallPaths` is async and cannot be used there).
+- **Self Assets injection**: `buildSelfMap()` (`packages/agent-core/src/profile/self-map.ts`) renders the map (config.toml / tui.toml / user-prefs.md / mcp.json / AGENTS.md / skills / plugins / memory / knowledge, plus core-code and runtime-artifact boundaries). It is injected as the `SCREAM_SELF_ASSETS` template variable in `buildTemplateVars` (`profile/resolve.ts`) and rendered in the `# Self Assets` section of `profile/default/system.md`. Every path, the user-level AGENTS.md and skills included, resolves against the scream home (`resolveScreamHome()`, so `SCREAM_CODE_HOME` moves all of it); only the generic `~/.agents/` convention stays in the OS home. `buildSelfMap` must stay pure and synchronous (no async path lookups — `resolveSkillInstallPaths` is async and cannot be used there).
 - **InspectOwnAssets tool**: `packages/agent-core/src/tools/builtin/state/inspect-own-assets.ts` (+ `.md` description). Registered in `ToolManager.initializeBuiltinTools()` **main-agent only** (`this.agent.type === 'main'`), listed in `profile/default/agent.yaml` under the main agent's `tools`, and added to the auto-approve whitelist in `agent/permission/policies/default-tool-approve.ts` (read-only, like Read/Grep/Glob). Subagent profiles define their own tool lists, so the tool is not exposed to subagents. It supports `scope` = `all | skills | mcp | config | memory | knowledge`; reports existence/size/frontmatter status (dir skills: `---` + `name:` within the first 25 lines, bounded 32 KiB read; flat skills: always ok, name from filename; skips dot-entries, node_modules and the 14 documentation filenames), mcp.json parse status + server count (1 MiB oversize guard), plugin-managed skills under `<screamHome>/plugins/managed/<id>/SKILL.md`, and git-root-anchored project skills via `resolveSkillInstallPaths`. Strictly read-only; declares `ToolAccesses.readTree`/`readFile` conservatively.
 - **Tests**: `test/tools/inspect-own-assets.test.ts` (unit, temp dir tree) and `test/tools/inspect-own-assets.e2e.test.ts` (real agent: registration, `useProfile(DEFAULT_AGENT_PROFILES['agent'])` wiring into model-visible `loopTools`, execution).
 

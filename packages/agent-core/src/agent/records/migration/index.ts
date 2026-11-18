@@ -67,15 +67,6 @@ export function migrateWireRecord(
   );
 }
 
-export function migrateWireRecords(
-  records: readonly WireMigrationRecord[],
-  readVersion: string | undefined,
-): WireMigrationRecord[] {
-  const migrations =
-    readVersion === undefined ? MIGRATIONS : resolveWireMigrations(readVersion);
-  return records.map((record) => migrateWireRecord(record, migrations));
-}
-
 function findMigration(sourceVersion: string): WireMigration | undefined {
   for (const migration of MIGRATIONS) {
     if (migration.sourceVersion === sourceVersion) return migration;

@@ -5,7 +5,9 @@ import { SkillParseError, UnsupportedSkillTypeError, parseSkillFromFile } from '
 import type { SkillDefinition, SkillRoot, SkillSource, SkippedSkill } from './types';
 import { normalizeSkillName } from './types';
 
-const USER_BRAND_DIRS = ['.scream-code/skills'] as const;
+// User skills: `<scream home>/skills` (follows SCREAM_CODE_HOME, see
+// `userSkillsDir`). The generic `.agents/skills` convention is shared with
+// other tools, so it stays in the OS home.
 const USER_GENERIC_DIRS = ['.agents/skills'] as const;
 const PROJECT_BRAND_DIRS = ['.scream-code/skills'] as const;
 const PROJECT_GENERIC_DIRS = ['.agents/skills'] as const;
@@ -38,8 +40,19 @@ const DOCUMENTATION_MARKDOWN_LOWER = new Set([
 ]);
 
 export interface SkillPathContext {
+  /** OS home: `~/.agents/skills` and `~` in configured skill dirs. */
   readonly userHomeDir: string;
+  /**
+   * Scream home (`resolveScreamHome()`), where the user's own skills live as
+   * `skills/`. Omitted means `<userHomeDir>/.scream-code`, the default home.
+   */
+  readonly screamHomeDir?: string | undefined;
   readonly workDir: string;
+}
+
+/** The user's own skill directory: `<scream home>/skills`. */
+export function userSkillsDir(paths: Pick<SkillPathContext, 'userHomeDir' | 'screamHomeDir'>): string {
+  return join(paths.screamHomeDir ?? join(paths.userHomeDir, '.scream-code'), 'skills');
 }
 
 export interface ResolveSkillRootsOptions {
@@ -106,15 +119,7 @@ export async function resolveSkillRoots(
       realpath,
     );
     await pushFirstExisting(roots, PROJECT_GENERIC_DIRS, projectRoot, 'project', isDir, realpath);
-    await pushBrandGroup(
-      roots,
-      USER_BRAND_DIRS,
-      userHomeDir,
-      'user',
-      mergeAllAvailableSkills,
-      isDir,
-      realpath,
-    );
+    await pushExistingRoot(roots, userSkillsDir(options.paths), 'user', isDir, realpath);
     await pushFirstExisting(roots, USER_GENERIC_DIRS, userHomeDir, 'user', isDir, realpath);
   }
 

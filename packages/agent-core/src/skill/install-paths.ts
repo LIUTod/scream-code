@@ -1,9 +1,9 @@
 import { basename, dirname, join, normalize } from 'pathe';
 
-import { findProjectRoot } from './scanner';
+import { findProjectRoot, userSkillsDir } from './scanner';
 
 export interface SkillInstallPaths {
-  /** ~/.scream-code/skills */
+  /** <scream home>/skills (`~/.scream-code/skills` by default) */
   readonly userDir: string;
   /** <projectRoot>/.scream-code/skills */
   readonly projectDir: string;
@@ -18,11 +18,19 @@ const MANAGED_SKILL_ROOT_NAMES = new Set(['.scream-code', '.agents']);
  * skills this is the `.md` file itself.
  *
  * The install unit is the first ancestor of `skillPath` whose parent is a
- * managed skill root such as `<...>/.scream-code/skills` or
- * `<...>/.agents/skills`.
+ * managed skill root: one of `skillRoots` (the user's skill directory, which
+ * follows SCREAM_CODE_HOME and may have any name), or a directory shaped like
+ * `<...>/.scream-code/skills` or `<...>/.agents/skills`.
  */
-export function resolveSkillInstallUnit(skillPath: string): string {
+export function resolveSkillInstallUnit(skillPath: string, skillRoots: readonly string[] = []): string {
   const normalized = normalize(skillPath).replaceAll('\\', '/');
+  for (const root of skillRoots) {
+    const base = normalize(root).replaceAll('\\', '/').replace(/\/+$/, '');
+    const prefix = `${base}/`;
+    if (!samePathPrefix(normalized, prefix)) continue;
+    const first = normalized.slice(prefix.length).split('/')[0];
+    if (first !== undefined && first.length > 0) return normalized.slice(0, prefix.length) + first;
+  }
   let current = normalized;
   while (true) {
     const parent = dirname(current).replaceAll('\\', '/');
@@ -39,21 +47,30 @@ export function resolveSkillInstallUnit(skillPath: string): string {
   }
 }
 
+/** Windows paths are case-insensitive; elsewhere compare exactly. */
+function samePathPrefix(path: string, prefix: string): boolean {
+  return process.platform === 'win32'
+    ? path.toLowerCase().startsWith(prefix.toLowerCase())
+    : path.startsWith(prefix);
+}
+
 /**
  * Resolve the two standard skill installation directories.
  *
- * - User skills live under `~/.scream-code/skills`.
+ * - User skills live under `<scream home>/skills` (`~/.scream-code/skills`
+ *   unless SCREAM_CODE_HOME moves it).
  * - Project skills live under `<git-root>/.scream-code/skills`, where the
  *   git-root is the nearest ancestor of `workDir` containing a `.git` directory
  *   (falling back to `workDir` itself).
  */
 export async function resolveSkillInstallPaths(options: {
   readonly userHomeDir: string;
+  readonly screamHomeDir?: string | undefined;
   readonly workDir: string;
 }): Promise<SkillInstallPaths> {
   const projectRoot = await findProjectRoot(options.workDir);
   return {
-    userDir: join(options.userHomeDir, '.scream-code', 'skills'),
+    userDir: userSkillsDir(options),
     projectDir: join(projectRoot, '.scream-code', 'skills'),
   };
 }

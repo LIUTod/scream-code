@@ -6,35 +6,22 @@ import type { WireMigration, WireMigrationRecord } from './index';
  * built-in: `ast_grep` -> `AstGrep`, `ast_edit` -> `AstEdit`, `python` ->
  * `Python` (`tools/tool-names.ts`).
  *
- * Every record that names a tool is rewritten, so a resumed session shows
- * one name for each tool, the model's history uses the names its tools now
- * have, and a stored grant or active-tool list keeps applying:
+ * Only tool calls are rewritten, so a resumed session shows one name per tool
+ * and the model's history uses the names its tools now have:
  *   - assistant tool calls in `context.append_message` and in the history of
  *     `context.snapshot` (live and deferred messages);
- *   - `tool.call` loop events (`context.append_loop_event`);
- *   - `tools.set_active_tools` names and `request.header` activeTools;
- *   - `permission.record_approval_result` / `permission.record_decision`
- *     tool names, and the tool part of approve-for-session rules
- *     (`sessionApprovalRule`, `permission.record_grant_revocation`).
- * Anything else, and any record without the expected shape, passes through.
+ *   - `tool.call` loop events (`context.append_loop_event`).
+ * Tool lists and permission rules stay as written: `tools.set_active_tools`
+ * replays through `setActiveTools`, which adds the current name next to an old
+ * one, and rule matching accepts the old name. Leaving them keeps a user or
+ * plugin tool that really has one of the old names working. Anything else, and
+ * any record without the expected shape, passes through.
  */
 
 type AnyRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is AnyRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function renameNames(value: unknown): unknown {
-  return Array.isArray(value) ? value.map((name) => (typeof name === 'string' ? canonicalToolName(name) : name)) : value;
-}
-
-/** `python` -> `Python`, `ast_grep(foo)` -> `AstGrep(foo)`; other rules unchanged. */
-function renameRulePattern(value: unknown): unknown {
-  if (typeof value !== 'string') return value;
-  const open = value.indexOf('(');
-  if (open === -1) return canonicalToolName(value);
-  return canonicalToolName(value.slice(0, open)) + value.slice(open);
 }
 
 function renameMessage(message: unknown): unknown {
@@ -49,12 +36,6 @@ function renameMessage(message: unknown): unknown {
 
 function renameMessages(value: unknown): unknown {
   return Array.isArray(value) ? value.map(renameMessage) : value;
-}
-
-function renameToolName(record: WireMigrationRecord): WireMigrationRecord {
-  return typeof record['toolName'] === 'string'
-    ? { ...record, toolName: canonicalToolName(record['toolName']) }
-    : record;
 }
 
 export const migrateV1_8ToV1_9: WireMigration = {
@@ -81,20 +62,6 @@ export const migrateV1_8ToV1_9: WireMigration = {
           },
         };
       }
-      case 'tools.set_active_tools':
-        return { ...record, names: renameNames(record['names']) };
-      case 'request.header':
-        return { ...record, activeTools: renameNames(record['activeTools']) };
-      case 'permission.record_decision':
-        return renameToolName(record);
-      case 'permission.record_approval_result': {
-        const renamed = renameToolName(record);
-        return 'sessionApprovalRule' in renamed
-          ? { ...renamed, sessionApprovalRule: renameRulePattern(renamed['sessionApprovalRule']) }
-          : renamed;
-      }
-      case 'permission.record_grant_revocation':
-        return { ...record, pattern: renameRulePattern(record['pattern']) };
       default:
         return record;
     }

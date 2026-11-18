@@ -34,16 +34,16 @@ describe('InspectOwnAssetsTool', () => {
     await writeFile(join(home, 'memory', 'entries.jsonl'), '{}\n{}\n');
     await writeFile(join(home, 'knowledge', 'knowledge.db'), 'DB');
 
-    // OS-home anchored assets (AGENTS.md + user skills)
-    await mkdir(join(userHome, '.scream-code', 'skills', 'my-skill'), { recursive: true });
-    await mkdir(join(userHome, '.scream-code', 'skills', 'bad-skill'), { recursive: true });
-    await writeFile(join(userHome, '.scream-code', 'AGENTS.md'), '# User instructions\n');
+    // The user's own AGENTS.md and skills live in the scream home too
+    await mkdir(join(home, 'skills', 'my-skill'), { recursive: true });
+    await mkdir(join(home, 'skills', 'bad-skill'), { recursive: true });
+    await writeFile(join(home, 'AGENTS.md'), '# User instructions\n');
     await writeFile(
-      join(userHome, '.scream-code', 'skills', 'my-skill', 'SKILL.md'),
+      join(home, 'skills', 'my-skill', 'SKILL.md'),
       '---\nname: my-skill\ndescription: does things\n---\nDo things.\n',
     );
-    await writeFile(join(userHome, '.scream-code', 'skills', 'bad-skill', 'SKILL.md'), 'no frontmatter here\n');
-    await writeFile(join(userHome, '.scream-code', 'skills', 'flat.md'), '---\nname: flat\n---\nFlat skill.\n');
+    await writeFile(join(home, 'skills', 'bad-skill', 'SKILL.md'), 'no frontmatter here\n');
+    await writeFile(join(home, 'skills', 'flat.md'), '---\nname: flat\n---\nFlat skill.\n');
 
     // project-level assets
     await mkdir(join(cwd, '.scream-code'), { recursive: true });
@@ -91,10 +91,10 @@ describe('InspectOwnAssetsTool', () => {
     expect(out).toContain('tui.toml');
     expect(out).toContain('user-prefs.md');
     expect(out).toContain('AGENTS.md (user)');
-    expect(out).toContain(join(userHome, '.scream-code', 'AGENTS.md'));
+    expect(out).toContain(join(home, 'AGENTS.md'));
   });
 
-  it('lists skills with frontmatter status, anchored to the OS home', async () => {
+  it('lists skills with frontmatter status, from the scream home', async () => {
     const out = await run('skills');
 
     expect(out).toContain('my-skill');
@@ -102,7 +102,7 @@ describe('InspectOwnAssetsTool', () => {
     expect(out).toContain('bad-skill');
     expect(out).toContain('missing');
     expect(out).toContain('flat');
-    expect(out).toContain(join(userHome, '.scream-code', 'skills'));
+    expect(out).toContain(join(home, 'skills'));
   });
 
   it('marks invocable status against the live registry and reports coverage', async () => {
@@ -257,7 +257,7 @@ describe('InspectOwnAssetsTool', () => {
   });
 
   it('skips non-skill entries (dot-dirs, node_modules, README.md, dirs without SKILL.md)', async () => {
-    const skillsDir = join(userHome, '.scream-code', 'skills');
+    const skillsDir = join(home, 'skills');
     await mkdir(join(skillsDir, '.hidden'), { recursive: true });
     await mkdir(join(skillsDir, 'node_modules'), { recursive: true });
     await mkdir(join(skillsDir, 'no-skill-md'), { recursive: true });
@@ -272,7 +272,7 @@ describe('InspectOwnAssetsTool', () => {
   });
 
   it('reports none when skills directories are missing', async () => {
-    await rm(join(userHome, '.scream-code', 'skills'), { recursive: true, force: true });
+    await rm(join(home, 'skills'), { recursive: true, force: true });
     const out = await run('skills');
 
     expect(out).toContain('none');
@@ -298,9 +298,9 @@ describe('InspectOwnAssetsTool', () => {
   });
 
   it('marks dir skills with frontmatter but no name as broken (matches the registry parser)', async () => {
-    await mkdir(join(userHome, '.scream-code', 'skills', 'named-less'), { recursive: true });
+    await mkdir(join(home, 'skills', 'named-less'), { recursive: true });
     await writeFile(
-      join(userHome, '.scream-code', 'skills', 'named-less', 'SKILL.md'),
+      join(home, 'skills', 'named-less', 'SKILL.md'),
       '---\ndescription: no name here\n---\nBody.\n',
     );
 
@@ -314,9 +314,9 @@ describe('InspectOwnAssetsTool', () => {
     // Same failure mode as the real-world tod plugin: an unquoted `: ` inside
     // the description makes the YAML unparseable even though a `name:` line
     // exists — a heuristic check would wrongly report it as ok.
-    await mkdir(join(userHome, '.scream-code', 'skills', 'tod-like'), { recursive: true });
+    await mkdir(join(home, 'skills', 'tod-like'), { recursive: true });
     await writeFile(
-      join(userHome, '.scream-code', 'skills', 'tod-like', 'SKILL.md'),
+      join(home, 'skills', 'tod-like', 'SKILL.md'),
       '---\nname: tod-like\ndescription: Core mechanisms: external-anchor\n---\nBody.\n',
     );
 
@@ -327,8 +327,8 @@ describe('InspectOwnAssetsTool', () => {
   });
 
   it('distinguishes registered-but-not-invocable skills (registry lists them, invocable does not)', async () => {
-    await mkdir(join(userHome, '.scream-code', 'skills', 'blocked-skill'), { recursive: true });
-    await writeFile(join(userHome, '.scream-code', 'skills', 'blocked-skill', 'SKILL.md'), '---\nname: blocked-skill\ndescription: blocked\n---\nBody.\n');
+    await mkdir(join(home, 'skills', 'blocked-skill'), { recursive: true });
+    await writeFile(join(home, 'skills', 'blocked-skill', 'SKILL.md'), '---\nname: blocked-skill\ndescription: blocked\n---\nBody.\n');
     const withRegistry = new InspectOwnAssetsTool(
       {
         config: { cwd },

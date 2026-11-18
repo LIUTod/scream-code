@@ -5,7 +5,6 @@ import { buildSelfMap } from '../../src/profile/self-map';
 describe('buildSelfMap', () => {
   const opts = {
     homeDir: '/home/user/.scream-code',
-    userHomeDir: '/home/user',
     cwd: '/work/project',
   };
 
@@ -41,18 +40,17 @@ describe('buildSelfMap', () => {
     expect(map).toContain('KnowledgeLookup tool');
   });
 
-  it('anchors user-level AGENTS.md and skills to the OS home, not the scream home', () => {
-    // SCREAM_CODE_HOME scenario: scream home differs from the OS home.
+  it('puts the user-level AGENTS.md and skills in the scream home with everything else', () => {
+    // SCREAM_CODE_HOME scenario: the scream home is not ~/.scream-code.
     const map = buildSelfMap({
       homeDir: '/custom/scream-home',
-      userHomeDir: '/home/user',
       cwd: '/work/project',
     });
 
-    // User-level files live under ~/.scream-code regardless of SCREAM_CODE_HOME
-    expect(map).toContain('/home/user/.scream-code/AGENTS.md');
-    expect(map).toContain('/home/user/.scream-code/skills');
-    // Everything else follows the scream home override
+    // The user's own instructions and skills move with SCREAM_CODE_HOME too.
+    expect(map).toContain('/custom/scream-home/AGENTS.md');
+    expect(map).toContain('/custom/scream-home/skills');
+    expect(map).not.toContain('.scream-code/AGENTS.md');
     expect(map).toContain('/custom/scream-home/config.toml');
     expect(map).toContain('/custom/scream-home/tui.toml');
     expect(map).toContain('/custom/scream-home/memory');
@@ -94,7 +92,6 @@ describe('buildSelfMap', () => {
   it('derives paths from the provided options (no hardcoded absolute paths)', () => {
     const map = buildSelfMap({
       homeDir: '/custom/home/.scream-code',
-      userHomeDir: '/custom/home',
       cwd: '/custom/proj',
     });
 
@@ -107,7 +104,6 @@ describe('buildSelfMap', () => {
   it('handles Windows-style paths without breaking backtick pairing', () => {
     const map = buildSelfMap({
       homeDir: 'C:\\Users\\someone\\.scream-code',
-      userHomeDir: 'C:\\Users\\someone',
       cwd: 'C:\\work\\project',
     });
 

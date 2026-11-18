@@ -48,6 +48,8 @@ const mocks = vi.hoisted(() => {
     harnessCreatesDeviceIdOnConstruction: false,
     execSync: vi.fn(),
     refreshUpdateCache: vi.fn(async () => ({ source: 'npm', checkedAt: null, latest: null })),
+    // Machine-independent: the real check reads the developer's OS home.
+    legacyUserAssetsNotice: vi.fn((): string | undefined => undefined),
     TuiConfigParseError,
   };
 });
@@ -125,6 +127,10 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 vi.mock('../../src/cli/update/refresh', () => ({
   refreshUpdateCache: mocks.refreshUpdateCache,
+}));
+
+vi.mock('../../src/utils/legacy-user-assets', () => ({
+  legacyUserAssetsNotice: mocks.legacyUserAssetsNotice,
 }));
 
 describe('runShell', () => {
@@ -242,6 +248,40 @@ describe('runShell', () => {
         editorCommand: 'vim',
         notifications: { enabled: true, condition: 'always' },
       },
+    });
+  });
+
+  it('shows the left-behind skills hint after the config warning, checked against the resolved home', async () => {
+    mocks.loadTuiConfig.mockRejectedValue(
+      new mocks.TuiConfigParseError({
+        theme: 'dark',
+        editorCommand: null,
+        notifications: { enabled: true, condition: 'unfocused' },
+      }),
+    );
+    mocks.legacyUserAssetsNotice.mockReturnValueOnce('skills left behind');
+    mocks.tuiStart.mockResolvedValue(undefined);
+
+    await runShell(
+      {
+        session: '',
+        continue: false,
+        yolo: false,
+        auto: false,
+        plan: false,
+        wolfpack: false,
+        model: undefined,
+        outputFormat: undefined,
+        prompt: undefined,
+        skillsDirs: [],
+      },
+      '1.2.3-test',
+    );
+
+    expect(mocks.legacyUserAssetsNotice).toHaveBeenCalledWith('/tmp/scream-code-test-home');
+    const [, , startupInput] = mocks.screamTuiConstructor.mock.calls.at(-1)!;
+    expect(startupInput).toMatchObject({
+      startupNotice: 'Invalid TUI config in ~/.scream-code/tui.toml; using defaults.\nskills left behind',
     });
   });
 

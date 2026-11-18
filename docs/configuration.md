@@ -3,11 +3,20 @@
 Everything persistent lives under the Scream home directory: `~/.scream-code`
 (override with `SCREAM_CODE_HOME`).
 
+`SCREAM_CODE_HOME` takes a path on any platform (`D:\Scream`, `/data/scream`);
+`~/...` is expanded even where no shell does it (Windows environment settings,
+launchd, systemd), a relative path is made absolute, surrounding quotes are
+dropped, and a blank value counts as unset. Moving the home moves everything
+below, your own skills and `AGENTS.md` included, so a second value gives a fully
+separate profile. The generic `~/.agents/` folder, shared with other tools,
+stays in your OS home.
+
 ```
 ~/.scream-code/
 ├── config.toml          # providers, models, permissions, hooks, services
 ├── mcp.json             # MCP servers (user level)
 ├── image-config.json    # image-generation endpoint
+├── AGENTS.md            # your own instructions for every project
 ├── skills/              # user skills
 ├── memory/              # memo store
 ├── knowledge/           # knowledge base

@@ -1,9 +1,8 @@
-import { homedir } from 'node:os';
 
 import { resolveScreamHome } from '../config/path';
 import { describeLocalTimeZone, formatLocalIso } from '../utils/local-time';
 import { renderPrompt } from '../utils/render-prompt';
-import { canonicalToolName } from '../tools/tool-names';
+import { withCurrentToolNames } from '../tools/tool-names';
 import { buildSelfMap } from './self-map';
 import type {
   RawAgentProfile,
@@ -109,8 +108,9 @@ function resolveMergedProfile(
       ...parent?.promptVars,
       ...profile.promptVars,
     },
-    // A user profile may still list a renamed built-in by its old name.
-    tools: profile.tools !== undefined ? profile.tools.map(canonicalToolName) : [...(parent?.tools ?? [])],
+    // A user profile may still list a renamed built-in by its old name; the
+    // old name stays too, in case a plugin tool really has it.
+    tools: profile.tools !== undefined ? withCurrentToolNames(profile.tools) : [...(parent?.tools ?? [])],
     // An inheriting profile that declares its own `tools:` states an explicit
     // tool contract for that role (every built-in subagent does). The root
     // profile's list is the opposite: it IS the default resolved set (all
@@ -204,7 +204,6 @@ function buildTemplateVars(
     SCREAM_SKILLS: skills,
     SCREAM_SELF_ASSETS: buildSelfMap({
       homeDir: resolveScreamHome(),
-      userHomeDir: homedir(),
       cwd: context.cwd,
     }),
     SCREAM_ADDITIONAL_DIRS_INFO: context.additionalDirsInfo ?? '',

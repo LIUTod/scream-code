@@ -33,7 +33,8 @@ Body: the instructions the agent follows once the skill is invoked.
 
 | Root | Scope |
 |---|---|
-| `~/.scream-code/skills/` | user |
+| `~/.scream-code/skills/` | user (the `skills/` folder of the Scream home, so `SCREAM_CODE_HOME` moves it) |
+| `~/.agents/skills/` | user (alternate convention) |
 | `<git-root>/.scream-code/skills/` | project (the git root, not the current directory) |
 | `<git-root>/.agents/skills/` | project (alternate convention) |
 | `extraSkillDirs` in `config.toml` | extra roots |

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -26,9 +26,18 @@ describe('getDataDir', () => {
     expect(getDataDir()).toBe('/tmp/scream-test-data');
   });
 
-  it('returns SCREAM_CODE_HOME even if it is a relative path', () => {
+  it('makes a relative SCREAM_CODE_HOME absolute, so the app and the engine agree', () => {
     process.env['SCREAM_CODE_HOME'] = 'relative/path';
-    expect(getDataDir()).toBe('relative/path');
+    expect(getDataDir()).toBe(resolve('relative/path'));
+  });
+
+  it('treats a blank or quoted SCREAM_CODE_HOME the way users mean it', () => {
+    process.env['SCREAM_CODE_HOME'] = '   ';
+    expect(getDataDir()).toBe(join(homedir(), '.scream-code'));
+    process.env['SCREAM_CODE_HOME'] = '"/tmp/quoted home"';
+    expect(getDataDir()).toBe(resolve('/tmp/quoted home'));
+    process.env['SCREAM_CODE_HOME'] = '~/scream-alt';
+    expect(getDataDir()).toBe(join(homedir(), 'scream-alt'));
   });
 });
 

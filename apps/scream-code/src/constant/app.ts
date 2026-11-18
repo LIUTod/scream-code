@@ -6,7 +6,6 @@ export const CLI_UI_MODE = 'shell';
 
 // App-owned data paths. SDK/core runtime config is intentionally not routed here.
 
-export const SCREAM_CODE_HOME_ENV = 'SCREAM_CODE_HOME';
 export const SCREAM_CODE_DATA_DIR_NAME = '.scream-code';
 export const SCREAM_CODE_LOG_DIR_NAME = 'logs';
 export const SCREAM_CODE_UPDATE_DIR_NAME = 'updates';

@@ -1,7 +1,7 @@
 import picomatch from 'picomatch';
 
 import type { RunnableToolExecution } from '../../loop/types';
-import { canonicalToolName } from '../../tools/tool-names';
+import { legacyToolName } from '../../tools/tool-names';
 import type { PermissionRule } from './types';
 
 /**
@@ -51,17 +51,16 @@ export function parsePattern(pattern: string): ParsedPattern {
     throw new Error('permission pattern: empty string');
   }
 
-  // A rule written against a renamed built-in's old name keeps matching it.
   const openIdx = trimmed.indexOf('(');
   if (openIdx === -1) {
-    return { toolName: canonicalToolName(trimmed) };
+    return { toolName: trimmed };
   }
 
   if (!trimmed.endsWith(')')) {
     throw new Error(`permission pattern: missing closing paren in "${pattern}"`);
   }
 
-  const toolName = canonicalToolName(trimmed.slice(0, openIdx));
+  const toolName = trimmed.slice(0, openIdx);
   const argPattern = trimmed.slice(openIdx + 1, -1);
   if (toolName.length === 0) {
     throw new Error(`permission pattern: empty tool name in "${pattern}"`);
@@ -86,7 +85,15 @@ export function matchPermissionRule({
     return undefined;
   }
 
-  if (parsed.toolName !== '*' && !picomatch.isMatch(toolName, parsed.toolName)) {
+  // A rule written against a renamed built-in's old name keeps matching the
+  // tool under its current name; a tool that really has the old name (a user
+  // or plugin tool) still matches it exactly.
+  const legacyName = legacyToolName(toolName);
+  if (
+    parsed.toolName !== '*' &&
+    !picomatch.isMatch(toolName, parsed.toolName) &&
+    !(legacyName !== undefined && picomatch.isMatch(legacyName, parsed.toolName))
+  ) {
     return undefined;
   }
 

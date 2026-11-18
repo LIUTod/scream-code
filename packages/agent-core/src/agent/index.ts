@@ -82,6 +82,7 @@ import type { Jian } from '@scream-code/jian';
 import type { ToolServices } from '../tools/support/services';
 import { scheduleCronTask, validateCronSchedule } from '../tools/cron/schedule';
 import type { CronTask } from '../tools/cron/types';
+import { legacyToolName } from '../tools/tool-names';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
 export { REPLAY_TURN_LIMIT } from './replay';
@@ -564,7 +565,7 @@ export class Agent {
     this.cacheWarmer?.dispose();
     if (!this.rlmEnabled) return;
     this.rlmEnabled = false;
-    const withoutPython = this.tools.getActiveTools().filter((name) => name !== 'Python');
+    const withoutPython = this.activeToolsWithoutPython();
     this.tools.setActiveTools(withoutPython);
     (this.tools.getBuiltinTool('Python') as { dispose?: () => void } | undefined)?.dispose?.();
     // Symmetric with setRlmEnabled(false): persist rlm.exit so a close →
@@ -572,6 +573,18 @@ export class Agent {
     // above stays consistent). Without this, replay would see only rlm.enter
     // → badge lit, python tool removed by the close record → broken state.
     this.records.logRecord({ type: 'rlm.exit' });
+  }
+
+  /**
+   * The active list without the RLM `Python` tool. A list from before the
+   * rename may still carry the old name `python`, which `setActiveTools`
+   * would turn back into `Python`; it goes too, unless a user or plugin tool
+   * really has that name.
+   */
+  private activeToolsWithoutPython(): string[] {
+    return this.tools
+      .getActiveTools()
+      .filter((name) => name !== 'Python' && !(name === legacyToolName('Python') && !this.tools.hasUserTool(name)));
   }
 
   /**
@@ -588,7 +601,7 @@ export class Agent {
         this.tools.setActiveTools([...current, 'Python']);
       }
     } else {
-      const withoutPython = current.filter((name) => name !== 'Python');
+      const withoutPython = this.activeToolsWithoutPython();
       if (withoutPython.length !== current.length) {
         this.tools.setActiveTools(withoutPython);
       }
@@ -695,7 +708,7 @@ export class Agent {
         this.tools.setActiveTools([...current, 'Python']);
       }
     } else {
-      const withoutPython = current.filter((name) => name !== 'Python');
+      const withoutPython = this.activeToolsWithoutPython();
       if (withoutPython.length !== current.length) {
         this.tools.setActiveTools(withoutPython);
       }

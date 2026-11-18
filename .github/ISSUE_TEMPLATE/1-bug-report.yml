@@ -25,15 +25,15 @@ body:
   - type: input
     id: plan
     attributes:
-      label: Which open platform/subscription were you using?
-      description: The one you selected when running `/login`
+      label: Which model provider were you using?
+      description: The provider you configured with `/config` (for example a built-in provider or a custom API endpoint)
     validations:
       required: true
   - type: input
     id: model
     attributes:
       label: Which model were you using?
-      description: The one you can see on the bottom status line, like `scream-k2.6`, `scream-for-coding`, etc.
+      description: The model alias shown on the bottom status line (or in `/model`)
   - type: input
     id: platform
     attributes:

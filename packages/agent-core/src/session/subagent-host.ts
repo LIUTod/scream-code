@@ -1272,7 +1272,7 @@ export class SessionSubagentHost {
       thinkingLevel,
     });
 
-    const context = await prepareSystemPromptContext(child.jian);
+    const context = await prepareSystemPromptContext(child.jian, child.screamHomeDir);
     child.useProfile(profile, context);
 
     // RLM inheritance must happen AFTER useProfile mounts the profile's tools

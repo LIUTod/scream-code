@@ -6,12 +6,11 @@
  */
 
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, normalize } from 'node:path';
+
+import { resolveScreamHome } from '@scream-code/scream-code-sdk';
 
 import {
-  SCREAM_CODE_DATA_DIR_NAME,
-  SCREAM_CODE_HOME_ENV,
   SCREAM_CODE_INPUT_HISTORY_DIR_NAME,
   SCREAM_CODE_LOG_DIR_NAME,
   SCREAM_CODE_UPDATE_DIR_NAME,
@@ -19,16 +18,14 @@ import {
 } from '#/constant/app';
 
 /**
- * Return the root data directory for Scream Code.
- *
- * Priority: `SCREAM_CODE_HOME` env var > `~/.scream-code`.
+ * Return the root data directory for Scream Code: the same Scream home the
+ * engine uses (`SCREAM_CODE_HOME`, else `~/.scream-code`), resolved by one
+ * function so the app and the engine can never disagree about a blank,
+ * quoted, `~`-prefixed or relative value. Normalized to the platform's own
+ * separators, so paths shown to Windows users do not mix `/` and `\`.
  */
 export function getDataDir(): string {
-  const envDir = process.env[SCREAM_CODE_HOME_ENV];
-  if (envDir) {
-    return envDir;
-  }
-  return join(homedir(), SCREAM_CODE_DATA_DIR_NAME);
+  return normalize(resolveScreamHome());
 }
 
 /**

@@ -5,12 +5,6 @@ import { resolveConfigPath } from '../config/path';
 export interface BuildSelfMapOptions {
   /** Scream home directory (usually ~/.scream-code, overridable via SCREAM_CODE_HOME). */
   readonly homeDir: string;
-  /**
-   * OS user home directory (homedir()). User-level AGENTS.md and skills are
-   * anchored to this (e.g. ~/.scream-code/AGENTS.md) regardless of
-   * SCREAM_CODE_HOME, matching loadAgentsMd / resolveSkillInstallPaths.
-   */
-  readonly userHomeDir: string;
   /** Current working directory (used to derive project-level paths). */
   readonly cwd: string;
 }
@@ -29,7 +23,6 @@ export interface BuildSelfMapOptions {
  */
 export function buildSelfMap(options: BuildSelfMapOptions): string {
   const home = options.homeDir;
-  const userHome = options.userHomeDir;
   const cwd = options.cwd;
 
   const configPath = resolveConfigPath({ homeDir: home });
@@ -37,8 +30,10 @@ export function buildSelfMap(options: BuildSelfMapOptions): string {
   const userPrefsPath = join(home, 'user-prefs.md');
   const userMcpJson = join(home, 'mcp.json');
   const projectMcpJson = join(cwd, '.scream-code', 'mcp.json');
-  const userAgentsMd = join(userHome, '.scream-code', 'AGENTS.md');
-  const userSkillsDir = join(userHome, '.scream-code', 'skills');
+  // The user's own instructions and skills live in the Scream home too
+  // (loadAgentsMd / userSkillsDir), so SCREAM_CODE_HOME moves them as well.
+  const userAgentsMd = join(home, 'AGENTS.md');
+  const userSkillsDir = join(home, 'skills');
   const pluginsDir = join(home, 'plugins');
   const memoryDir = join(home, 'memory');
   const knowledgeDir = join(home, 'knowledge');

@@ -325,12 +325,12 @@ function formatSkillEntry(entry: SkillEntry, status: string): string {
   return `- ${entry.name} — ${entry.kind} — ${entry.frontmatter} — ${status}${origin}${registration} — \`${entry.path}\``;
 }
 
-async function inspectConfig(home: string, userHome: string): Promise<string> {
+async function inspectConfig(home: string): Promise<string> {
   const items = [
     ['config.toml', resolveConfigPath({ homeDir: home })],
     ['tui.toml', join(home, 'tui.toml')],
     ['user-prefs.md', join(home, 'user-prefs.md')],
-    ['AGENTS.md (user)', join(userHome, '.scream-code', 'AGENTS.md')],
+    ['AGENTS.md (user)', join(home, 'AGENTS.md')],
   ] as const;
 
   const lines = ['## Config', ''];
@@ -349,6 +349,7 @@ async function inspectSkills(
 ): Promise<string> {
   const { userDir, projectDir } = await resolveSkillInstallPaths({
     userHomeDir: userHome,
+    screamHomeDir: home,
     workDir: cwd,
   });
   const registry = agent.skills?.registry;
@@ -498,9 +499,9 @@ export class InspectOwnAssetsTool implements BuiltinTool<InspectOwnAssetsInput> 
     const userHome = this.override?.userHomeDir ?? homedir();
     const cwd = this.agent.config.cwd;
 
-    // Conservative read declarations: everything under the scream home, the
-    // user-level .scream-code dir (AGENTS.md + skills), the working dir, and
-    // every parent-level mcp.json that may exist above the cwd.
+    // Conservative read declarations: everything under the scream home (which
+    // holds the user's AGENTS.md and skills too), the working dir, and every
+    // parent-level mcp.json that may exist above the cwd.
     //
     // Known boundary: in a monorepo, git-root project skills may live above
     // `cwd` and outside these declarations. Reads are not gated by accesses
@@ -509,7 +510,6 @@ export class InspectOwnAssetsTool implements BuiltinTool<InspectOwnAssetsInput> 
     const parentMcpPaths = resolveMcpJsonPaths({ cwd, homeDir: home }).parents;
     const accesses: ToolAccesses = [
       ...ToolAccesses.readTree(home),
-      ...ToolAccesses.readTree(join(userHome, '.scream-code')),
       ...ToolAccesses.readTree(cwd),
       ...parentMcpPaths.flatMap((p) => ToolAccesses.readFile(p)),
     ];
@@ -522,7 +522,7 @@ export class InspectOwnAssetsTool implements BuiltinTool<InspectOwnAssetsInput> 
         const scope = args.scope ?? 'all';
         const sections: string[] = [];
         if (scope === 'all' || scope === 'config') {
-          sections.push(await inspectConfig(home, userHome));
+          sections.push(await inspectConfig(home));
         }
         if (scope === 'all' || scope === 'skills') {
           sections.push(await inspectSkills(home, userHome, cwd, this.agent));

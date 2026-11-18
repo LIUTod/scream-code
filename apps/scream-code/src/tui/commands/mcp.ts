@@ -506,17 +506,12 @@ function npmCacheRoot(): string {
 }
 
 /**
- * Where skill discovery actually looks.
- *
- * Deliberately NOT `getDataDir()`: the scanner anchors user skills to
- * `<OS home>/.scream-code/skills` (`skill/scanner.ts` USER_BRAND_DIRS), while
- * `getDataDir()` follows SCREAM_CODE_HOME. Installing into the relocated
- * directory would put the files where nothing ever scans them — the exact
- * "feature exists but is not switched on" failure this repo keeps guarding
- * against.
+ * Where skill discovery actually looks: the user skill directory in the
+ * Scream home (`userSkillsDir` in agent-core's `skill/scanner.ts`), which
+ * follows SCREAM_CODE_HOME like every other piece of user data.
  */
 function skillsRoot(): string {
-  return join(homedir(), '.scream-code', 'skills');
+  return join(getDataDir(), 'skills');
 }
 
 async function loadUpstreamSkillsState(): Promise<UpstreamSkillsState> {

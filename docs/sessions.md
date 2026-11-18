@@ -9,12 +9,15 @@ append-only record stream.
 ~/.scream-code/sessions/
 └── <encoded-workdir>/
     └── <session-id>/
-        ├── wire.jsonl              # main agent records (append-only)
-        └── agents/<agent-id>/wire.jsonl
+        ├── state.json              # title, last prompt, session metadata
+        ├── logs/                   # this session's log
+        └── agents/
+            ├── main/wire.jsonl     # main agent records (append-only)
+            └── <agent-id>/wire.jsonl
 ```
 
-- `wire.jsonl` is the source of truth: every message, tool call and tool result
-  in order. Corrupt lines are reported with the file path and line number
+- Each agent's `wire.jsonl` is the source of truth: every message, tool call and
+  tool result in order. Corrupt lines are reported with the file path and line number
   (`agent/records/persistence.ts`).
 - `encoded-workdir` comes from `session/store/workdir-key.ts`, so sessions are
   bucketed per project and a listing defaults to the current directory.

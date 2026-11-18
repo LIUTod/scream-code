@@ -102,33 +102,35 @@ describe('HarnessAPI session skills', () => {
     expect(JSON.stringify(skills)).not.toContain('Your tool list contains one synthetic tool');
   });
 
-  it('resolves user skills from the OS home directory, not from the scream home', async () => {
+  it('resolves user skills from the scream home, not from ~/.scream-code in the OS home', async () => {
     const processHome = join(tmp, 'process-home');
     vi.stubEnv('HOME', processHome);
-    await writeUserSkill(processHome, 'real-home-only', 'Real home skill');
-    await writeUserSkill(homeDir, 'sandbox-only', 'Sandbox skill');
+    vi.stubEnv('USERPROFILE', processHome);
+    await writeUserSkill(join(processHome, '.scream-code'), 'real-home-only', 'Real home skill');
+    await writeUserSkill(homeDir, 'scream-home-skill', 'Scream home skill');
     const { rpc } = await createTestRpc();
     const created = await rpc.createSession({ id: 'ses_skill_sandbox_home', workDir });
 
     const names = new Set((await rpc.listSkills({ sessionId: created.id })).map((skill) => skill.name));
 
-    expect(names.has('real-home-only')).toBe(true);
-    expect(names.has('sandbox-only')).toBe(false);
+    expect(names.has('scream-home-skill')).toBe(true);
+    expect(names.has('real-home-only')).toBe(false);
   });
 
-  it('resolves user skills from the OS home directory even when SCREAM_CODE_HOME is set', async () => {
+  it('resolves user skills from the scream home that SCREAM_CODE_HOME points at', async () => {
     const processHome = join(tmp, 'env-process-home');
     vi.stubEnv('HOME', processHome);
+    vi.stubEnv('USERPROFILE', processHome);
     vi.stubEnv('SCREAM_CODE_HOME', homeDir);
-    await writeUserSkill(processHome, 'env-real-home-only', 'Env real home skill');
-    await writeUserSkill(homeDir, 'env-sandbox-only', 'Env sandbox skill');
+    await writeUserSkill(join(processHome, '.scream-code'), 'env-real-home-only', 'Env real home skill');
+    await writeUserSkill(homeDir, 'env-scream-home-skill', 'Env scream home skill');
     const { rpc } = await createTestRpc({});
     const created = await rpc.createSession({ id: 'ses_skill_env_home', workDir });
 
     const names = new Set((await rpc.listSkills({ sessionId: created.id })).map((skill) => skill.name));
 
-    expect(names.has('env-real-home-only')).toBe(true);
-    expect(names.has('env-sandbox-only')).toBe(false);
+    expect(names.has('env-scream-home-skill')).toBe(true);
+    expect(names.has('env-real-home-only')).toBe(false);
   });
 
   it('activates an inline skill through core and records display origin metadata', async () => {
@@ -439,8 +441,9 @@ describe('HarnessAPI session skills', () => {
     await writeFile(join(dir, 'SKILL.md'), lines.join('\n'));
   }
 
-  async function writeUserSkill(userHomeDir: string, name: string, description: string): Promise<void> {
-    const dir = join(userHomeDir, '.scream-code', 'skills', name);
+  /** Write a user skill into `<screamHome>/skills/<name>/SKILL.md`. */
+  async function writeUserSkill(screamHome: string, name: string, description: string): Promise<void> {
+    const dir = join(screamHome, 'skills', name);
     await mkdir(dir, { recursive: true });
     await writeFile(
       join(dir, 'SKILL.md'),

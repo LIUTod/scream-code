@@ -952,6 +952,15 @@ export const zh: Record<string, string> = {
   'taskbrowser.agent_source_unknown': '独立（无父线索）',
 
   // ─── 子代理模型绑定 ─────────────
+  'subagent.desc_coder': '通用软件工程任务',
+  'subagent.desc_reviewer': '代码审查，发现 bug 和 API 契约违反',
+  'subagent.desc_writer': '内容生产与研究报告',
+  'subagent.desc_explore': '快速代码库探索（只读）',
+  'subagent.desc_oracle': '既有代码的系统尺度审查（架构/技术债/可维护性/冗余）',
+  'subagent.desc_plan': '实现规划与架构设计（只读）',
+  'subagent.desc_verify': '运行构建/测试/lint 验证改动',
+  'subagent.desc_worker': '办公自动化：格式转换、批量处理、文件整理',
+  'subagent.desc_designer': '视觉层设计：UI/UX/TUI 方向、规格、落地与审计',
   'subagent.follow_main': '跟随主模型',
   'subagent.follow_main_desc': '使用主代理当前模型（默认）',
   // Unset role/housekeeping rows: config.toml (`model_roles` /
@@ -1118,7 +1127,7 @@ export const zh: Record<string, string> = {
   'permission.auto': '自动',
   'permission.auto_desc': '完全无交互运行。工具操作自动批准，跳过代理问题以便其自行决策。',
   'permission.yolo_desc': '自动批准工具操作（含危险命令）。需要您决策时（提问、计划评审）代理仍会来找您。',
-  'permission.bot_desc': '无人值守模式：可逆操作自动执行；其余一律拒绝并排队等你决策。',
+  'permission.bot_desc': '无人值守模式：可逆操作自动执行；其余一律拒绝，并在汇报中列出。',
   'permission.ask_desc': '只读问答模式：直接对话回答，不修改文件、不运行命令、不调用 MCP 工具。',
   'permission.select_title': '选择权限模式',
 
@@ -1565,6 +1574,8 @@ export const zh: Record<string, string> = {
   'registry.exit_desc': '退出应用',
 
   // ─── Config messages ───────────
+  'startup.legacy_user_assets':
+    '设置了 SCREAM_CODE_HOME 后，这些旧位置的内容不再加载：{items}。如需继续使用，请移到 {home} 下（skills/ 和 AGENTS.md）。',
   'tui.invalid_config': '~/.scream-code/tui.toml 中的 TUI 配置无效；使用默认配置。',
 
   // ─── Goal ──────────────────────

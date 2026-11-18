@@ -14,7 +14,6 @@ import { MakeSkillPlanTool } from '../../src/tools/builtin/skill/make-skill-plan
 import { writePluginSkillPackage } from '../../src/tools/builtin/skill/plugin-skill-package-writer';
 import {
   sanitizeSkillName,
-  writeSkillPackage,
 } from '../../src/tools/builtin/skill/skill-package-writer';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -101,101 +100,30 @@ describe('sanitizeSkillName', () => {
   });
 });
 
-describe('writeSkillPackage', () => {
-  it('writes SKILL.md and supporting files under the user scope', async () => {
+describe('writePluginSkillPackage path safety', () => {
+  // The only skill writer in production; every unsafe supporting-file path a
+  // model might produce must be refused on every host platform.
+  it.each([
+    ['a parent-directory escape', '../escape.txt'],
+    ['a POSIX absolute path', '/etc/passwd'],
+    ['a Windows drive path', String.raw`C:\outside\f.txt`],
+    ['a Windows drive path with forward slashes', 'C:/outside/f.txt'],
+    ['a UNC path', String.raw`\\server\share\f.txt`],
+  ])('rejects %s', async (_label, path) => {
     const tmp = await mkdtemp(join(tmpdir(), 'make-skill-test-'));
     const jian = await makeJian(tmp);
-
-    const result = await writeSkillPackage({
-      jian,
-      package: {
-        name: 'test-skill',
-        description: 'A test skill.',
-        content:
-          '---\nname: test-skill\ndescription: A test skill.\ntype: inline\n---\n\n# Test\n',
-        files: [{ path: 'helper.txt', content: 'helper content' }],
-      },
-      scope: 'user',
-      userHomeDir: tmp,
-      workDir: tmp,
-    });
-
-    expect(result.targetDir).toBe(join(tmp, '.scream-code', 'skills', 'test-skill'));
-    const skillMd = await jian.readText(join(result.targetDir, 'SKILL.md'));
-    expect(skillMd).toContain('name: test-skill');
-    const helper = await jian.readText(join(result.targetDir, 'helper.txt'));
-    expect(helper).toBe('helper content');
-  });
-
-  it('refuses to overwrite an existing skill', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'make-skill-test-'));
-    const jian = await makeJian(tmp);
-
-    const pkg = {
-      name: 'dup-skill',
-      description: 'First.',
-      content:
-        '---\nname: dup-skill\ndescription: First.\ntype: inline\n---\n\n# First\n',
-      files: [],
-    };
-
-    await writeSkillPackage({ jian, package: pkg, scope: 'user', userHomeDir: tmp, workDir: tmp });
     await expect(
-      writeSkillPackage({ jian, package: pkg, scope: 'user', userHomeDir: tmp, workDir: tmp }),
-    ).rejects.toThrow(ScreamError);
-  });
-
-  it('rejects supporting files that escape the skill directory', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'make-skill-test-'));
-    const jian = await makeJian(tmp);
-
-    await expect(
-      writeSkillPackage({
+      writePluginSkillPackage({
         jian,
+        screamHomeDir: tmp,
         package: {
-          name: 'escape-skill',
+          name: 'unsafe-path-skill',
           description: 'Bad.',
-          content:
-            '---\nname: escape-skill\ndescription: Bad.\ntype: inline\n---\n\n# Bad\n',
-          files: [{ path: '../escape.txt', content: 'should not write' }],
+          content: '---\nname: unsafe-path-skill\ndescription: Bad.\ntype: inline\n---\n\n# Bad\n',
+          files: [{ path, content: 'should not write' }],
         },
-        scope: 'user',
-        userHomeDir: tmp,
-        workDir: tmp,
       }),
-    ).rejects.toThrow(ScreamError);
-  });
-
-  it('rejects supporting files given as absolute paths, whatever the host platform', async () => {
-    const tmp = await mkdtemp(join(tmpdir(), 'make-skill-test-'));
-    const jian = await makeJian(tmp);
-
-    const absolutePaths = [
-      '/etc/passwd',
-      String.raw`C:\outside\f.txt`,
-      'C:/outside/f.txt',
-      String.raw`\\server\share\f.txt`,
-    ];
-
-    // A distinct skill name per case: the first attempt creates the skill
-    // directory, so reusing one name would fail on "already exists" instead.
-    for (const [index, path] of absolutePaths.entries()) {
-      await expect(
-        writeSkillPackage({
-          jian,
-          package: {
-            name: `absolute-path-skill-${index}`,
-            description: 'Bad.',
-            content:
-              `---\nname: absolute-path-skill-${index}\ndescription: Bad.\ntype: inline\n---\n\n# Bad\n`,
-            files: [{ path, content: 'should not write' }],
-          },
-          scope: 'user',
-          userHomeDir: tmp,
-          workDir: tmp,
-        }),
-      ).rejects.toThrow(/Unsafe supporting file path/);
-    }
+    ).rejects.toThrow(/Unsafe supporting file path/);
   });
 });
 

@@ -10,6 +10,7 @@ import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
 import { CHROME_GUTTER } from '#/tui/constant/rendering';
 import { ScreamTUI } from '#/tui/index';
 import { detectTerminalTheme } from '#/tui/theme/detect';
+import { legacyUserAssetsNotice } from '#/utils/legacy-user-assets';
 
 import type { CLIOptions } from './options';
 import { ensureDocsInstalled } from './ensure-docs';
@@ -47,6 +48,11 @@ export async function runShell(
 
   const workDir = process.cwd();
   const homeDir = resolveScreamHome();
+  const legacyAssetsNotice = legacyUserAssetsNotice(homeDir);
+  const startupNotice =
+    configWarning !== undefined && legacyAssetsNotice !== undefined
+      ? `${configWarning}\n${legacyAssetsNotice}`
+      : (configWarning ?? legacyAssetsNotice);
   const harness = new ScreamHarness({
     homeDir,
     identity: createScreamCodeHostIdentity(version),
@@ -84,7 +90,7 @@ export async function runShell(
     tuiConfig,
     version,
     workDir,
-    startupNotice: configWarning,
+    startupNotice,
     resolvedTheme,
     updatePrefetched: true,
     sessionsPrefetch,

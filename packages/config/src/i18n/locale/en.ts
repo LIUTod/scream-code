@@ -958,6 +958,15 @@ export const en: Record<string, string> = {
   'taskbrowser.agent_source_unknown': 'standalone (no parent info)',
 
   // ─── Subagent model binder ──────
+  'subagent.desc_coder': 'General software engineering',
+  'subagent.desc_reviewer': 'Code review, bug & API contract violations',
+  'subagent.desc_writer': 'Content production & research reports',
+  'subagent.desc_explore': 'Quick codebase exploration (read-only)',
+  'subagent.desc_oracle': 'Large-scope review of existing code (architecture, debt, maintainability, dead weight)',
+  'subagent.desc_plan': 'Implementation planning & architecture design (read-only)',
+  'subagent.desc_verify': 'Run build/test/lint to verify changes',
+  'subagent.desc_worker': 'Office automation: format conversion, batch processing, file organization',
+  'subagent.desc_designer': 'Visual design: UI/UX/TUI direction, specs & polish',
   'subagent.follow_main': 'Follow main model',
   'subagent.follow_main_desc': 'Use the main agent\'s current model (default)',
   // Unset role/housekeeping rows: config.toml (`model_roles` /
@@ -1128,7 +1137,7 @@ export const en: Record<string, string> = {
   'permission.auto': 'Auto',
   'permission.auto_desc': 'Run fully without interaction. Tool operations are auto-approved; agent questions are skipped so it can decide on its own.',
   'permission.yolo_desc': 'Auto-approve tool operations (dangerous commands included). The agent still brings its questions and plan reviews to you.',
-  'permission.bot_desc': 'Unattended mode: reversible actions auto-approve; anything else is denied and parked for you to review.',
+  'permission.bot_desc': 'Unattended mode: reversible actions auto-approve; anything else is denied and listed in the report.',
   'permission.ask_desc': 'Read-only Q&A mode: answer in conversation, never modify files, run commands, or call MCP tools.',
   'permission.select_title': 'Select permission mode',
 
@@ -1576,6 +1585,8 @@ export const en: Record<string, string> = {
   'registry.exit_desc': 'Exit application',
 
   // ─── Config messages ───────────
+  'startup.legacy_user_assets':
+    'Not loaded any more, because SCREAM_CODE_HOME moved your Scream home: {items}. Move them into {home} (as skills/ and AGENTS.md) to keep using them.',
   'tui.invalid_config': 'Invalid TUI config in ~/.scream-code/tui.toml; using defaults.',
 
   // ─── Goal ──────────────────────

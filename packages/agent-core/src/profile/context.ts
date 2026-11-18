@@ -16,10 +16,11 @@ export type PreparedSystemPromptContext = Pick<
 >;
 export async function prepareSystemPromptContext(
   jian: Jian,
+  screamHomeDir?: string | undefined,
 ): Promise<PreparedSystemPromptContext> {
   const [cwdListing, agentsMd, roleAdditional] = await Promise.all([
     listDirectory(jian),
-    loadAgentsMd(jian),
+    loadAgentsMd(jian, screamHomeDir),
     loadRoleAdditional(jian),
   ]);
   return { cwdListing, agentsMd, roleAdditional };
@@ -39,7 +40,12 @@ export async function loadRoleAdditional(_jian: Jian): Promise<string | undefine
   }
 }
 
-export async function loadAgentsMd(jian: Jian): Promise<string> {
+/**
+ * The user's AGENTS.md lives in the Scream home (`<scream home>/AGENTS.md`, so
+ * SCREAM_CODE_HOME moves it with the rest of the user's data); omitted means
+ * `resolveScreamHome()`, the same home `user-prefs.md` is read from.
+ */
+export async function loadAgentsMd(jian: Jian, screamHomeDir?: string | undefined): Promise<string> {
   const workDir = jian.getcwd();
   const projectRoot = await findProjectRoot(jian, workDir);
   const dirs = dirsRootToLeaf(jian, workDir, projectRoot);
@@ -58,7 +64,7 @@ export async function loadAgentsMd(jian: Jian): Promise<string> {
 
   // User-level files come first so any project-level AGENTS.md overrides them.
   const home = jian.gethome();
-  await collect(join(home, '.scream-code', 'AGENTS.md'));
+  await collect(join(screamHomeDir ?? resolveScreamHome(), 'AGENTS.md'));
 
   // Generic user-level dir (.agents) matches skill discovery.
   const genericDirs = [join(home, '.agents')];

@@ -73,7 +73,6 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "@scream-code/agent-core": "workspace:^",
     "@scream-code/config": "workspace:^",
     "@scream-code/evals": "workspace:^",

@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { parsePattern } from '../../src/agent/permission/matches-rule';
+import { matchPermissionRule } from '../../src/agent/permission/matches-rule';
+import type { PermissionRule } from '../../src/agent/permission/types';
 import { AGENT_WIRE_PROTOCOL_VERSION, FileSystemAgentRecordPersistence } from '../../src/agent/records';
 import { migrateV1_8ToV1_9 } from '../../src/agent/records/migration/v1.9';
 import type { LoopHooks } from '../../src/loop/index';
@@ -75,24 +76,72 @@ describe('a model call by the old name', () => {
   });
 });
 
+function ruleMatches(pattern: string, toolName: string): boolean {
+  const rule = { decision: 'deny', scope: 'session-runtime', pattern } as PermissionRule;
+  return matchPermissionRule({ rule, toolName, execution: {} }) !== undefined;
+}
+
+const userTool = (name: string) => ({
+  name,
+  description: 'a user tool',
+  parameters: { type: 'object', properties: {} },
+  execute: async () => ({ output: 'ok' }),
+});
+
 describe('old names in configuration', () => {
-  it('a permission rule on the old name targets the renamed tool', () => {
-    expect(parsePattern('python')).toEqual({ toolName: 'Python' });
-    expect(parsePattern('ast_edit(src/**)')).toEqual({ toolName: 'AstEdit', argPattern: 'src/**' });
-    expect(parsePattern('Bash(git *)')).toEqual({ toolName: 'Bash', argPattern: 'git *' });
+  it('a permission rule on the old name matches the renamed tool, and still matches a tool that has the old name', () => {
+    expect(ruleMatches('python', 'Python')).toBe(true);
+    expect(ruleMatches('ast_edit(src/**)', 'AstEdit')).toBe(false); // the arg part still has to match
+    expect(ruleMatches('ast_edit', 'AstEdit')).toBe(true);
+    expect(ruleMatches('python', 'python')).toBe(true);
+    // A rule on the current name targets the built-in only.
+    expect(ruleMatches('Python', 'python')).toBe(false);
+    expect(ruleMatches('Bash', 'Python')).toBe(false);
   });
 
-  it('a profile tools list and an SDK active-tool list are stored with current names', () => {
+  it('a profile tools list keeps the old name and gains the current one', () => {
     const profiles = resolveAgentProfiles([
       { name: 'agent', tools: ['Bash'] },
-      { name: 'custom', extends: 'agent', tools: ['Read', 'ast_grep', 'python'] },
+      { name: 'custom', extends: 'agent', tools: ['Read', 'ast_grep', 'python', 'Python'] },
     ]);
-    expect(profiles['custom']!.tools).toEqual(['Read', 'AstGrep', 'Python']);
+    expect(profiles['custom']!.tools).toEqual(['Read', 'ast_grep', 'AstGrep', 'python', 'Python']);
+  });
 
+  it('an active-tool list enables the renamed built-in for an old name', () => {
     const ctx = testAgent();
     ctx.configure();
     ctx.agent.tools.setActiveTools(['Bash', 'ast_grep']);
-    expect([...ctx.agent.tools.getActiveTools()]).toEqual(['Bash', 'AstGrep']);
+    expect([...ctx.agent.tools.getActiveTools()]).toEqual(['Bash', 'ast_grep', 'AstGrep']);
+    expect(ctx.agent.tools.loopTools.map((tool) => tool.name)).toContain('AstGrep');
+  });
+
+  it('an old name that a user or plugin tool really has keeps meaning that tool', () => {
+    const ctx = testAgent();
+    ctx.configure();
+    ctx.agent.tools.registerUserTool(userTool('python'));
+    ctx.agent.tools.setActiveTools(['Bash', 'python']);
+    expect([...ctx.agent.tools.getActiveTools()]).toEqual(['Bash', 'python']);
+    const offered = ctx.agent.tools.loopTools.map((tool) => tool.name);
+    expect(offered).toContain('python');
+    expect(offered).not.toContain('Python');
+  });
+
+  it('/rlm off removes the built-in even when the list came from before the rename', async () => {
+    const ctx = testAgent();
+    ctx.configure();
+    ctx.agent.tools.setActiveTools(['Bash', 'python']);
+    await ctx.rpc.setRlmEnabled({ enabled: true });
+    await ctx.rpc.setRlmEnabled({ enabled: false });
+    expect([...ctx.agent.tools.getActiveTools()]).toEqual(['Bash']);
+
+    // ...but leaves a user tool that really is called `python`.
+    const withUserTool = testAgent();
+    withUserTool.configure();
+    withUserTool.agent.tools.registerUserTool(userTool('python'));
+    withUserTool.agent.tools.setActiveTools(['Bash', 'python']);
+    await withUserTool.rpc.setRlmEnabled({ enabled: true });
+    await withUserTool.rpc.setRlmEnabled({ enabled: false });
+    expect([...withUserTool.agent.tools.getActiveTools()]).toEqual(['Bash', 'python']);
   });
 
   it('a tool hook whose matcher names the old tool still fires', async () => {
@@ -114,7 +163,7 @@ describe('old names in configuration', () => {
 describe('wire v1.8 -> v1.9', () => {
   const migrate = migrateV1_8ToV1_9.migrateRecord;
 
-  it('renames tool names in every record that carries one', () => {
+  it('renames the tool in every stored tool call', () => {
     expect(
       migrate({
         type: 'context.append_message',
@@ -151,19 +200,6 @@ describe('wire v1.8 -> v1.9', () => {
       },
     });
 
-    expect(migrate({ type: 'tools.set_active_tools', names: ['Bash', 'python', 'mcp__x__*'] })).toEqual({
-      type: 'tools.set_active_tools',
-      names: ['Bash', 'Python', 'mcp__x__*'],
-    });
-    expect(migrate({ type: 'request.header', activeTools: ['ast_grep'] })).toMatchObject({ activeTools: ['AstGrep'] });
-    expect(migrate({ type: 'permission.record_decision', toolName: 'python' })).toMatchObject({ toolName: 'Python' });
-    expect(
-      migrate({ type: 'permission.record_approval_result', toolName: 'ast_edit', sessionApprovalRule: 'ast_edit(/w/a.ts)' }),
-    ).toMatchObject({ toolName: 'AstEdit', sessionApprovalRule: 'AstEdit(/w/a.ts)' });
-    expect(migrate({ type: 'permission.record_grant_revocation', pattern: 'python' })).toEqual({
-      type: 'permission.record_grant_revocation',
-      pattern: 'Python',
-    });
   });
 
   it('leaves other records, other names and unexpected shapes alone', () => {
@@ -172,7 +208,11 @@ describe('wire v1.8 -> v1.9', () => {
       { type: 'turn.prompt', input: [{ type: 'text', text: 'run python please' }] },
       { type: 'context.append_message', message: { role: 'user', content: [] } },
       { type: 'context.append_loop_event', event: { type: 'tool.result', toolCallId: 'a' } },
-      { type: 'permission.record_approval_result', toolName: 'Bash', result: {} },
+      // Tool lists and rules stay as written; replay and matching handle them.
+      { type: 'tools.set_active_tools', names: ['Bash', 'python'] },
+      { type: 'request.header', activeTools: ['ast_grep'] },
+      { type: 'permission.record_approval_result', toolName: 'python', sessionApprovalRule: 'python', result: {} },
+      { type: 'permission.record_grant_revocation', pattern: 'ast_edit' },
     ];
     for (const record of untouched) {
       expect(migrate(record), record.type).toEqual(record);
@@ -186,7 +226,7 @@ describe('resuming a session written before the rename', () => {
     for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
   });
 
-  it('restores the old names as the current ones and rewrites the wire', async () => {
+  it('resumes with the renamed tools enabled and the stored calls renamed', async () => {
     const dir = join(tmpdir(), `tool-rename-resume-${randomBytes(6).toString('hex')}`);
     await mkdir(dir, { recursive: true });
     dirs.push(dir);
@@ -209,11 +249,12 @@ describe('resuming a session written before the rename', () => {
     const { agent } = testAgent({ persistence: new FileSystemAgentRecordPersistence(wirePath) });
     await agent.records.replay();
 
-    expect([...agent.tools.getActiveTools()]).toEqual(['Bash', 'Python', 'AstGrep']);
+    expect([...agent.tools.getActiveTools()]).toEqual(['Bash', 'python', 'Python', 'ast_grep', 'AstGrep']);
     const toolCalls = agent.context.history.flatMap((message) => message.toolCalls.map((call) => call.name));
     expect(toolCalls).toEqual(['Python']);
     const rewritten = await readFile(wirePath, 'utf8');
     expect(rewritten).toContain(`"protocol_version":"${AGENT_WIRE_PROTOCOL_VERSION}"`);
-    expect(rewritten).not.toMatch(/"(python|ast_grep)"/);
+    expect(rewritten).toContain('"name":"Python"');
+    expect(rewritten).not.toContain('"name":"python"');
   });
 });

@@ -89,7 +89,7 @@ function sorted(names: readonly string[]): string[] {
 async function expectedBasePrompt(agent: Agent): Promise<string> {
   const now = /session was opened \(started or resumed\) was `([^`]+)`/.exec(agent.config.systemPrompt)?.[1];
   if (now === undefined) throw new Error('system prompt is missing the session-open timestamp');
-  const context = await prepareSystemPromptContext(agent.jian);
+  const context = await prepareSystemPromptContext(agent.jian, agent.screamHomeDir);
   const base = DEFAULT_AGENT_PROFILES['agent'];
   if (base === undefined) throw new Error('default agent profile is missing');
   return base.systemPrompt({

@@ -31,7 +31,7 @@ describe('loadAgentsMd user-level discovery', () => {
     await writeFile(join(homeDir, '.agents', 'AGENTS.md'), 'user generic', 'utf-8');
     await writeFile(join(workDir, 'AGENTS.md'), 'project instructions', 'utf-8');
 
-    const result = await loadAgentsMd(testJian);
+    const result = await loadAgentsMd(testJian, join(homeDir, '.scream-code'));
 
     expect(result).toContain('user branded');
     expect(result).toContain('user generic');
@@ -44,7 +44,7 @@ describe('loadAgentsMd user-level discovery', () => {
     await mkdir(join(homeDir, '.agents'), { recursive: true });
     await writeFile(join(homeDir, '.agents', 'AGENTS.md'), 'dot-agents generic', 'utf-8');
 
-    const result = await loadAgentsMd(testJian);
+    const result = await loadAgentsMd(testJian, join(homeDir, '.scream-code'));
 
     expect(result).toContain('dot-agents generic');
   });
@@ -52,7 +52,7 @@ describe('loadAgentsMd user-level discovery', () => {
   it('falls back to project-level only when no user-level files exist', async () => {
     await writeFile(join(workDir, 'AGENTS.md'), 'project only', 'utf-8');
 
-    const result = await loadAgentsMd(testJian);
+    const result = await loadAgentsMd(testJian, join(homeDir, '.scream-code'));
 
     expect(result).toContain('project only');
     expect(result).not.toContain(homeDir);
@@ -63,7 +63,7 @@ describe('loadAgentsMd user-level discovery', () => {
     await writeFile(join(workDir, 'AGENTS.md'), '项目说明'.repeat(40_000), 'utf-8');
 
     const startedAt = Date.now();
-    const result = await loadAgentsMd(testJian);
+    const result = await loadAgentsMd(testJian, join(homeDir, '.scream-code'));
     const elapsed = Date.now() - startedAt;
 
     // 32 KB budget plus the per-file annotation line.
@@ -84,7 +84,7 @@ describe('loadAgentsMd user-level discovery', () => {
     );
     await writeFile(join(workDir, 'AGENTS.md'), 'x'.repeat(120_000), 'utf-8');
 
-    const result = await loadAgentsMd(testJian);
+    const result = await loadAgentsMd(testJian, join(homeDir, '.scream-code'));
 
     // The project file overrides its ancestors; it must not starve them.
     expect(result).toContain('use the cf CLI unless the project has a wrangler config');
@@ -94,7 +94,7 @@ describe('loadAgentsMd user-level discovery', () => {
   it('says what it dropped instead of cutting silently', async () => {
     await writeFile(join(workDir, 'AGENTS.md'), 'y'.repeat(120_000), 'utf-8');
 
-    const result = await loadAgentsMd(testJian);
+    const result = await loadAgentsMd(testJian, join(homeDir, '.scream-code'));
 
     // A silent cut leaves the model believing it read the whole file, so it
     // never opens the rest; the marker names the file and the omitted size.
@@ -113,7 +113,7 @@ describe('loadAgentsMd user-level discovery', () => {
     vi.spyOn(testJian, 'getcwd').mockReturnValue(join(workDir, 'nested'));
     await writeFile(join(workDir, 'nested', 'AGENTS.md'), 'leaf-rule\n' + 'l'.repeat(60_000), 'utf-8');
 
-    const result = await loadAgentsMd(testJian);
+    const result = await loadAgentsMd(testJian, join(homeDir, '.scream-code'));
 
     expect(result).toContain('global-rule');
     expect(result).toContain('root-rule');
@@ -126,7 +126,7 @@ describe('loadAgentsMd user-level discovery', () => {
     await mkdir(join(homeDir, '.scream-code'), { recursive: true });
     await writeFile(join(homeDir, '.scream-code', 'AGENTS.md'), 'home branded', 'utf-8');
 
-    const result = await loadAgentsMd(testJian);
+    const result = await loadAgentsMd(testJian, join(homeDir, '.scream-code'));
 
     expect(result.split('home branded').length - 1).toBe(1);
   });
@@ -148,7 +148,7 @@ describe('prepareSystemPromptContext roleAdditional', () => {
   });
 
   it('returns undefined when user-prefs.md is absent', async () => {
-    const context = await prepareSystemPromptContext(testJian);
+    const context = await prepareSystemPromptContext(testJian, join(homeDir, '.scream-code'));
     expect(context.roleAdditional).toBeUndefined();
   });
 
@@ -158,13 +158,13 @@ describe('prepareSystemPromptContext roleAdditional', () => {
       '\n  The user\'s preferred nickname is "Alex".\n  ',
       'utf-8',
     );
-    const context = await prepareSystemPromptContext(testJian);
+    const context = await prepareSystemPromptContext(testJian, join(homeDir, '.scream-code'));
     expect(context.roleAdditional).toBe('The user\'s preferred nickname is "Alex".');
   });
 
   it('returns undefined when user-prefs.md is empty', async () => {
     await writeFile(join(homeDir, 'user-prefs.md'), '   \n  ', 'utf-8');
-    const context = await prepareSystemPromptContext(testJian);
+    const context = await prepareSystemPromptContext(testJian, join(homeDir, '.scream-code'));
     expect(context.roleAdditional).toBeUndefined();
   });
 });

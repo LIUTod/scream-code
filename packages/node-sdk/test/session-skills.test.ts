@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type * as LtodModule from '@scream-code/ltod';
@@ -192,22 +192,31 @@ describe('Session skills', () => {
     }
   });
 
-  it('resolves user skills from the OS home directory, independently of SCREAM_CODE_HOME', async () => {
-    const homeDir = await makeTempDir(tempDirs, 'scream-sdk-skills-home-');
+  it('resolves user skills from the Scream home, so SCREAM_CODE_HOME moves them too', async () => {
+    // A home whose folder is not named .scream-code (and has a space), as a
+    // user picks it on any platform: discovery and removal must both work.
+    const homeParent = await makeTempDir(tempDirs, 'scream-sdk-skills-home-');
+    const homeDir = join(homeParent, 'Scream Data');
     const processHome = await makeTempDir(tempDirs, 'scream-sdk-skills-process-home-');
     const workDir = await makeTempDir(tempDirs, 'scream-sdk-skills-work-');
     vi.stubEnv('HOME', processHome);
+    vi.stubEnv('USERPROFILE', processHome);
     vi.stubEnv('SCREAM_CODE_HOME', homeDir);
-    await writeUserSkill(processHome, 'sdk-real-home-only', 'SDK real home skill');
-    await writeUserSkill(homeDir, 'sdk-sandbox-only', 'SDK sandbox skill');
+    // Left in ~/.scream-code by an older build: no longer loaded.
+    await writeUserSkill(join(processHome, '.scream-code'), 'sdk-real-home-only', 'SDK real home skill');
+    await writeUserSkill(homeDir, 'sdk-scream-home', 'SDK scream home skill');
     const harness = new ScreamHarness({ identity: TEST_IDENTITY });
 
     try {
       const session = await harness.createSession({ id: 'ses_sdk_skill_env_home', workDir });
       const names = new Set((await session.listSkills()).map((skill) => skill.name));
 
-      expect(names.has('sdk-real-home-only')).toBe(true);
-      expect(names.has('sdk-sandbox-only')).toBe(false);
+      expect(names.has('sdk-scream-home')).toBe(true);
+      expect(names.has('sdk-real-home-only')).toBe(false);
+
+      await session.removeSkill('sdk-scream-home');
+      await expect(stat(join(homeDir, 'skills', 'sdk-scream-home'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await session.listSkills()).some((skill) => skill.name === 'sdk-scream-home')).toBe(false);
     } finally {
       await harness.close();
     }
@@ -288,8 +297,9 @@ async function writeSkill(workDir: string, name: string, lines: readonly string[
   await writeFile(join(dir, 'SKILL.md'), lines.join('\n'));
 }
 
-async function writeUserSkill(userHomeDir: string, name: string, description: string): Promise<void> {
-  const dir = join(userHomeDir, '.scream-code', 'skills', name);
+/** Write a user skill into `<screamHome>/skills/<name>/SKILL.md`. */
+async function writeUserSkill(screamHome: string, name: string, description: string): Promise<void> {
+  const dir = join(screamHome, 'skills', name);
   await mkdir(dir, { recursive: true });
   await writeFile(
     join(dir, 'SKILL.md'),

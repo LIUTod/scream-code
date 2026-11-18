@@ -73,7 +73,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 - **TUI Sidebar** — five live panels: workspace Git diff summary (green adds / red deletes), per-session token accounting (cache-hit / cache-miss / output), 9 sub-agent slots with real-time states (idle / working / outputting / messaging / reworking / asking), Goal status with judge state (awaiting / judging / adjudicated), and a Network Hub — the measured provider response time plus round trips to a few well-known endpoints, probed only while the sidebar is visible, every 30 seconds.
 - **Wolfpack** — unlimited parallel sub-agents (coder / explore / plan / verify / reviewer / oracle / worker / writer / designer).
 - **Subagent Collaboration** — delegate to specialist sub-agents and stay in control: they **ask the lead agent for guidance mid-task instead of guessing when blocked**, request a handoff when a different specialist fits, take mid-task redirects or follow-up notes, return structured JSON when asked, and can be confined to a safe mode (read-only / edit-only / commands-allowed) so they never overstep your limits.
-- **Bot Mode (`/bot`)** — unattended execution: reversible work (reads, in-workspace edits, read-only commands) runs freely, while irreversible actions (push / publish / delete / sensitive files / unclassified operations) are automatically denied and queued for your review — with the reason fed back to the model so it stops retrying.
+- **Bot Mode (`/bot`)** — unattended execution: reversible work (reads, in-workspace edits, read-only commands) runs freely, while irreversible actions (push / publish / delete / sensitive files / unclassified operations) are automatically denied — the reason goes back to the model, which does not retry, carries on with the rest and lists what needs you in its final report; each denial is also recorded in the session log.
 - **Persistent Memory** — structured pain-point memory with FTS5 full-text + tag + vector retrieval, shared across sessions.
 - **Local Knowledge Graph** — SAG-based visual knowledge base for multi-hop reasoning; import your own docs anytime.
 - **RLM Mode** — persistent Python workspace for long-running tasks; `rlm()` spawns recursive sub-agents straight from code, always through the `coder` profile, unlimited by default and cap-limited per session with `/rlm-max-depth`. Every `rlm()` call is a real sub-agent run — it consumes tokens like any other delegation.
@@ -98,7 +98,7 @@ Type `/` in the input to browse. All 58 commands:
 | `/auto` | Toggle auto permission mode |
 | `/yes` (`/yolo`) | Toggle auto-approve mode |
 | `/ask` | Toggle read-only Q&A mode |
-| `/bot` | Unattended bot mode: reversible actions auto-approve, irreversible ones park for review |
+| `/bot` | Unattended bot mode: reversible actions auto-approve, irreversible ones are denied and reported |
 | `/goal [objective]` | View/manage auto goals |
 | `/wolfpack` (`/wp`) | Toggle wolfpack mode — auto-approve + batch concurrency |
 | `/rlm` | RLM mode: persistent Python workspace; `rlm()` spawns real recursive subagents (coder profile) |

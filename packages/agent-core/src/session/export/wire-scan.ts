@@ -5,26 +5,38 @@ import { join } from 'pathe';
 export interface SessionWireScan {
   readonly firstActivityMs?: number | undefined;
   readonly lastActivityMs?: number | undefined;
-  readonly lastUserMessageMs?: number | undefined;
-  readonly firstUserInput?: string | undefined;
 }
 
 /**
- * Scan a session's `wire.jsonl` for activity timestamps and the first user
- * input.
+ * Where a session keeps its main agent's wire: `agents/main/wire.jsonl` (every
+ * agent has its own directory under `agents/`), with the session-level
+ * `wire.jsonl` the session store also accepts as a fallback.
+ */
+const MAIN_WIRE_CANDIDATES = [join('agents', 'main', 'wire.jsonl'), 'wire.jsonl'] as const;
+
+/**
+ * Scan a session's main-agent wire for its first and last activity timestamps
+ * (every record carries `time`).
  *
  * The log is append-only and line-delimited, but a long-lived session can grow
  * it to gigabytes, so it is streamed rather than read into a single string: a
  * `StringDecoder` turns each chunk into text without splitting multi-byte
- * characters, complete lines are consumed as they arrive, and only the four
- * aggregated values are retained. Any read failure (including a missing file)
- * yields an empty scan.
+ * characters, complete lines are consumed as they arrive, and only the two
+ * timestamps are retained. A wire that cannot be read (including a missing
+ * file) falls through to the next location, then to an empty scan.
  */
 export async function scanSessionWire(sessionDir: string): Promise<SessionWireScan> {
+  for (const candidate of MAIN_WIRE_CANDIDATES) {
+    const scan = await scanWireFile(join(sessionDir, candidate));
+    if (scan !== undefined) return scan;
+  }
+  return {};
+}
+
+/** `undefined` when the file cannot be read, so the next candidate is tried. */
+async function scanWireFile(wirePath: string): Promise<SessionWireScan | undefined> {
   let firstActivityMs: number | undefined;
   let lastActivityMs: number | undefined;
-  let lastUserMessageMs: number | undefined;
-  let firstUserInput: string | undefined;
 
   const consumeLine = (line: string): void => {
     const trimmed = line.trim();
@@ -36,27 +48,11 @@ export async function scanSessionWire(sessionDir: string): Promise<SessionWireSc
       return;
     }
     if (typeof parsed !== 'object' || parsed === null) return;
-    const record = parsed as {
-      type?: unknown;
-      time?: unknown;
-      userInput?: unknown;
-    };
+    const record = parsed as { time?: unknown };
     const timeMs = typeof record.time === 'number' ? normalizeTimestampMs(record.time) : undefined;
     if (timeMs !== undefined) {
       firstActivityMs ??= timeMs;
       lastActivityMs = timeMs;
-    }
-    if (record.type === 'turn_begin') {
-      if (timeMs !== undefined) {
-        lastUserMessageMs = timeMs;
-      }
-      if (
-        firstUserInput === undefined &&
-        typeof record.userInput === 'string' &&
-        record.userInput.trim().length > 0
-      ) {
-        firstUserInput = record.userInput;
-      }
     }
   };
 
@@ -67,7 +63,7 @@ export async function scanSessionWire(sessionDir: string): Promise<SessionWireSc
     // that ends mid-line is not rescanned from the start (a multi-MB line would
     // otherwise cost O(line²)).
     let scanned = 0;
-    const stream = createReadStream(join(sessionDir, 'wire.jsonl'));
+    const stream = createReadStream(wirePath);
     for await (const chunk of stream as AsyncIterable<Buffer>) {
       pending += decoder.write(chunk);
       let newlineIndex = pending.indexOf('\n', scanned);
@@ -84,15 +80,10 @@ export async function scanSessionWire(sessionDir: string): Promise<SessionWireSc
     pending += decoder.end();
     if (pending.length > 0) consumeLine(pending);
   } catch {
-    return {};
+    return undefined;
   }
 
-  return {
-    firstActivityMs,
-    lastActivityMs,
-    lastUserMessageMs,
-    firstUserInput,
-  };
+  return { firstActivityMs, lastActivityMs };
 }
 
 export function normalizeTimestampMs(value: number): number | undefined {

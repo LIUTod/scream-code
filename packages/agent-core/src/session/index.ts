@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises';
+import { realpath, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'pathe';
@@ -15,7 +15,7 @@ import type { ContextMessage } from '../agent/context';
 import type { BackgroundManager } from '../agent/background';
 import { HookEngine, type HookDef } from './hooks';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
-import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig } from '../config';
+import { parseBooleanEnv, resolveConfigValue, resolveScreamHome, type BackgroundConfig } from '../config';
 import { makeErrorPayload } from '../errors';
 import {
   McpConnectionManager,
@@ -39,6 +39,7 @@ import {
   resolveSkillRoots,
   SkillRegistry,
   summarizeSkill,
+  userSkillsDir,
   type SkillRoot,
   type SkillSummary,
 } from '../skill';
@@ -626,7 +627,7 @@ export class Session {
     agent: Agent,
     profile: ResolvedAgentProfile,
   ): Promise<void> {
-    const context = await prepareSystemPromptContext(agent.jian);
+    const context = await prepareSystemPromptContext(agent.jian, agent.screamHomeDir);
     agent.useProfile(profile, context);
   }
 
@@ -653,7 +654,7 @@ export class Session {
       });
       await handle.completion;
 
-      const agentsMd = await loadAgentsMd(mainAgent.jian);
+      const agentsMd = await loadAgentsMd(mainAgent.jian, mainAgent.screamHomeDir);
       mainAgent.context.appendSystemReminder(initCompletionReminder(agentsMd), {
         kind: 'injection',
         variant: 'init',
@@ -882,19 +883,32 @@ export class Session {
         `Skill "${skillName}" cannot be removed this way; use removePlugin for plugin skills`,
       );
     }
-    const installUnit = resolveSkillInstallUnit(skill.path);
+    // The user's skill directory follows SCREAM_CODE_HOME and can have any
+    // name, so name it explicitly; resolved like the scanner resolves roots
+    // (symlinks, forward slashes) so the prefix compare sees the same path.
+    const userRoot = userSkillsDir(this.skillPaths());
+    const userRootResolved = await realpath(userRoot)
+      .then((resolved) => resolved.replaceAll('\\', '/'))
+      .catch(() => userRoot);
+    const installUnit = resolveSkillInstallUnit(skill.path, [userRootResolved]);
     await rm(installUnit, { recursive: true, force: true });
     this.skills.removeSkillPath(installUnit);
     this.refreshAgentBuiltinTools();
   }
 
 
+  /** OS home, Scream home and work dir that skill discovery and removal use. */
+  private skillPaths(): { userHomeDir: string; screamHomeDir: string; workDir: string } {
+    return {
+      userHomeDir: this.options.skills?.userHomeDir ?? homedir(),
+      screamHomeDir: this.options.screamHomeDir ?? resolveScreamHome(),
+      workDir: this.options.jian.getcwd(),
+    };
+  }
+
   private async loadSkills(): Promise<void> {
     const roots = await resolveSkillRoots({
-      paths: {
-        userHomeDir: this.options.skills?.userHomeDir ?? homedir(),
-        workDir: this.options.jian.getcwd(),
-      },
+      paths: this.skillPaths(),
       explicitDirs: this.options.skills?.explicitDirs,
       extraDirs: this.options.skills?.extraDirs,
       pluginSkillRoots: this.options.skills?.pluginSkillRoots,

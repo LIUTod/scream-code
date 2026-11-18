@@ -32,7 +32,7 @@ import { LspTool } from '../../tools/builtin/lsp-tool';
 import { LspRegistry } from '../../lsp/registry';
 import type { GoalGraderFn } from '../../tools/builtin/goal/update-goal';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
-import { canonicalToolName } from '../../tools/tool-names';
+import { withCurrentToolNames } from '../../tools/tool-names';
 import type {
   BuiltinTool,
   McpServerRegistrationResult,
@@ -1012,14 +1012,20 @@ export class ToolManager {
     return [...this.enabledTools, ...this.mcpAccessPatterns];
   }
 
+  /** Whether a user or plugin tool is registered under `name`. */
+  hasUserTool(name: string): boolean {
+    return this.userTools.has(name);
+  }
+
   getBuiltinTool(name: string): BuiltinTool | undefined {
     return this.builtinTools.get(name);
   }
 
   setActiveTools(requested: readonly string[]): void {
-    // Old names of renamed built-ins (an SDK caller's list, a user profile)
-    // become current names here, so every later check sees one spelling.
-    const names = requested.map(canonicalToolName);
+    // An old name of a renamed built-in (an SDK caller's list, a user
+    // profile, a pre-rename wire) also enables the current name; the old name
+    // stays in case a user or plugin tool really has it.
+    const names = withCurrentToolNames(requested, (name) => this.userTools.has(name));
     this.agent.records.logRecord({
       type: 'tools.set_active_tools',
       names,
@@ -1057,7 +1063,7 @@ export class ToolManager {
    * like naming any other tool the registry does not have.
    */
   registerExplicitDeferredTools(names: readonly string[]): readonly string[] {
-    const wanted = new Set(names.map(canonicalToolName));
+    const wanted = new Set(withCurrentToolNames(names, (name) => this.userTools.has(name)));
     const registered: string[] = [];
     for (const group of DEFERRED_GROUPS) {
       const requested = group.toolNames.filter((name) => wanted.has(name));
