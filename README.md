@@ -8,7 +8,6 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/scream-code"><img alt="npm" src="https://img.shields.io/npm/v/scream-code?style=flat-square&logo=npm&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/scream-code"><img alt="downloads" src="https://img.shields.io/npm/dm/scream-code?style=flat-square" /></a>
   <a href="https://github.com/LIUTod/scream-code/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/LIUTod/scream-code?style=flat-square&logo=github" /></a>
   <a href="https://github.com/LIUTod/scream-code/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/github/license/LIUTod/scream-code?style=flat-square" /></a>
 </p>

@@ -1,102 +1,102 @@
-# 后台服务与常驻
+# Background host and resident service
 
-后台服务（`scream host`）是一个没有窗口的 scream 进程，每个 Scream 主目录只有一个。它做这几件事：
+The background host (`scream host`) is a scream process without a window; there is one per Scream home. It does these things:
 
-- **续跑**：目标（`/goal`）或 bot 模式的工作，被崩溃、关机或断电打断后，它会接着做；终端退出时交给后台的会话，它也会接着做。
-- **聊天通道**：配置了 `/line`（飞书或微信）时，由它收发消息。
-- **交还**：你在终端里打开一个它正在做的会话时，可以选择接管，它会停下这一轮把会话交给你。
-- **后台任务**：到点运行 `/jobs` 里的任务（见下文）。
-- **待你处理**：无人值守时被拦下的操作和它想问你的问题，记下来等你回复：打开终端时提示、底部状态栏计数、系统通知；配了飞书/微信再推一份到聊天。
+- **Continues work**: a goal (`/goal`) or bot-mode work cut off by a crash, a shutdown or a power loss is carried on, and so is a session a terminal handed over when it exited.
+- **Chat channel**: when `/line` (Feishu or WeChat) is set up, it sends and receives the messages.
+- **Hands back**: opening a session it is working on in a terminal lets you take it over; it stops its turn and gives you the session.
+- **Background jobs**: runs the jobs in `/jobs` when they fall due (see below).
+- **Waiting for you**: what unattended work could not decide alone (a refused action, a question) is kept until you answer: a note when a terminal opens, a count in the footer, a system notification; with Feishu or WeChat set up, a copy in the chat as well.
 
-**不配飞书/微信也完全能用。** 终端是主角：打开终端时会提示"你不在时"后台做了什么，底部状态栏在有事等你时显示 `◆ 待处理 1`（后台没起来时显示 `◆ jobs 未运行`），侧边栏（`Ctrl+X`）第一块是 Jobs 面板：后台是否在跑、待处理几件、每个任务上次结果和下次运行时间。有事等你、任务失败、交给后台的活干完时弹系统通知。聊天只是多一份推到手机。
+**Everything works without Feishu or WeChat.** The terminal comes first: opening it tells you what happened while you were away; the footer shows `◆ 1 waiting` when something needs you (or `◆ jobs not running` when the background is not up); the first sidebar panel (`Ctrl+X`) is Jobs — whether the background runs, what waits, and each job's last result and next run. A system notification pops up when something waits for you, a job fails, or handed-over work is done. A chat only adds a copy on your phone.
 
-## 常驻（`/service`）
+## Resident service (`/service`)
 
-`/service`（命令行：`scream service install`）把后台服务装成系统的用户服务。装好之后它会随登录自动启动，崩溃后自动重启。这个操作不需要管理员权限。
+`/service` (shell: `scream service install`) installs the background host as a per-user system service. It then starts at login and restarts after a crash. No administrator rights are needed.
 
-| 系统 | 方式 | 什么时候启动 |
+| System | How | When it starts |
 |---|---|---|
-| macOS | LaunchAgent（`~/Library/LaunchAgents`） | 登录后 |
-| Linux | systemd 用户服务（`~/.config/systemd/user`） | 登录后；执行 `loginctl enable-linger $USER` 后改为开机即启动，不需要登录 |
-| Windows | 登录时运行的计划任务（隐藏窗口） | 登录后 |
+| macOS | LaunchAgent (`~/Library/LaunchAgents`) | At login |
+| Linux | systemd user unit (`~/.config/systemd/user`) | At login; after `loginctl enable-linger $USER`, at boot without a login |
+| Windows | Logon task (hidden window) | At login |
 
-服务运行的是 `~/.scream-code/bin` 里的一个启动脚本，脚本里固定了 node 和 scream 的路径以及当时的 `PATH`。每次启动 scream 都会检查这个脚本，发现升级或者换了 node 版本导致路径变了，就自动重写。
+The service runs a launcher script in `~/.scream-code/bin` that pins the node and scream paths and the `PATH` of the time. Every scream start checks it and rewrites it when an update or a different node version moved those paths.
 
-只有你主动开启才会安装：`/service`、`scream service install`，或者第一次配置 `/line` 时弹出的那一次询问。关闭用 `/service` 里的"关闭常驻"或 `scream service uninstall`，数据都会保留。
+It is installed only when you choose it: `/service`, `scream service install`, or the one offer made when `/line` is first set up. Turn it off with "turn off" in `/service` or `scream service uninstall`; your data stays.
 
-`/service` 里还有一个开关叫"任务运行时保持唤醒"，默认是开的。只要有任何 scream 进程在跑一轮、并且接着电源，后台服务就会阻止系统因空闲而睡眠（macOS 用 `caffeinate`，Linux 用 `systemd-inhibit`，Windows 用 `SetThreadExecutionState`）；用电池时不阻止。注意：MacBook 合上盖子照样会睡眠，接了外接显示器的情况除外。
+`/service` also has "keep awake while work runs", on by default: while any scream process runs a turn on mains power, the host keeps the system from idling into sleep (`caffeinate` on macOS, `systemd-inhibit` on Linux, `SetThreadExecutionState` on Windows); on battery it does not. A MacBook still sleeps with its lid closed, unless an external display is attached.
 
-## 交给后台、接管
+## Handing work over, taking it back
 
-- 在终端里退出时，如果目标还在进行、或者这一轮还没做完，会问你要不要"交给后台继续"。选了以后，后台服务会接着做，需要时会自动把它拉起来。按 Esc 就不退出。
-- 没法问你的时候：直接点叉关掉终端窗口、SSH 断开（SIGHUP），或者关机（SIGTERM），进行中的活（目标，或者还没做完的这一轮）会自动交给后台接着做（后台没开就先把它拉起来，几秒内完成）。被 kill -9 或断电时来不及做任何事，但"正在干活"的登记会留下，后台下次运行时接着做。
-- 打开一个后台正在做的会话时，可以选"接管"、"只看"或"返回"。接管时后台如果正在干活，终端会接着干下去（目标会重新跑起来），不会停在后台放手的地方。"只看"不抢会话，显示后台这一轮是否还在跑、目标状态和最后一段回复，可以随时刷新。另一个终端开着的会话不能接管，只会告诉你它开在哪里。
-- 崩溃、关机或断电后，后台接着做中断的工作时，会在你最近用的聊天里说一声。
-- 同一个会话同一时刻只有一个进程能打开（会话锁），所以终端和后台不会同时往一个会话里写。
+- Quitting a terminal (`/exit` works mid-turn) while a goal runs or a turn is unfinished asks whether to hand it to the background. If you do, the host continues it and is started when needed. Esc keeps you in.
+- When nobody can be asked — the window closed, an SSH link dropped (SIGHUP), the system shutting down (SIGTERM) — work in progress (a goal, or the unfinished turn) is handed to the background, starting it first if needed, within a few seconds. `kill -9` or a power loss leaves no time for anything, but the "work in progress" record stays and the host continues it the next time it runs.
+- Opening a session the host is working on offers **take over**, **just watch** or **back**. Taking over while the host is working carries the work on in the terminal (a goal is driven again) instead of leaving it where the host let go. Just watch does not take the session: it shows whether the host is running a turn, the goal, and the latest answer, and can be refreshed. A session another terminal has open cannot be taken; you are told where it is open.
+- After a crash, shutdown or power loss, when the host carries interrupted work on it says so in the chat you used last.
+- A session is open in one process at a time (session lock), so a terminal and the host never write to the same session at once.
 
-## 后台任务（`/jobs`）
+## Background jobs (`/jobs`)
 
-`/jobs` 管所有"不用你开口也会跑"的东西：后台任务，以及当前会话里的提醒（以前的 `/cron`，这个名字仍然可用）。
+`/jobs` holds everything that runs without being asked: background jobs, and this session's reminders (formerly `/cron`, which still works).
 
-- 一个任务写清四件事：**做什么**、**什么时候开始**（一次、或按 cron 重复）、**动手做还是只汇报**、**到什么时候为止**（一直、到某个时间、或达成某个结果，比如"测试连续 5 次通过"）。
-- 每次运行都新开一个会话，这些会话不进 `/sessions`，`-C` 也接不到；运行记录在 `/jobs` 里看。每个任务只保留最近 30 次运行。上一次的结论会作为"任务笔记"带给下一次。
-- **动手做**的任务如果在 git 仓库里，会在独立的 worktree 里干活（`~/.scream-code/worktrees/`），分支名 `scream/<任务>/<日期-时间>`。跑完后由后台把改动提交到这个分支，然后删掉 worktree；你白天的工作目录不会被碰。什么都没改就不留分支。
-- **只汇报**的任务不能改任何东西。
-- **不需要先开 `/service`**：有开着的任务时，打开终端就会把后台拉起来，关掉终端它继续跑，直到电脑重启。`/service` 让它在重启后也自己起来。
-- 后台没在运行时任务不会跑。重新运行后，最近 24 小时内错过的运行合并成一次补跑，并告诉它错过了几次；更早错过的直接跳过，在简报和 `scream report` 里写一句。连续失败 10 次的任务会自动停用，并告诉你。
-- 后台服务开着时，agent 在终端会话里建的重复定时任务（每 15 分钟或更久一次）会直接建成后台任务，关掉终端也照样跑。一次性提醒、更频繁的任务、聊天里建的任务，仍留在原来的会话里。
-- agent 自己建的任务最短 15 分钟一次，同时启用的任务最多 20 个。无人值守（bot 模式）时它可以建任务、删它自己建的任务；要删你建的任务，会先进"待你处理"等你同意。
-- 在 IM 里：`/jobs` 看任务，`/brief` 开启每天 08:30 的简报，`/stop all` 暂停全部后台工作。
-- **每日简报**：每天 08:30，几句话说清后台做了什么、失败了什么、等你处理的事，最后一句是"需要你看的一件事"。只在配了飞书/微信时提供（第一次开启常驻时问一次，IM 里用 `/brief` 开关）；没配的话，打开终端时的"你不在时"提示就是你的简报。随时也可以运行 `scream report` 看同样的数据。
+- A job says four things: **what to do**, **when it starts** (once, or on a cron schedule), **whether it acts or only reports**, and **until when** (always, a date, or an outcome such as "the tests pass five times in a row").
+- Each run gets a fresh session that stays out of `/sessions` and `-C`; its history is in `/jobs`. The newest 30 runs are kept per job. The last run's conclusion is passed to the next as its notes.
+- A job that **acts** inside a git repository works in its own worktree (`~/.scream-code/worktrees/`) on a branch `scream/<job>/<date-time>`. Afterwards the host commits the changes to that branch and removes the worktree; your checkout is never touched. A run that changed nothing leaves no branch.
+- A job that **only reports** cannot change anything.
+- **No need to turn on `/service` first**: with jobs on, opening a terminal starts the background, which keeps running after the terminal closes, until the computer restarts. `/service` makes it start again after a restart.
+- Jobs do not run while the background is down. When it runs again, runs missed in the last 24 hours are coalesced into one that knows how many it stands in for; older ones are skipped and noted in the brief and `scream report`. A job that fails ten runs in a row is switched off, and you are told.
+- While the background host runs, a repeating task the agent schedules in a terminal session (every 15 minutes or less often) becomes a background job, so it keeps running after the terminal closes. One-shot reminders, more frequent ones, and tasks made in a chat stay in their session.
+- Jobs the agent makes repeat at most every 15 minutes, and at most 20 jobs are on at once. Unattended (bot mode), the agent may create jobs and delete the ones it made; deleting one you set up waits for your approval.
+- In the chat: `/jobs` lists jobs, `/brief` turns on the 08:30 daily brief, `/stop all` pauses all background work.
+- **Daily brief**: every day at 08:30, a few sentences on what background work did, what failed and what waits for you, ending with the one thing you should look at. Offered only with Feishu or WeChat set up (asked once when the service is first turned on; `/brief` in the chat turns it on and off). Without a chat, the "while you were away" note in the terminal is your brief. `scream report` shows the same data at any time.
 
-## 待你处理
+## Waiting for you
 
-无人值守（bot 模式）时，不可逆的操作（比如 `git push`、删除文件）会被拦下，提问也没人回答。现在它们不只是被拒绝，还会进"待你处理"：
+Unattended (bot mode), an irreversible action (such as `git push` or deleting files) is refused and a question has nobody to answer it. Instead of only being refused, they wait for you:
 
-- 在终端：打开时提示，`/jobs` 最上面一行处理，底部状态栏显示件数，并弹系统通知（`/service` 里可以关）。
-- 配了飞书/微信时也推到聊天：来自聊天的会话推回那个聊天，其他的推到你最近发过消息的聊天。只有一件在等时，直接回"同意"、"拒绝"或"以后都同意"就行；也可以回 `/approve <编号>`（加 `session` 表示这个会话里同样的操作都同意，加 `always` 表示以后都同意）、`/reject <编号>`、`/mine <编号>`（交给我做：你自己处理，比如输密码、过二次验证），或 `/answer <编号> <回答>`；`/inbox` 列出还没处理的。
-- 终端里：`/jobs` 最上面一行"待你处理 N 件"，回车处理；`/service` 也会显示件数。
-- 等待期间它不停工，先去做别的。你同意后，后台会打开那个会话，只放行**这一个**完全相同的操作一次（"总是允许"会把这个操作记下来，以后无人值守时直接放行），并且仍然走完整的权限检查。
-- 24 小时没人处理就作废；还在等的和作废的都会写进每日简报。
-- "以后都同意"记的是这一个操作；后台任务推的分支名（`scream/任务/日期-时间`）每次都不同，所以这类分支算同一个：同意过一次 `git push origin scream/...`，以后推这类分支都直接放行，推 `main` 或强推仍然会问你。
-- 在终端里建的任务、交给后台的活：结果和"做完了"也推到你最近用的聊天（配了的话）。
-- 后台任务如果有事在等你，它的 worktree 会留着，等事情处理完或作废后再提交并清理。
+- In the terminal: a note when it opens, the top row of `/jobs`, a count in the footer and in `/service`, and a system notification (switch in `/service`).
+- With Feishu or WeChat set up, also in the chat: items from a chat session go back to that chat, others to the chat you last wrote from. With one item waiting, just reply `同意` (approve), `拒绝` (reject) or `以后都同意` (always approve). Or reply `/approve <id>` (add `session` to allow the same action for the rest of that session, `always` to allow it from now on), `/reject <id>`, `/mine <id>` (you do it yourself — a password, a second factor), or `/answer <id> <text>`; `/inbox` lists what is still waiting.
+- The work does not wait meanwhile; it carries on with the rest. Once you approve, the host opens that session and lets **exactly that action** through once ("always" remembers it for unattended runs from then on), still through every permission check.
+- An item nobody answers expires after 24 hours; what still waits and what expired go into the daily brief.
+- "Always" remembers that one action; branches pushed by background jobs (`scream/<job>/<time>`) get a new name every run, so they count as one: once `git push origin scream/...` is always-approved, later pushes of such branches go through, while a push to `main` or a force push still asks.
+- Results of jobs made in a terminal, and "done" for handed-over work, also go to the chat you used last (when one is set up).
+- A background job with something waiting keeps its worktree until the item is settled or expires, then commits and cleans it up.
 
-## 每周自查与改动历史
+## Weekly self-review and change history
 
-每周自查是一个内置的后台任务，scream 改进自己只走这一条路。开启方式：`/jobs` 里的"开启每周自查"，或者第一次开启常驻时的询问。
+The weekly self-review is a built-in background job, and the only way scream improves itself. Turn it on with "turn on the weekly self-review" in `/jobs`, or when asked as the service is first turned on.
 
-- 每周一 08:00 运行。它只拿到统计数字：一周里每个工具调用了多少次、出错多少次、出错最多的是哪几个会话（只有编号），以及四周里每个技能被实际调用了多少次。它不读对话内容。
-- 每次最多提 3 条改进：新技能、改技能、整理记忆、插件。每条都写明改什么、为什么、来自哪几个会话、预计减少哪种摩擦。四周没被调用过的技能，会提议下线。
-- **默认只提建议，不改任何东西。** 在 `/jobs` 里打开这个任务，可以改成"允许小改动直接做"：新建、修改技能直接做；删除技能、写记忆、任何跟插件有关的事仍然进"待你处理"，等你同意。启用插件代码一律先问你。
-- 它的工作目录是技能文件夹（`~/.scream-code/skills`），权限策略、预算、`config.toml` 都在这个文件夹外面，它改不了。技能不能给自己加工具权限。
-- **改动历史**：技能和记忆的每次改动都记在 `~/.scream-code/evolution`（一个 git 仓库，需要装 git）。在 `/skills` 最上面的"改动历史"或 `/memory history` 里能看到每次改了什么，选一条就能回滚。插件沿用 `/plugins` 自己的回滚。
-- 无人值守时写记忆同样会进"待你处理"，带着来源会话，你同意了才写进去。动手做的后台任务跑完、被接着做完的工作结束时，提取出的经验也一样先进"待你处理"，你选"保存"才会用到；只汇报的任务（简报、自查）不提取。这类"要不要保存"不推到聊天、不弹通知，只在 `/jobs` 和打开终端时的提示里，等你 7 天。
-- 每周自查会拿这周和上一周的出错率对比，看上周的改动有没有用。
+- It runs on Mondays at 08:00 and gets numbers only: how often each tool was called and failed over the week, the sessions with the most errors (ids only), and how often each skill was actually invoked over four weeks. It never reads conversations.
+- It proposes at most three improvements per run — a new skill, a skill change, tidier memories, a plugin — each saying what, why, which sessions it came from and which friction it should reduce. Skills nobody invoked for four weeks are proposed for retirement.
+- **By default it only proposes and changes nothing.** Open the job in `/jobs` to let it make small changes: new or edited skills are then made directly; deleting skills, writing memories and anything to do with plugins still wait for you. Enabling plugin code always asks.
+- It works in the skills folder (`~/.scream-code/skills`); permission policies, budgets and `config.toml` are outside it, out of its reach. Skills cannot grant themselves tools.
+- **Change history**: every change to skills and memories is recorded in `~/.scream-code/evolution` (a git repository; git must be installed). "Change history" at the bottom of `/skills`, or `/memory history`, shows what each change touched and rolls any one back. Plugins keep their own rollback in `/plugins`.
+- Memories written unattended wait for you too, with the session they came from, and are saved only when you approve. What an acting job or continued work learned when it ends waits the same way and is used only once you choose "save"; report-only jobs (the brief, the self-review) keep nothing. These "save?" items are not pushed to the chat and raise no notification; they wait in `/jobs` and the terminal's note for 7 days.
+- The self-review compares this week's error rates with the week before, to tell whether last week's changes helped.
 
-## 每日 token 上限
+## Daily token limit
 
-`/service` 里可以设一个"每天 token 上限"（默认不限），只算后台的无人值守工作：任务、续跑、待你处理的后续。到了上限，当天不再开始新的运行，第二天自动恢复，并会告诉你一次。
+`/service` can set a daily token limit (none by default) on unattended work only: jobs, continued work, and follow-ups of what waited for you. Once reached, no new run starts that day; work resumes the next day and you are told once.
 
-## 命令
+## Commands
 
 ```
-scream host [run|start|stop|status|restart|pause]   # run 是前台运行；pause 暂停全部后台工作
+scream host [run|start|stop|status|restart|pause]   # run = in the foreground; pause stops all background work
 scream service [install|uninstall|status|restart|logs]
-scream report [--since 24h]   # 后台工作报告：任务运行、待你处理的事、今天的 token（不调用模型）
+scream report [--since 24h]   # what background work did: job runs, what waits, tokens today (no model call)
 ```
 
-`stop` 会先等进行中的回合做完（最多 60 秒）再退出，Windows 上也一样。
+`stop` waits for a turn in progress to finish (up to 60 seconds) before exiting, on Windows too.
 
-## 文件
+## Files
 
-- `~/.scream-code/host/host.log`：日志，超过 5MB 会轮转到 `host.log.1`
-- `~/.scream-code/host/running/`：进行中工作的登记。每个会话一个文件，一轮开始时写入、结束时删除，留下来的就说明那一轮被打断了
-- `~/.scream-code/host/settings.json`：`/service` 里的设置（保持唤醒、每天 token 上限）
-- `~/.scream-code/host/jobs.json`：后台任务
-- `~/.scream-code/host/usage.json`：后台工作当天用掉的 token
-- `~/.scream-code/host/inbox/`：待你处理的事，一件一个文件
-- `~/.scream-code/host/approved-actions.json`：选了"总是允许"的操作
-- `~/.scream-code/worktrees/`：后台任务的 worktree
-- `~/.scream-code/evolution/`：技能和记忆的改动历史（git 仓库）
-- `~/.scream-code/run/control.token`：进程之间发请求（停止、交还）用的令牌，只有你自己能读
+- `~/.scream-code/host/host.log`: the log, rotated to `host.log.1` past 5 MB
+- `~/.scream-code/host/running/`: work in progress, one file per session, written when a turn starts and removed when it ends; a file left behind means the turn was cut off
+- `~/.scream-code/host/settings.json`: `/service` settings (keep awake, daily token limit, notifications)
+- `~/.scream-code/host/jobs.json`: background jobs
+- `~/.scream-code/host/usage.json`: tokens unattended work spent today
+- `~/.scream-code/host/inbox/`: what waits for you, one file per item
+- `~/.scream-code/host/activity.jsonl`: what background work did (the "while you were away" note)
+- `~/.scream-code/host/approved-actions.json`: actions you always-approved
+- `~/.scream-code/worktrees/`: background jobs' worktrees
+- `~/.scream-code/evolution/`: change history of skills and memories (a git repository)
+- `~/.scream-code/run/control.token`: the secret requests between your scream processes are signed with (stop, hand back); readable by you only

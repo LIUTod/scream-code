@@ -1,168 +1,166 @@
-# Line — 原生通道（飞书 + 微信）
+# Line — native channels (Feishu and WeChat)
 
-用 `/line` 把 Scream Code 连到 IM：配置向导 + 后台守护进程。两个平台均为**官方接口**，无需公网 IP：
-- **飞书**：开放平台 WebSocket 长连接
-- **微信**：官方 ilink 机器人网关（`getupdates` 长轮询 + `sendmessage` 下发，微信官方 bot 开放接口）
+`/line` connects Scream Code to an IM app: a setup wizard plus a background daemon. Both platforms use **official interfaces** and need no public IP:
+- **Feishu (Lark)**: the open platform's WebSocket long connection
+- **WeChat**: the official ilink bot gateway (`getupdates` long polling, `sendmessage` to reply — WeChat's official bot interface)
 
-## 快速开始
+## Quick start
 
-1. 在 TUI 里运行 `/line` → 选择「配置飞书（向导）」或「配置微信（向导）」
-2. 飞书：选**「跟着向导创建应用（推荐）」**——向导分步带你走完官方流程（创建应用 → 启用机器人 → 开通权限 → 长连接订阅 → 发布 → 粘贴凭证，约 3 分钟，无需公网 IP），每步都有直达链接与说明；微信：选**「扫码登录（推荐）」**——终端显示登录链接，手机微信打开确认即可，token 与白名单自动写入。
-   已有现成凭证 → 直接「手动输入」粘贴（微信的现成 token 获取见下文）。
-3. 凭证实测校验通过后写入 `~/.scream-code/line/config.json`（权限 0600）。
-4. 选择「立即启动」→ 后台守护进程拉起，footer 状态段显示 `◆ Line: Lark` / `◆ Line: Wechat`；守护没跑时显示 `◆ Line: 未连接`。
-5. 在 IM 里给机器人发消息，scream 会在对应会话里处理并回复。
+1. In the TUI run `/line` and pick "set up Feishu (wizard)" or "set up WeChat (wizard)".
+2. Feishu: choose **"create the app with the wizard (recommended)"** — it walks you through the official steps (create an app → enable the bot → grant permissions → long-connection subscription → publish → paste the credentials; about 3 minutes, no public IP), with a direct link and an explanation for each step. WeChat: choose **"log in by scanning (recommended)"** — the terminal shows a login link; open it in WeChat on your phone and confirm, and the token and allow-list are written for you.
+   Already have credentials? Choose "enter manually" and paste them (see below for WeChat tokens).
+3. Once the credentials pass a live check they are written to `~/.scream-code/line/config.json` (mode 0600).
+4. Choose "start now": the daemon starts and the footer shows `◆ Line: Lark` / `◆ Line: Wechat`; when the daemon is not running it shows the channel as not connected.
+5. Message the bot in the IM app; scream handles it in that chat's session and replies.
 
-## 单通道约束
+## One channel at a time
 
-`/line` 一次只服务**一个**通道：配置飞书后，微信向导不可再选（反之亦然）。要切换平台：`/line` → **卸载**（停守护 + 清 `~/.scream-code/line/`），再运行另一平台的向导。直接手改配置文件塞进两个平台会被守护进程拒绝启动（fail-fast，不会静默双跑）。切换后，旧平台的会话仍保留在 `/sessions` 里（独立命名空间，互不干扰），只是不再被新通道使用。
+`/line` serves **one** channel at a time: with Feishu set up, the WeChat wizard cannot be chosen (and the other way round). To switch: `/line` → **uninstall** (stops the daemon and clears `~/.scream-code/line/`), then run the other platform's wizard. A config file edited by hand to hold both platforms is refused at daemon start (fail-fast, never two channels quietly). After a switch the old platform's sessions stay in `/sessions` (their own namespace) but the new channel no longer uses them.
 
-## TUI 与 CLI 命令
+## TUI and CLI commands
 
-| 命令 | 作用 |
+| Command | What it does |
 |---|---|
-| `/line` | 向导 + 启动 / 停止 / 重启 / 卸载（TUI 内） |
-| `scream line` | 前台运行守护进程（调试用） |
-| `scream line start` / `stop` / `status` | 后台启停与状态查询 |
+| `/line` | Wizard, plus start / stop / restart / uninstall (in the TUI) |
+| `scream line` | Run the daemon in the foreground (for debugging) |
+| `scream line start` / `stop` / `status` | Start, stop and query it in the background |
 
-## 配置文件
+## Configuration file
 
-`~/.scream-code/line/config.json`（0600）。飞书选项名与飞书开放平台/业界惯用命名对齐，微信选项名与 ilink 网关字段对齐：
+`~/.scream-code/line/config.json` (0600). Feishu option names follow the Feishu open platform's usual naming; WeChat option names follow the ilink gateway's fields.
 
-### 通用字段
+### Common fields
 
-| 字段 | 默认 | 说明 |
+| Field | Default | Meaning |
 |---|---|---|
-| `permissionMode` | `auto` | 会话权限模式（见下节），IM 默认 `auto` |
-| `autoStart` | true | TUI 启动时自动拉起守护进程 |
-| `workDir` | 守护启动目录 | 会话工作目录 |
+| `permissionMode` | `auto` | Permission mode of chat sessions (see below); `auto` by default for IM |
+| `autoStart` | true | Start the daemon when the TUI starts |
+| `workDir` | The daemon's start directory | Working directory of chat sessions |
 
-### 飞书（`feishu`）
+### Feishu (`feishu`)
 
-| 字段 | 默认 | 说明 |
+| Field | Default | Meaning |
 |---|---|---|
-| `app_id` / `app_secret` | 必填 | 飞书应用凭证 |
-| `allow_from` | 空 = 允许所有人 | 用户 ID 白名单（逗号分隔）。**建议配置** |
-| `allow_chat` | 空 = 允许所有群 | 群聊 ID 白名单（仅群聊生效） |
-| `group_only` | false | 只响应群聊 |
-| `require_mention` | true | 群聊必须 @机器人（`false` 表示群内消息全部响应） |
-| `share_session_in_channel` | false | 会话按「群」共享（默认按「群 + 用户」隔离） |
-| `reaction_emoji` | `OnIt` | 收到消息的回应表情；`none` 关闭 |
-| `done_emoji` | 关 | 完成后的表情（如 `THUMBSUP`）；`none` 关闭 |
-| `domain` | `https://open.feishu.cn` | Lark 国际版填 `https://open.larksuite.com` |
+| `app_id` / `app_secret` | Required | The Feishu app's credentials |
+| `allow_from` | Empty = everyone | Allow-list of user IDs (comma-separated). **Recommended** |
+| `allow_chat` | Empty = every group | Allow-list of group chat IDs (group chats only) |
+| `group_only` | false | Answer group chats only |
+| `require_mention` | true | In groups, answer only when the bot is @-mentioned (`false`: answer every group message) |
+| `share_session_in_channel` | false | One session per group (by default one per group and user) |
+| `reaction_emoji` | `OnIt` | Reaction added when a message arrives; `none` turns it off |
+| `done_emoji` | Off | Reaction added when done (e.g. `THUMBSUP`); `none` turns it off |
+| `domain` | `https://open.feishu.cn` | For international Lark use `https://open.larksuite.com` |
 
-### 微信（`weixin`）
+### WeChat (`weixin`)
 
-| 字段 | 默认 | 说明 |
+| Field | Default | Meaning |
 |---|---|---|
-| `token` | 必填 | ilink bot Bearer token |
-| `base_url` | `https://ilinkai.weixin.qq.com` | 网关根地址（运营商不一致时才改） |
-| `allow_from` | 空 = 允许所有人 | ilink 用户 ID 白名单（形如 `xxx@im.wechat`）。**建议配置** |
-| `route_tag` | 空 | 运营商要求的 `SKRouteTag` 请求头 |
-| `long_poll_timeout_ms` | 35000 | 长轮询超时 |
-| `dedup_window_seconds` | 300 | 去重窗口（ilink 可能因 ACK 延迟重发同一消息） |
-| `cdn_base_url` | `https://novac2c.cdn.weixin.qq.com/c2c` | 媒体 CDN 根地址（仅网关换域名时改） |
+| `token` | Required | ilink bot bearer token |
+| `base_url` | `https://ilinkai.weixin.qq.com` | Gateway root (change only if your operator differs) |
+| `allow_from` | Empty = everyone | Allow-list of ilink user IDs (like `xxx@im.wechat`). **Recommended** |
+| `route_tag` | Empty | The `SKRouteTag` request header some operators require |
+| `long_poll_timeout_ms` | 35000 | Long-polling timeout |
+| `dedup_window_seconds` | 300 | De-duplication window (ilink may resend a message when an ACK is late) |
+| `cdn_base_url` | `https://novac2c.cdn.weixin.qq.com/c2c` | Media CDN root (change only if the gateway moves domain) |
 
-**微信 token 获取**——扫码登录是主路径，全程在 `/line` 向导内完成，**无需安装任何其他工具**：
-1. `/line` → 「配置微信（向导）」→ **「扫码登录（推荐）」**：向导向官方网关申请登录链接 → 你在手机微信中打开并确认 → token 自动写入配置，你的微信 ID 自动加入 `allow_from` 白名单
-2. 已有现成 token（运营商提供）→ 「手动输入 token」粘贴
+**Getting a WeChat token** — logging in by scanning is the main path, done entirely inside the `/line` wizard, **nothing else to install**:
+1. `/line` → "set up WeChat (wizard)" → **"log in by scanning (recommended)"**: the wizard asks the official gateway for a login link → you open it in WeChat on your phone and confirm → the token is written to the config and your WeChat ID is added to `allow_from`.
+2. Already have a token (from an operator)? "Enter the token manually" and paste it.
 
-**首次激活**：token 有效但会话过期（errcode -14）时，启动守护进程后用允许的微信账号给机器人**发一条消息**即可完成会话关联（context_token 机制——回复必须携带对方消息里的 context_token）。
+**First activation**: when the token is valid but the session has expired (errcode -14), start the daemon and **send the bot one message** from an allowed WeChat account; that links the session (context_token: a reply must carry the context_token of the other side's message).
 
-**微信能力边界**：支持文字、引用（`[引用: …]` 前缀）、语音转写文本、**图片 / 文件 / 语音 / 视频收发**（见「媒体收发」）；回复按 3800 字符分块、代码围栏感知切分；typing「对方正在输入」指示自动开启/结束。
+**What WeChat supports**: text, quotes (a `[引用: …]` prefix), voice transcribed to text, and **images / files / voice / video both ways** (see "Media"); replies are split into 3800-character chunks without breaking code fences; the "typing…" indicator is turned on and off automatically.
 
-## 媒体收发
+## Media
 
-两个平台都支持**图片与文件双向传输**，模型能看到你发的图，也能把工作目录里的图/文件发回给你。
+Both platforms carry **images and files both ways**: the model sees the images you send and can send images and files from the working directory back to you.
 
-| 方向 | 飞书 | 微信 |
+| Direction | Feishu | WeChat |
 |---|---|---|
-| 入站图片 | `image` 消息、富文本 `post` 内嵌图；同一次连发的多张图在 800 ms 内合并为一轮（**回复某条消息时会立即发送，不做批量**，以免丢掉引用文本） | `image_item`，CDN 下载 + AES-128-ECB 解密 |
-| 入站文件 | `file` / `audio` / `media`（视频）以及富文本 `post` 的 `files[]` → 落盘后把路径交给模型 | `file_item` / `video_item` / 无转写的 `voice_item` → 同上 |
-| 出站 | `image.create` / `file.create` 上传后按 `image` / `file` 消息发出 | `getuploadurl` → CDN 加密上传 → `sendmessage` 媒体 item（图片/文件/视频/**语音**） |
-| 单张上限 | 入站图片 8 MiB；附件入站 32 MiB；出站 25 MiB | 同左（入站 CDN 单包 100 MiB 硬上限） |
-| 大文件 | 下载走 `Range` 分块（绕过官方 SDK 在 ~2 MiB 处的截断），上限 512 MiB | 直连 CDN |
+| Incoming images | `image` messages and images inside rich-text `post`; several images sent in a row are merged into one turn within 800 ms (**a reply to a message is sent at once, not batched**, so the quoted text is not lost) | `image_item`, CDN download + AES-128-ECB decryption |
+| Incoming files | `file` / `audio` / `media` (video) and the `files[]` of a rich-text `post` → saved to disk and the path given to the model | `file_item` / `video_item` / `voice_item` without a transcript → same |
+| Outgoing | Uploaded with `image.create` / `file.create`, then sent as an `image` / `file` message | `getuploadurl` → encrypted CDN upload → a `sendmessage` media item (image / file / video / **voice**) |
+| Size limits | Incoming images 8 MiB; incoming attachments 32 MiB; outgoing 25 MiB | Same (incoming CDN hard limit 100 MiB per package) |
+| Large files | Downloaded in `Range` chunks (avoiding the official SDK's truncation around 2 MiB), up to 512 MiB | Directly from the CDN |
 
-- **引用消息**：回复某条消息时会把被引用内容压成 `[引用: …]`（500 字截断）带进本轮；被引用消息里的图片（≤2 张）会一并取回，**文件只在引用者与被引用消息同一发送者时才取回**（防止群成员把别人的文件拉进自己的会话）。
-- **入站附件落盘位置**：`~/.scream-code/line/inbox/<会话键>/<时间戳>-<文件名>`（0600，不写进你的项目目录）。
-- **图片如何进模型**：作为 `image_url` 内容分片直接进入本轮对话，无需模型再读文件；附件则以路径形式告知，模型自行用 `ReadMediaFile` / `Read` 打开。
-- **出站工具**：模型侧工具 `line_send_media`（仅在 IM 会话可见）。只允许发送**工作目录内**的普通文件（realpath 校验，防目录穿越与符号链接逃逸），单文件 ≤ 25 MiB；`.png/.jpg/.gif/.webp/.bmp` 按图片发送，`.amr/.wav/.mp3/.m4a/.aac/.ogg/.oga/.opus/.silk/.flac` 按语音发送，其余按文件发送；也可显式传 `kind`（`image` / `file` / `audio`）。
-- **语音出站（微信）**：网关只接受 **AMR-NB**（8 kHz / 单声道 / 12.2 kbps）。非 AMR 音频先用 **ffmpeg** 转码（走 stdin/stdout 管道，不落临时文件）；本机没有 ffmpeg、或 ffmpeg 缺少 AMR-NB 编码器时**自动降级为文件消息**，并在工具回执里说明原因，不会让整轮失败。
-  - macOS：`brew install ffmpeg`（注意 Homebrew 官方构建**可能不含** `libopencore_amrnb`，可用 `ffmpeg -encoders | grep amr` 自检）。
-  - Ubuntu/Debian：`sudo apt install ffmpeg`。
-  - Windows：从 ffmpeg.org 下载带 `libopencore-amr` 的构建并加入 `PATH`（`ffmpeg.exe`）。
-  - 仅 **AMR-NB**（`#!AMR\n`）会直接发送；AMR-WB（`#!AMR-WB`）及其他格式一律先转码。
-  - 飞书侧语音统一按**文件**发送（语音气泡仅微信支持），回执会注明。
-- **失败回执**：图片/附件下载失败会回一句「图片下载失败，请重新发送一次。」，不会静默吞掉。
+- **Quoted messages**: replying to a message brings the quoted content into the turn as `[引用: …]` (cut at 500 characters); images in the quoted message (up to 2) are fetched too, and **files only when the quoting and the quoted message come from the same sender** (so a group member cannot pull someone else's file into their own session).
+- **Where incoming attachments are saved**: `~/.scream-code/line/inbox/<session key>/<timestamp>-<file name>` (0600; never inside your project).
+- **How images reach the model**: as `image_url` content parts directly in the turn, with no need for the model to read a file; attachments are given as paths, which the model opens with `ReadMediaFile` / `Read`.
+- **Sending tool**: the model-side tool `line_send_media` (visible in IM sessions only). It sends only ordinary files **inside the working directory** (realpath checked against directory traversal and symlink escapes), up to 25 MiB each; `.png/.jpg/.gif/.webp/.bmp` go as images, `.amr/.wav/.mp3/.m4a/.aac/.ogg/.oga/.opus/.silk/.flac` as voice, anything else as a file; `kind` (`image` / `file` / `audio`) can also be given explicitly.
+- **Outgoing voice (WeChat)**: the gateway accepts **AMR-NB** only (8 kHz, mono, 12.2 kbps). Other audio is transcoded with **ffmpeg** first (through stdin/stdout, no temporary file); without ffmpeg, or with an ffmpeg lacking the AMR-NB encoder, it **falls back to a file message**, with the reason in the tool result, and the turn does not fail.
+  - macOS: `brew install ffmpeg` (Homebrew's official build **may not include** `libopencore_amrnb`; check with `ffmpeg -encoders | grep amr`).
+  - Ubuntu/Debian: `sudo apt install ffmpeg`.
+  - Windows: download an ffmpeg build with `libopencore-amr` from ffmpeg.org and put `ffmpeg.exe` on `PATH`.
+  - Only **AMR-NB** (`#!AMR\n`) is sent as it is; AMR-WB (`#!AMR-WB`) and other formats are transcoded first.
+  - On Feishu voice is always sent as a **file** (voice bubbles are WeChat-only); the tool result says so.
+- **Failure replies**: when an image or attachment cannot be downloaded the bot replies `图片下载失败，请重新发送一次。` ("the image could not be downloaded, please send it again") instead of dropping it silently.
 
-## 在 IM 里可用的命令
+## Commands in the chat
 
-直接在对话里发斜杠命令，由守护进程拦截执行，**不会进入模型**（不消耗 token）：
+Slash commands sent in the chat are handled by the daemon and **never reach the model** (no tokens spent). Replies from the bot are in Chinese.
 
-| 命令 | 作用 |
+| Command | What it does |
 |---|---|
-| `/status` | 当前模型、权限/计划/群狼/RLM 模式、上下文占用与思考级别 |
-| `/model <名称>` | 切换模型；不带参数显示当前模型 |
-| `/compact` | 压缩上下文 |
-| `/stop` | 停止**正在运行**的那一轮，并丢弃该聊天还在排队的消息（IM 版的 ESC；忙时也可用），回执「已停止当前任务。」；若 10 秒内停不下来（工具挂死），会关闭在线会话，下一条消息自动恢复同一会话 |
-| `/cancel` | 停止并开启新会话（等价 `/stop` + `/new`，忙时也可用） |
-| `/cron` | 查看本聊天的定时任务（含「静默/静音」标记与「上次失败」）；`/cron add [--silent\|--mute] <分 时 日 月 周> <要做的事>` 新建；`/cron rm <id>` 删除 |
+| `/status` | Current model, permission / plan / wolfpack / RLM mode, context use and thinking level |
+| `/model <name>` | Switch model; without a name, show the current one |
+| `/compact` | Compact the context |
+| `/stop` | Stop the turn **in progress** and drop this chat's queued messages (the IM equivalent of Esc; works while busy); replies `已停止当前任务。` ("stopped the current task"). If it cannot stop within 10 seconds (a hung tool), the live session is closed and the next message resumes the same session |
+| `/cancel` | Stop and start a new session (`/stop` + `/new`; works while busy) |
+| `/cron` | This chat's reminders (with "silent / muted" marks and "last failure"); `/cron add [--silent\|--mute] <min hour day month weekday> <what to do>` adds one; `/cron rm <id>` deletes one |
+| `/new` | Drop the current session; the next message starts a new one |
+| `/jobs` | Background jobs: each job's schedule, last result and whether it is on |
+| `/brief` | Turn on the daily brief (every day at 08:30 to this chat: what got done, what failed, what waits for you) |
+| `/project [number]` | Show or switch this chat's project folder (from recently used projects) |
+| `/stop all` | Pause all background work: stop runs in progress and switch every job off |
+| `/inbox` | List what waits for you (approvals, questions) |
+| `/approve <id> [always]` | Approve once (`always`: allow the same action unattended from now on) |
+| `/approve <id> session` | Allow the same action for the rest of that session |
+| `/reject <id>` | Reject |
+| `/mine <id>` | You did it yourself (a password, say): tell the work it is done |
+| `/answer <id> <answer>` | Answer a question from background work |
+| `同意` / `拒绝` / `以后都同意` | Approve / reject / always approve. With one pushed approval waiting, just reply one of these words, no id needed; with several waiting, the bot lists their ids. Only these exact words count, so normal chatting is unaffected |
+| `/help` | The command list (custom commands included) |
+| `/<name>` | Commands you define yourself in the config (`prompt` or `exec`) |
 
-- `--silent`：触发时不发「⏰ 已触发」，只发结果；`--mute`：什么都不发（纯后台维护任务）。模型侧 `CronCreate` 对应参数 `silent` / `mute`。
-- 任务失败会在 `/cron` 列表里留一行「上次失败：…」，下次成功自动清除。
-| `/new` | 丢弃当前会话，下条消息开新会话 |
-| `/jobs` | 后台任务列表：每个任务的计划、上次结果、是否启用 |
-| `/brief` | 开启每日简报（每天 08:30 发到这个聊天：做完了什么、失败了什么、等你处理的事） |
-| `/project [编号]` | 查看或切换这个聊天的项目目录（从最近用过的项目里选） |
-| `/stop all` | 暂停全部后台工作：停掉进行中的运行，停用所有任务 |
-| `/inbox` | 列出等你处理的事（审批、提问） |
-| `/approve <编号> [always]` | 同意这一次（`always`：以后无人值守时同样的操作都直接做） |
-| `/reject <编号>` | 拒绝 |
-| `/mine <编号>` | 交给我做：你自己处理了（比如输密码），告诉它已完成 |
-| `/answer <编号> <回答>` | 回答后台的提问 |
-| `同意` / `拒绝` / `以后都同意` | 只有一件推送过的审批在等时，直接回这几个字就行，不用带编号；有好几件时会列出编号让你选。只认这几个词，平常聊天不受影响 |
-| `/approve <编号> session` | 这个会话里同样的操作都同意 |
-| `/help` | 命令列表（含自定义命令） |
-| `/自定义` | 你自己在配置里定义的命令（`prompt` 型或 `exec` 型） |
+- `/cron add` options: `--silent` sends only the result, without the `⏰` "fired" line; `--mute` sends nothing (pure background maintenance). The model-side `CronCreate` has the same `silent` / `mute` parameters. A failed task leaves a "last failure: …" line in `/cron`, cleared by the next success.
+- While a turn is running, `/model`, `/compact` and `/new` reply "wait for this turn to finish (reply /stop to abort)" so they do not race the running turn; `/stop` itself **is never blocked**.
+- A message queued behind others gets an immediate `收到，前面还有 N 条在处理中。回复 /stop 可中止当前任务。` ("received; N ahead of it; reply /stop to abort") instead of waiting silently.
+- **Reminders come back to the chat**: when `cron.fired` triggers in a session the daemon first sends a `⏰` line naming the task, then the turn's final answer once it ends. Delivery uses the remembered chat target: Feishu's session → group mapping in `line/feishu/chats.json`, WeChat's locally saved context_token (`line/weixin/context_tokens.json`).
+- **Reminders keep firing after a daemon restart**: on start it reopens chat sessions with reminders (even after the working directory changed), without waiting for your next message; a fire missed while it was down is delivered once after the restart (a repeating task says how many it merged). Feishu pushes directly; WeChat pushes with the context_token saved before the restart, and if WeChat considers it expired you need to send one message to restore pushing (the log says so). A fire that lands while your own turn runs is folded into that turn's reply, not pushed twice.
+- `/status` ends with the voice capability found at start (whether ffmpeg / the AMR-NB encoder is available); a missing encoder means voice falls back to files.
+- **Custom commands**: defined in the config's `commands` array. A `prompt` command sends its template as a turn (`{args}` is replaced; without a placeholder the arguments are appended); an `exec` command runs a shell in the daemon (`/bin/sh -c` on macOS/Linux, `%ComSpec% /d /s /c` on Windows; 30 s timeout, output cut at 8 KiB, arguments in the `LINE_ARGS` environment variable, `work_dir` must be inside the working directory). On Windows the `{args}` placeholder is **not supported** (command-injection safety); read `%LINE_ARGS%` in the script. Command names must not repeat or clash with built-in commands.
+- **Unknown commands go to the model as usual**; commands that need the interactive UI (`/theme`, the `/line` wizard, `/model` without a name, `/sessions`) reply that they must be run in scream in a terminal.
 
-- 有任务正在处理时，`/model`、`/compact`、`/new` 会回复「请等这一轮结束（回复 /stop 可中止）」，避免与运行中的回合争用；`/stop` 本身**不受忙限制**。
-- 消息排在别人后面时，会立刻回一条 `收到，前面还有 N 条在处理中。回复 /stop 可中止当前任务。`——不再静默排队。
-- **定时任务现在能回到聊天**：`cron.fired` 在会话里触发后，守护进程会先发一行 `⏰ 定时任务已触发：…`，等这一轮跑完再把最终内容发到该聊天。投递靠记下的聊天目标：飞书的「会话 → 群聊」对应关系存在 `line/feishu/chats.json`，微信用本机保存的 context_token（`line/weixin/context_tokens.json`）找回对方。
-- **守护进程重启后定时任务照常触发**：启动时会自动恢复带定时任务的聊天会话（即使改过工作目录也能找到），不必等你先发消息；停机期间错过的触发会在恢复后补发一次（重复任务会注明合并了几次）。飞书可直接推送；微信用重启前保存的 context_token 推送，若微信判定该 token 已失效，需要你在微信里再发一条消息才能恢复推送（日志会提示）。触发时若正有你的回合在跑，结果并入那一轮回复，不会重复推送。
-- `/status` 末尾会带上启动时的语音能力探测结果（ffmpeg / AMR-NB 编码器是否可用），缺编码器意味着语音会降级成文件。
-- **自定义命令**：配置项的 `commands` 数组里定义，`prompt` 型会把模板（`{args}` 会被替换，无占位符则把参数附在末尾）作为一轮输入发给模型；`exec` 型在守护进程里执行 shell（macOS/Linux 为 `/bin/sh -c`，Windows 为 `%ComSpec% /d /s /c`；30 s 超时、输出截断 8 KiB、参数通过 `LINE_ARGS` 环境变量传递、`work_dir` 必须位于工作目录内）。Windows 上出于命令注入安全考虑**不支持 `{args}` 占位符**，请在脚本里读 `%LINE_ARGS%`。命令名不能与内置命令重名、不能重复。
-- **未识别的命令照常发给模型**；需要界面交互的命令（`/theme`、`/line` 向导、无参 `/model` 选择器、`/sessions`）会提示「需要在终端里的 scream 中操作」。
+## How the model knows the channel
 
-## 模型如何感知当前通道
+When a session is created or resumed, the daemon gives it a channel note (runtime system prompt, not part of the conversation): Lark or WeChat, what it can receive and send, **no desktop screenshots**, long replies split into chunks. So the model does not offer to "take a screenshot" or claim to see attachments you never sent.
 
-每次建立/恢复会话时，守护进程会向该会话注入一段渠道说明（运行时 system prompt，不进入对话正文）：当前是 Lark 还是 WeChat、能收什么、能发什么、**没有桌面截图能力**、超长回复会被分块。因此模型不会再说「我给你截图」，也不会声称看到了你并未发送的附件。
+## Limits
 
-## 运行边界
+- **60 minutes per turn** (`turnTimeoutMinutes` changes it): past it the turn is cancelled and the bot replies that the turn timed out, so one stuck request cannot hold the chat's queue forever.
+- **`/new` is exclusive**: a message arriving during the reset is told the session is being reset and to resend shortly; a turn already running finishes before the storage is deleted.
+- **Shutdown**: turns in progress are allowed to finish first (up to 60 seconds, logged while waiting), then the transports and sessions close.
 
-- **单轮上限 60 分钟**（配置项 `turnTimeoutMinutes` 可改）：超过即取消该轮并回复「本轮执行超时」，避免某次卡死的请求把整个会话队列永久占住。
-- **`/new` 互斥**：重置进行中到达的消息会收到「会话正在重置，请稍后重发」；已有回合会先跑完再删存储。
-- **关停**：先等进行中的回合结束（最多 60 秒，等待时会在日志里说明），再关闭传输层与会话。
+## Permissions and safety
 
-## 权限与安全
+- `permissionMode: auto` (**default**) = after the deny rules, everything is allowed, with no interactive surface (no questions, no plan reviews) — the best fit for IM.
+- `permissionMode: yolo` = also fully automatic, but keeps plan review (ExitPlanMode) as an interactive path; not recommended for IM.
+- `permissionMode: dontAsk` = bot mode: reversible work runs; irreversible actions (publishing, pushing, deleting, sensitive files and so on) are refused and wait for your approval (see "Waiting for you" in [`host.md`](host.md)).
+- No mode bypasses `deny` rules; a value written explicitly in an older config is kept as it is, never replaced by the default.
+- Feishu's group @-filter **fails closed**: if the bot's identity cannot be fetched, it answers nothing rather than every group message.
+- Without a WeChat `allow_from`, any private-chat user can spend your model tokens — **always set an allow-list** (ilink user IDs look like `xxx@im.wechat`).
+- Secrets and tokens are stored with mode 0600; logs contain no credentials.
+- Remote sessions and local TUI sessions are separate; they are listed in `/sessions` (`source: line`).
 
-- `permissionMode: auto`（**默认**）= 策略层在 deny 规则之后全量放行，且不产生任何交互面（不弹提问、不做计划评审）——最适合 IM。
-- `permissionMode: yolo` = 同样全自动，但会保留计划评审（ExitPlanMode）这一交互路径，IM 下不推荐。
-- `permissionMode: dontAsk` = 不可逆操作（发布、推送、删除、敏感文件等）一律拒绝（决定记入审计；bot 不产生交互审批，也不排队等审）；可逆操作仍会自动执行（bot 模式）。
-- 三种模式都**不会**绕过 `deny` 规则；旧配置里显式写下的值保持原样，不会被默认值改写。
-- 飞书群聊 @ 过滤是 **fail-closed**：机器人身份获取失败时宁可不响应，也不会抢答所有群消息。
-- 微信 `allow_from` 未配置时任何私聊用户都能触发你的模型计费——**建议始终配置白名单**（ilink 用户 ID 形如 `xxx@im.wechat`）。
-- Secret/token 以 0600 权限落盘；日志不含凭证。
-- 远程会话与本地 TUI 会话互相独立，可在 `/sessions` 中查看（`source: line`）。
+## The daemon
 
-## 守护进程
+- The channel runs inside the **background host** (`scream host`; `scream line` is its older name), see [`host.md`](host.md). Quitting the TUI does not affect the channel. There is one background host per Scream home: while it runs it holds a lock owned by the operating system (an abstract socket on Linux, a socket file on macOS, a named pipe on Windows), released however the process ends — nothing is left behind, and a reused pid is never mistaken for it.
+- Log: `~/.scream-code/host/host.log` (checked every 10 minutes while running; past 5 MB its content moves to `host.log.1` and the file is emptied).
+- WeChat state: `~/.scream-code/line/weixin/` (long-polling cursor and context_token cache, both 0600; keep them private).
+- With `autoStart: true` it starts with the TUI; to have it start at login and restart after a crash, turn on the resident service with `/service`.
+- Graceful shutdown: `scream line stop`, or stop in `/line`, lets turns in progress finish (up to 60 seconds) before exiting, on Windows too; only then is it forced. SIGTERM/SIGINT wait the same way.
 
-- 通道跑在**后台服务**（`scream host`，`scream line` 是它的旧名字）里，详见 [`host.md`](host.md)。TUI 退出不影响通道。同一个 Scream 主目录只会有一个后台服务：它运行期间持有一把由操作系统管理的锁（Linux 抽象 socket、macOS socket 文件、Windows 命名管道），进程无论怎么退出锁都会随之释放，不会残留，也不会因为 pid 被复用而误判。
-- 日志：`~/.scream-code/host/host.log`（运行中每 10 分钟检查一次，超过 5MB 就把内容移到 `host.log.1` 并清空原文件）。
-- 微信状态：`~/.scream-code/line/weixin/`（长轮询游标 + context_token 缓存，均 0600，勿手动泄露）。
-- `autoStart: true` 时随 TUI 启动自动拉起；想开机/登录后就自动运行、崩溃后自动重启，用 `/service` 开启常驻。
-- 优雅关停：`scream line stop` 或 `/line` 停止时，守护进程会先等进行中的回合结束（最多 60 秒）再退出，Windows 上也一样；超时仍未退出才强制结束。收到 SIGTERM/SIGINT 时同样等待。
+## Channel ownership
 
-## 通道归属
-
-- `/line` 是 Scream 唯一的远程通道：**飞书（Lark）与微信（WeChat）二选一**，配置向导与守护进程全部内置，不依赖任何第三方桥接工具。
-- 已配置的通道会话在 `/sessions` 里标记 `line-feishu` / `line-weixin`，由通道管理（不可在 TUI 中删除，避免与守护进程争用）。
+- `/line` is Scream's only remote channel: **Feishu (Lark) or WeChat, one of the two**, with the wizard and daemon built in and no third-party bridge.
+- A configured channel's sessions are marked `line-feishu` / `line-weixin` in `/sessions` and managed by the channel (they cannot be deleted from the TUI, so they never race the daemon).
