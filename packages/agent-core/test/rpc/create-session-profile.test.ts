@@ -99,6 +99,8 @@ async function expectedBasePrompt(agent: Agent): Promise<string> {
     cwdListing: context.cwdListing,
     agentsMd: context.agentsMd,
     now,
+    // The self-asset map names the session's home, not SCREAM_CODE_HOME.
+    ...(agent.screamHomeDir === undefined ? {} : { screamHomeDir: agent.screamHomeDir }),
   });
 }
 

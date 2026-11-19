@@ -131,6 +131,8 @@ vi.mock('../../src/cli/update/refresh', () => ({
 
 vi.mock('../../src/utils/legacy-user-assets', () => ({
   legacyUserAssetsNotice: mocks.legacyUserAssetsNotice,
+  legacyUserAssetsNoticeOnce: mocks.legacyUserAssetsNotice,
+  markLegacyUserAssetsNoticed: () => {},
 }));
 
 describe('runShell', () => {

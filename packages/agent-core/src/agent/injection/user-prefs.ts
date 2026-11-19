@@ -27,7 +27,7 @@ export class UserPrefsInjector extends DynamicInjector {
     if (this.injectedAt !== null && !this.hasNewUserPromptSince(this.injectedAt)) {
       return undefined;
     }
-    const prefs = await loadRoleAdditional(this.agent.jian);
+    const prefs = await loadRoleAdditional(this.agent.jian, this.agent.screamHomeDir);
     if (prefs === undefined) return undefined;
 
     const text = [

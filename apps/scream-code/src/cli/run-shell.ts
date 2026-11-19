@@ -11,7 +11,7 @@ import { CHROME_GUTTER } from '#/tui/constant/rendering';
 import { ScreamTUI } from '#/tui/index';
 import { detectTerminalTheme } from '#/tui/theme/detect';
 import { refreshServiceLauncher } from '#/host/service';
-import { legacyUserAssetsNotice } from '#/utils/legacy-user-assets';
+import { legacyUserAssetsNoticeOnce, markLegacyUserAssetsNoticed } from '#/utils/legacy-user-assets';
 
 import type { CLIOptions } from './options';
 import { ensureDocsInstalled } from './ensure-docs';
@@ -49,7 +49,7 @@ export async function runShell(
 
   const workDir = process.cwd();
   const homeDir = resolveScreamHome();
-  const legacyAssetsNotice = legacyUserAssetsNotice(homeDir);
+  const legacyAssetsNotice = legacyUserAssetsNoticeOnce(homeDir);
   const startupNotice =
     configWarning !== undefined && legacyAssetsNotice !== undefined
       ? `${configWarning}\n${legacyAssetsNotice}`
@@ -117,6 +117,8 @@ export async function runShell(
   }
   try {
     await tui.start();
+    // Shown as a startup notice once the UI is up: remember it was said.
+    if (legacyAssetsNotice !== undefined) markLegacyUserAssetsNoticed(homeDir, legacyAssetsNotice);
   } catch (error) {
     await harness.close();
     throw error;

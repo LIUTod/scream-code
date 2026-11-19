@@ -21,13 +21,13 @@ export async function prepareSystemPromptContext(
   const [cwdListing, agentsMd, roleAdditional] = await Promise.all([
     listDirectory(jian),
     loadAgentsMd(jian, screamHomeDir),
-    loadRoleAdditional(jian),
+    loadRoleAdditional(jian, screamHomeDir),
   ]);
   return { cwdListing, agentsMd, roleAdditional };
 }
 
-export async function loadRoleAdditional(_jian: Jian): Promise<string | undefined> {
-  const prefsPath = join(resolveScreamHome(), 'user-prefs.md');
+export async function loadRoleAdditional(_jian: Jian, screamHomeDir?: string | undefined): Promise<string | undefined> {
+  const prefsPath = join(resolveScreamHome(screamHomeDir), 'user-prefs.md');
   if (!(await pathExists(_jian, prefsPath))) {
     return undefined;
   }

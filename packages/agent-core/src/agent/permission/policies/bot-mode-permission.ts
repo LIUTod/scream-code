@@ -273,7 +273,7 @@ export class BotModePermissionPolicy implements PermissionPolicy {
       // Irreversible first: an allowlisted head word must never outrank a
       // destructive payload in the same simple command.
       if (DANGEROUS_BASH.test(command)) {
-        return { kind: 'deny', reason: { reason: 'bot: irreversible command parked for human review' } };
+        return { kind: 'deny', reason: { reason: 'bot: irreversible command, needs the person' } };
       }
       if (READONLY_BASH.test(command)) {
         return { kind: 'approve', reason: { reason: 'bot: read-only command' } };

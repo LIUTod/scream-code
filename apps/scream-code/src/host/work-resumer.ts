@@ -39,12 +39,18 @@ const STALE_CHAT_RECORD_MS = 7 * 24 * 60 * 60 * 1000;
 const CHANNEL_SESSION_PREFIX = 'line-';
 /** Background-task runs (see `job-runner.ts`): rerun by their job, never continued here. */
 const JOB_RUN_SESSION_PREFIX = 'job-run-';
+/** How soon a handed-over session still held by its exiting terminal is looked at again. */
+const HANDOFF_RECHECK_MS = 3_000;
+/** A terminal exits within seconds of handing over; past this the 30 s sweep is enough. */
+const MAX_HANDOFF_RECHECKS = 5;
 
 export interface WorkResumerOptions {
   readonly harness: ScreamHarness;
   readonly screamHomeDir: string;
   /** The prompt that continues an interrupted run (localized by the caller). */
   readonly continuationText: string;
+  /** The prompt that continues work a terminal handed over; `continuationText` when absent. */
+  readonly handoffText?: string | undefined;
   /**
    * Continues a chat-channel session through its channel, so the reply is
    * delivered to the chat. Undefined while no channel runs: such sessions are
@@ -86,6 +92,8 @@ export class WorkResumer {
   }
 
   stop(): void {
+    if (this.recheckTimer !== undefined) clearTimeout(this.recheckTimer);
+    this.recheckTimer = undefined;
     this.stopped = true;
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
@@ -118,6 +126,11 @@ export class WorkResumer {
     }
   }
 
+  /** The one pending "look again soon" for handed-over sessions still held (see sweepOnce). */
+  private recheckTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Rechecks made per handed-over session, so one held for good is not polled forever. */
+  private readonly rechecks = new Map<string, number>();
+
   /** Sessions a terminal took back from this resumer: their run ending is not a failure. */
   private readonly handedOver = new Set<string>();
 
@@ -148,6 +161,7 @@ export class WorkResumer {
     if (this.options.budgetReached?.() === true) return 0;
     const now = (this.options.now ?? Date.now)();
     let started = 0;
+    let handoffStillHeld = false;
     for (const record of listRunningWork(this.options.screamHomeDir)) {
       if (this.stopped) break;
       if (this.inFlight.has(record.sessionId)) continue;
@@ -168,11 +182,23 @@ export class WorkResumer {
       } catch {
         continue;
       }
-      if (holder !== undefined) continue; // some process runs it right now
+      if (holder !== undefined) {
+        // A terminal hands work over and then exits; until it has, it still
+        // holds the session. Look again shortly rather than at the next sweep.
+        if (record.handoff === true) {
+          const made = this.rechecks.get(record.sessionId) ?? 0;
+          if (made < MAX_HANDOFF_RECHECKS) {
+            this.rechecks.set(record.sessionId, made + 1);
+            handoffStillHeld = true;
+          }
+        }
+        continue; // some process runs it right now
+      }
       if (record.sessionId.startsWith(CHANNEL_SESSION_PREFIX) && this.options.continueChannelSession === undefined) {
         continue;
       }
       this.inFlight.add(record.sessionId);
+      this.rechecks.delete(record.sessionId);
       started += 1;
       void this.continueWork(record)
         .catch((error: unknown) => {
@@ -185,11 +211,22 @@ export class WorkResumer {
           this.inFlight.delete(record.sessionId);
         });
     }
+    if (handoffStillHeld && !this.stopped && this.recheckTimer === undefined) {
+      this.recheckTimer = setTimeout(() => {
+        this.recheckTimer = undefined;
+        void this.sweep();
+      }, HANDOFF_RECHECK_MS);
+      this.recheckTimer.unref?.();
+    }
     return started;
   }
 
   private async continueWork(record: RunningWorkRecord): Promise<void> {
-    const { harness, screamHomeDir, continuationText } = this.options;
+    const { harness, screamHomeDir } = this.options;
+    const continuationText =
+      record.handoff === true && this.options.handoffText !== undefined
+        ? this.options.handoffText
+        : this.options.continuationText;
     if (record.sessionId.startsWith(CHANNEL_SESSION_PREFIX)) {
       removeRunningWork(screamHomeDir, record.sessionId);
       this.options.onContinued?.(record, undefined);

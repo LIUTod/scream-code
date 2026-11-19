@@ -49,7 +49,7 @@ describe('bot mode integration smoke', () => {
     // The tool actually EXECUTED and was refused by permission — not tool-not-found.
     expect(afterPush).not.toContain('Tool "Bash" not found');
     expect(afterPush).toContain('bot:');
-    expect(afterPush.toLowerCase()).toContain('parked for human review');
+    expect(afterPush.toLowerCase()).toContain('needs the person');
 
     // 2) In-workspace write → approved and executed (success result, no denial).
     ctx.mockNextResponse({

@@ -111,6 +111,24 @@ async function settle(resumer: WorkResumer): Promise<void> {
 }
 
 describe('WorkResumer', () => {
+  it('says "handed over" to work a terminal handed over, and "interrupted" to work that was cut off', async () => {
+    const dir = home();
+    writeRecord(dir, { sessionId: 'ses-handed', kind: 'chat', handoff: true });
+    writeRecord(dir, { sessionId: 'ses-cut', kind: 'goal' });
+    const sessions = new Map<string, ReturnType<typeof fakeSession>>();
+    const resumer = new WorkResumer({
+      harness: fakeHarness(sessions),
+      screamHomeDir: dir,
+      continuationText: 'interrupted',
+      handoffText: 'handed over',
+      settleMs: 10,
+    });
+    await resumer.sweep();
+    await settle(resumer);
+    expect(sessions.get('ses-handed')!.prompts).toEqual(['handed over']);
+    expect(sessions.get('ses-cut')!.prompts).toEqual(['interrupted']);
+  });
+
   it('drives a goal that reopening paused, and leaves a blocked one waiting for the person', async () => {
     for (const [before, after] of [['paused', 'active'], ['blocked', 'blocked']] as const) {
       const dir = home();

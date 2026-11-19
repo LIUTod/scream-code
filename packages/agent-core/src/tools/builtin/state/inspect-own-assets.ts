@@ -495,7 +495,7 @@ export class InspectOwnAssetsTool implements BuiltinTool<InspectOwnAssetsInput> 
   ) {}
 
   resolveExecution(args: InspectOwnAssetsInput): ToolExecution {
-    const home = this.override?.homeDir ?? resolveScreamHome();
+    const home = this.override?.homeDir ?? resolveScreamHome(this.agent.screamHomeDir);
     const userHome = this.override?.userHomeDir ?? homedir();
     const cwd = this.agent.config.cwd;
 

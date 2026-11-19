@@ -56,6 +56,13 @@ export async function handleMainCommand(opts: CLIOptions, version: string): Prom
 export function main(): void {
   initProcessName();
 
+  // A relative SCREAM_CODE_HOME is resolved against this process's directory.
+  // Pin it as an absolute path, so every process started from here (the
+  // background host, a scream run by a tool in a subfolder) uses the same home.
+  if (process.env['SCREAM_CODE_HOME'] !== undefined && process.env['SCREAM_CODE_HOME'].trim() !== '') {
+    process.env['SCREAM_CODE_HOME'] = resolveScreamHome();
+  }
+
   // The saved UI language must win over `LANG` for everything printed before a
   // session starts — `--help` and option errors are built before runShell /
   // runPrompt apply the loaded config.

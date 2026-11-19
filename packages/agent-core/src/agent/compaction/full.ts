@@ -5,6 +5,7 @@ import {
   makeErrorPayload,
   toScreamErrorPayload,
 } from '#/errors';
+import { MAX_COMPACTED_HISTORY_ENTRIES } from './limits';
 import {
   APIEmptyResponseError,
   isRetryableGenerateError,
@@ -64,7 +65,7 @@ export interface CompactedHistory {
  * grow quadratically. Nothing reads it back; the latest few are enough to see
  * what a compaction summarized.
  */
-export const MAX_COMPACTED_HISTORY_ENTRIES = 2;
+export { MAX_COMPACTED_HISTORY_ENTRIES } from './limits';
 
 export const MAX_COMPACTION_RETRY_ATTEMPTS = 5;
 

@@ -153,8 +153,9 @@ describe('prepareSystemPromptContext roleAdditional', () => {
   });
 
   it('loads trimmed user-prefs.md as roleAdditional', async () => {
+    await mkdir(join(homeDir, '.scream-code'), { recursive: true });
     await writeFile(
-      join(homeDir, 'user-prefs.md'),
+      join(homeDir, '.scream-code', 'user-prefs.md'),
       '\n  The user\'s preferred nickname is "Alex".\n  ',
       'utf-8',
     );
@@ -163,7 +164,8 @@ describe('prepareSystemPromptContext roleAdditional', () => {
   });
 
   it('returns undefined when user-prefs.md is empty', async () => {
-    await writeFile(join(homeDir, 'user-prefs.md'), '   \n  ', 'utf-8');
+    await mkdir(join(homeDir, '.scream-code'), { recursive: true });
+    await writeFile(join(homeDir, '.scream-code', 'user-prefs.md'), '   \n  ', 'utf-8');
     const context = await prepareSystemPromptContext(testJian, join(homeDir, '.scream-code'));
     expect(context.roleAdditional).toBeUndefined();
   });

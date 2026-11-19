@@ -45,6 +45,8 @@ export interface SystemPromptContext {
   readonly skills?: SkillRegistry | string;
   readonly additionalDirsInfo?: string;
   readonly roleAdditional?: string;
+  /** The session's Scream home (an SDK host may pass one other than SCREAM_CODE_HOME). */
+  readonly screamHomeDir?: string;
 }
 
 export type SystemPromptRenderer = (context: SystemPromptContext) => string;

@@ -1,4 +1,7 @@
 import { createReadStream } from 'node:fs';
+
+import { MAX_COMPACTED_HISTORY_ENTRIES } from '../compaction/limits';
+import { trimSnapshotTrail } from './snapshot-trail';
 import { mkdir, open, rename, rm, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { dirname } from 'pathe';
@@ -115,11 +118,18 @@ function rewriteWithEmptySnapshotTrail(data: Buffer): Buffer {
 }
 
 /**
- * Re-serialize one snapshot line (without its terminator) with an empty trail.
- * Records are written with `JSON.stringify`, so parsing and stringifying again
- * changes only the trail. A line that does not parse is returned untouched.
+ * One snapshot line (without its terminator) with an empty trail, written as
+ * `"compactedHistory":[]` so the reclaim pass recognises it next time. Cut on
+ * the bytes: parsing a superseded snapshot just to empty its trail (hundreds
+ * of megabytes in an old wire) exhausted the heap. A line whose trail the
+ * byte scan cannot place (no top-level array, a malformed record) falls back
+ * to parse-and-restringify, so it still gains the marker and is not counted
+ * as reclaimable on every resume; a line that does not parse is returned as
+ * it is.
  */
-function withEmptySnapshotTrail(line: Buffer): Buffer {
+export function withEmptySnapshotTrail(line: Buffer): Buffer {
+  const trimmed = trimSnapshotTrail(line, 0);
+  if (trimmed !== line || line.includes(EMPTY_TRAIL_MARKER)) return trimmed;
   try {
     const record = JSON.parse(line.toString('utf8')) as Record<string, unknown>;
     record['compactedHistory'] = [];
@@ -127,6 +137,25 @@ function withEmptySnapshotTrail(line: Buffer): Buffer {
   } catch {
     return line;
   }
+}
+
+/** Trail entries a restore keeps: the reader keeps no more than that. */
+export const TRAIL_ENTRIES_KEPT_ON_READ = MAX_COMPACTED_HISTORY_ENTRIES;
+/** Below this a snapshot line is parsed as it is: trimming would not pay off. */
+const TRAIL_TRIM_MIN_BYTES = 1024 * 1024;
+
+/**
+ * A snapshot line read for replay, with its debug trail cut before it is
+ * decoded: a superseded snapshot's trail is overwritten on restore (emptied),
+ * the last snapshot keeps only what restore keeps. Smaller lines and other
+ * records are returned as they are.
+ */
+function trimSnapshotLineForRead(line: Buffer, lineNumber: number, lastSnapshotLineNumber: number): Buffer {
+  if (line.length < TRAIL_TRIM_MIN_BYTES) return line;
+  if (!line.subarray(0, SNAPSHOT_RECORD_LINE_PREFIX_BYTES.length).equals(SNAPSHOT_RECORD_LINE_PREFIX_BYTES)) {
+    return line;
+  }
+  return trimSnapshotTrail(line, lineNumber < lastSnapshotLineNumber ? 0 : TRAIL_ENTRIES_KEPT_ON_READ);
 }
 
 /**
@@ -568,10 +597,9 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
             if (lineData.length > 0 && lineData.at(-1) === 0x0d) {
               lineData = lineData.subarray(0, lineData.length - 1);
             }
-            const lineText = lineData.toString('utf8');
             if (!headerSeen) {
               headerSeen = true;
-              skipFoldedBeforeSnapshot = readSkipFoldedFlag(lineText);
+              skipFoldedBeforeSnapshot = readSkipFoldedFlag(lineData.toString('utf8'));
             }
             // Counted so a wire whose only dead weight is superseded snapshot
             // trails still reaches the compaction watermark on resume.
@@ -581,7 +609,10 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
             ) {
               skippedBytes += lineBytes;
             }
-            const record = parseRecordLine(lineText, lineNumber, this.filePath, false);
+            // Trimmed on the bytes before decoding, so an old wire's huge
+            // snapshot trail is never turned into a string or an object.
+            const trimmed = trimSnapshotLineForRead(lineData, lineNumber, lastSnapshotLineNumber);
+            const record = parseRecordLine(trimmed.toString('utf8'), lineNumber, this.filePath, false);
             if (record !== undefined) yield record;
           }
           if (!retaining) skippedBytes += lineBytes;
@@ -611,7 +642,8 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
       if (lineData.length > 0 && lineData.at(-1) === 0x0d) {
         lineData = lineData.subarray(0, lineData.length - 1);
       }
-      const record = parseRecordLine(lineData.toString('utf8'), lineNumber, this.filePath, true);
+      const trimmed = trimSnapshotLineForRead(lineData, lineNumber, lastSnapshotLineNumber);
+      const record = parseRecordLine(trimmed.toString('utf8'), lineNumber, this.filePath, true);
       if (record !== undefined) yield record;
     } else if (!retaining) {
       skippedBytes += lineBytes;

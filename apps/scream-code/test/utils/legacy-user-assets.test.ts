@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { legacyUserAssetsNotice } from '#/utils/legacy-user-assets';
+import { legacyUserAssetsNotice, legacyUserAssetsNoticeOnce, markLegacyUserAssetsNoticed } from '#/utils/legacy-user-assets';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -59,5 +59,21 @@ describe('legacyUserAssetsNotice', () => {
     const other = await layout();
     await mkdir(join(other.legacy, 'skills', '.manifest-only'), { recursive: true });
     expect(legacyUserAssetsNotice(other.moved, other.osHome)).toBeUndefined();
+  });
+});
+
+describe('legacyUserAssetsNoticeOnce', () => {
+  it('is said once per Scream home, not at every start', async () => {
+    const { osHome, legacy, moved } = await layout();
+    await writeFile(join(legacy, 'AGENTS.md'), 'rules');
+    const first = legacyUserAssetsNoticeOnce(moved, osHome);
+    expect(first).toContain(join(legacy, 'AGENTS.md'));
+    // Not shown yet (startup failed, say): it is said again.
+    expect(legacyUserAssetsNoticeOnce(moved, osHome)).toBe(first);
+    markLegacyUserAssetsNoticed(moved, first!);
+    expect(legacyUserAssetsNoticeOnce(moved, osHome)).toBeUndefined();
+    // Something new left behind is a different hint: said again.
+    await mkdir(join(legacy, 'skills', 'mine'), { recursive: true });
+    expect(legacyUserAssetsNoticeOnce(moved, osHome)).toContain(join(legacy, 'skills'));
   });
 });

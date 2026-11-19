@@ -203,7 +203,7 @@ function buildTemplateVars(
     SCREAM_AGENTS_MD: context.agentsMd ?? '',
     SCREAM_SKILLS: skills,
     SCREAM_SELF_ASSETS: buildSelfMap({
-      homeDir: resolveScreamHome(),
+      homeDir: resolveScreamHome(context.screamHomeDir),
       cwd: context.cwd,
     }),
     SCREAM_ADDITIONAL_DIRS_INFO: context.additionalDirsInfo ?? '',

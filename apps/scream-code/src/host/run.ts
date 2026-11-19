@@ -252,6 +252,7 @@ export async function runHost(): Promise<void> {
     harness,
     screamHomeDir: resolveScreamHome(),
     continuationText: t('host.continue_prompt'),
+    handoffText: t('host.handoff_prompt'),
     budgetReached: () => hostBudgetReached(),
     recordUsage: (tokens) => {
       addHostTokens(tokens);

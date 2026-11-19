@@ -1053,6 +1053,7 @@ export class Agent {
       // renders, and user-prefs.md only survives through the per-turn
       // reminder injector instead of living in the (cacheable) system prompt.
       roleAdditional: context?.roleAdditional,
+      ...(this.screamHomeDir === undefined ? {} : { screamHomeDir: this.screamHomeDir }),
     });
     // An explicit `tools:` contract (SDK callers, subagent profiles, pinned
     // session bots) is applied EXACTLY. The default resolved set has no such
