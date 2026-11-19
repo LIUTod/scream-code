@@ -11,7 +11,7 @@ import { t } from '@scream-code/config';
 import { getLlmNotSetMessage, MAIN_AGENT_ID, getNoActiveSessionMessage } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import { isBusy } from '../utils/app-state';
-import { sessionRowsForPicker } from '../utils/session-picker-rows';
+import { isEmptySessionShell, sessionRowsForPicker } from '../utils/session-picker-rows';
 import { isChannelManagedSession, isContinuableSession } from '../utils/channel-sessions';
 import {
   consumeInterruptedTurn,
@@ -47,30 +47,15 @@ export type SessionsPrefetch = Promise<readonly SessionSummary[]>;
 const PRUNE_EMPTY_SESSION_GRACE_MS = 5 * 60 * 1000;
 
 /**
- * A session is prunable when it never received a user prompt and never got a
- * title (auto-generated or custom) — i.e. an empty shell left behind by a
- * one-off startup. Archived sessions and sessions touched within the grace
- * window are kept.
+ * A session is prunable when it is an empty shell (see isEmptySessionShell)
+ * left untouched for longer than the grace window.
  */
 export function isPrunableEmptySession(
   summary: Pick<SessionSummary, 'archived' | 'lastPrompt' | 'title' | 'updatedAt'>,
   now: number,
   graceMs: number = PRUNE_EMPTY_SESSION_GRACE_MS,
 ): boolean {
-  if (summary.archived) return false;
-  if (summary.lastPrompt !== undefined) return false;
-  // A session whose title is the placeholder 'New Session' (the default set
-  // at creation in agent-core session/index.ts) is still untitled: it has no
-  // real content. The title check must mirror agent-core's isUntitled()
-  // semantics, otherwise every brand-new empty session keeps its placeholder
-  // title and is never pruned, leaving a growing pile of empty shells.
-  if (hasRealTitle(summary.title)) return false;
-  return now - summary.updatedAt > graceMs;
-}
-
-/** True when the title is a user-meaningful title (not missing / placeholder). */
-function hasRealTitle(title: string | undefined): boolean {
-  return typeof title === 'string' && title.trim().length > 0 && title !== 'New Session';
+  return isEmptySessionShell(summary) && now - summary.updatedAt > graceMs;
 }
 import type { SessionEventHandler } from '../controllers/session-event-handler';
 import type { SessionReplayRenderer } from '../controllers/session-replay';
@@ -186,7 +171,11 @@ export class SessionManager {
         // person's, so `-C` skips them rather than opening a session another
         // process is writing.
         const sessions = await this.host.harness.listSessions({ workDir });
-        const target = sessions.find((summary) => isContinuableSession(summary.metadata));
+        // An empty shell (a crashed launch, another terminal's fresh session)
+        // has nothing to continue: skip it for the latest real conversation.
+        const target = sessions.find(
+          (summary) => isContinuableSession(summary.metadata) && !isEmptySessionShell(summary),
+        );
         if (target !== undefined) {
           // Held: see startScheduledTasks.
           session = await this.openSessionNamed(target.id);
@@ -301,6 +290,9 @@ export class SessionManager {
   async setSession(session: Session): Promise<void> {
     const previous = this.unloadCurrentSession('switching session');
     await previous?.close({ extractMemories: false });
+    // Switching away (`/new`, `/sessions`) from an empty session drops it,
+    // as quitting does, so repeated `/new` leaves no trail of empty shells.
+    if (previous !== undefined && previous.id !== session.id) void this.dropIfEmptyShell(previous.id);
     this.host.session = session;
     this.registerSessionHandlers(session);
     // The runtime prompt is per-session state, so every time this surface takes
@@ -376,6 +368,34 @@ export class SessionManager {
   async closeSession(reason?: string): Promise<void> {
     const previous = this.unloadCurrentSession(reason ?? 'closing');
     await previous?.close({ extractMemories: false });
+  }
+
+  /**
+   * Quitting: close the session, and delete it when it is an empty shell
+   * (no prompt was ever sent, no title), so a launch used only for a slash
+   * command, or quit right away, leaves nothing in `/sessions`. Decided on
+   * the live summary after the close, so a prompt sent in this launch always
+   * keeps the session. Returns whether the session was deleted.
+   */
+  async closeSessionOnExit(): Promise<boolean> {
+    const id = this.host.session?.id;
+    await this.closeSession();
+    return id === undefined ? false : this.dropIfEmptyShell(id);
+  }
+
+  /**
+   * Delete a closed session when it is an empty shell, decided on its live
+   * summary. Best-effort: any failure leaves it for the startup sweep.
+   */
+  private async dropIfEmptyShell(id: string): Promise<boolean> {
+    try {
+      const [summary] = await this.host.harness.listSessions({ sessionId: id });
+      if (summary?.id !== id || !isEmptySessionShell(summary)) return false;
+      await this.host.harness.deleteSession(id);
+      return true;
+    } catch {
+      return false; // the startup sweep catches it later
+    }
   }
 
   private unloadCurrentSession(reason: string): Session | undefined {

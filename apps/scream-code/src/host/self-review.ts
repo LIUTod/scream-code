@@ -25,23 +25,25 @@ import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { t } from '@scream-code/config';
-import { collectFriction, JobStore, renderFrictionBlock, type Job, type JobDoes } from '@scream-code/scream-code-sdk';
+import { collectFriction, collectMemoryUse, JobStore, renderFrictionBlock, type Job, type JobDoes } from '@scream-code/scream-code-sdk';
 
 const SELF_REVIEW_CRON = '0 8 * * 1';
 const PROMPT_HEAD = 'This is your weekly self-review.';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+/** A memory never recalled for this long is a candidate to tidy. */
+const MEMORY_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function selfReviewPrompt(does: JobDoes): string {
   return [
     PROMPT_HEAD,
-    'Look only at the numbers in <tool-friction> and <skill-use>: they are aggregates. Do not open session files or read past conversations.',
+    'Look only at the numbers in <tool-friction>, <skill-use> and <memory-use>: they are aggregates. Do not open session files or read past conversations.',
     'Find at most three improvements: a new skill, a change to a skill, tidying memories, or a plugin. For each say what to change, why, which sessions it comes from (ids only), and which friction it should reduce.',
     'Your working directory is the person\'s skills folder; a skill is a folder with a SKILL.md.',
     does === 'act'
       ? 'Make small changes yourself (write or edit a skill); every change is recorded and can be rolled back. Do not delete skills. Anything larger, any memory and anything to do with plugins: ask with AskUserQuestion — it goes to the person — and carry on.'
       : 'Change nothing: only propose. The person decides.',
     'Never touch permissions, budgets, config.toml or anything outside the skills folder.',
-    'Propose retiring a skill listed under "never invoked".',
+    'Propose retiring a skill listed under "never invoked". From <memory-use>, say which memories helped this week (by id), and propose tidying memories never recalled for a month (merge near-duplicates with /dream, delete the rest).',
     'Where an error rate is compared with the week before, say whether last week\'s changes helped.',
     'Reply in the language the person writes in. End with what you changed, what you propose, and the one thing the person should look at.',
   ].join(' ');
@@ -85,10 +87,11 @@ function userSkillNames(screamHomeDir: string): string[] {
 
 /** The numbers a self-review run is given. */
 export async function selfReviewContext(screamHomeDir: string, now: number): Promise<string> {
-  const [week, previous, month] = await Promise.all([
+  const [week, previous, month, memoryUse] = await Promise.all([
     collectFriction(screamHomeDir, now - WEEK_MS),
     collectFriction(screamHomeDir, now - 2 * WEEK_MS, now - WEEK_MS),
     collectFriction(screamHomeDir, now - 4 * WEEK_MS),
+    collectMemoryUse(screamHomeDir, now - WEEK_MS, now - MEMORY_IDLE_MS),
   ]);
-  return renderFrictionBlock(week, month, userSkillNames(screamHomeDir), previous);
+  return renderFrictionBlock(week, month, userSkillNames(screamHomeDir), previous, memoryUse);
 }

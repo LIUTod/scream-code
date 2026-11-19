@@ -171,6 +171,11 @@ export interface ToolCallStepContext {
    */
   readonly nested?: boolean | undefined;
   readonly tools?: readonly ExecutableTool[] | undefined;
+  /**
+   * A call names a tool this step does not offer: enable it if it is a
+   * deferred one and return the rebuilt table (undefined when it cannot be).
+   */
+  readonly enableMissingTool?: ((name: string) => readonly ExecutableTool[] | undefined) | undefined;
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
   /**
@@ -332,7 +337,17 @@ export async function runToolCallBatch(
   if (response.toolCalls.length === 0) {
     return { stopTurn: false, rejectedCount: 0, totalCalls: 0 };
   }
-  const calls = response.toolCalls.map((toolCall) => preflightToolCall(step.tools, toolCall));
+  // A call to a deferred tool nobody enabled yet (or enabled by an earlier
+  // call of this very batch) is resolved against the rebuilt table.
+  let tools = step.tools;
+  if (step.enableMissingTool !== undefined) {
+    for (const toolCall of response.toolCalls) {
+      const offered = new Set((tools ?? []).map((tool) => tool.name));
+      if (offered.has(toolCall.name) || offered.has(canonicalToolName(toolCall.name))) continue;
+      tools = step.enableMissingTool(toolCall.name) ?? tools;
+    }
+  }
+  const calls = response.toolCalls.map((toolCall) => preflightToolCall(tools, toolCall));
   const rejectedCount = calls.filter((call) => call.kind === 'rejected').length;
   const scheduler = new ToolScheduler<PendingToolResult>();
   const pendingResults: Array<Promise<PendingToolResult>> = [];

@@ -98,6 +98,16 @@ describe('computeRelevanceScore', () => {
 });
 
 describe('rankMemos', () => {
+  it('ranks a memo that keeps being recalled above an equal one never used', () => {
+    const memos = [
+      makeMemo({ id: 'unused', userNeed: 'Deploy to production', approach: 'Use docker compose' }),
+      makeMemo({ id: 'used', userNeed: 'Deploy to production', approach: 'Use docker compose', recallCount: 3 }),
+    ];
+    const ranked = rankMemos(memos, 'deploy docker', { minScore: 0, maxResults: 5 });
+    expect(ranked.map((entry) => entry.memo.id)).toEqual(['used', 'unused']);
+    expect(ranked[0]!.score).toBeGreaterThan(ranked[1]!.score);
+  });
+
   it('ranks same-project memo above cross-project memo for equal keywords', () => {
     const memos = [
       makeMemo({

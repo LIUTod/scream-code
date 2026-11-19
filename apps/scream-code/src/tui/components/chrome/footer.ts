@@ -7,7 +7,7 @@
  *           … right-aligned context gauge `📨 Context：<bar> <percent>`
  *           (a transient hint takes that right side while active)
  *   Line 2 (run strip): `↓ 缓存命中: xx%` · `计划/融合` · `RLM` · `群狼`
- *           (always shown: muted while off, mode-coloured and bold while on)
+ *           (each only while that mode is on, mode-coloured and bold)
  *           · `目标 …` (only while a goal is active)
  *           · `后台任务 xN · 后台Agent xN · 前台Agent xN`
  *           … right-aligned `◆ Line: <飞书|微信|未连接>` and the work status
@@ -548,32 +548,30 @@ export class FooterComponent implements Component {
       },
     ];
 
-    // Mode switches are always on the row, in the reading order plan → rlm →
-    // wolfpack, so their positions never jump: muted text while off, the mode
-    // colour and bold while on. No marker glyph — the colour alone carries it
-    // (and a marker would only add width). A switch that is off is the first
-    // thing to go when the row is short.
+    // Mode badges appear only while their mode is on (an always-visible row
+    // of muted labels was in the way), in the fixed order plan → rlm →
+    // wolfpack, in the mode colour and bold. No marker glyph — the colour
+    // alone carries it.
     const isFusion = state.planMode === 'fusionplan';
-    // The plan switch has two lit labels (plan / fusion); its slot is as wide as
-    // the wider one so neither its own toggling nor the switches after it move.
+    // The plan badge has two labels (plan / fusion); its slot is as wide as the
+    // wider one so switching between them does not move what follows.
     const planSlot = Math.max(visibleWidth(t('badge.plan')), visibleWidth(t('badge.fusion')));
-    const modeSwitch = (id: string, on: boolean, label: string, color: string, slot = 0): FitItem => {
+    const modeBadge = (id: string, label: string, color: string, slot = 0): FitItem => {
       const pad = ' '.repeat(Math.max(0, slot - visibleWidth(label)));
-      return on
-        ? { id: `${id}-on`, rank: 3, variants: [chalk.hex(color).bold(label) + pad] }
-        : { id: `${id}-off`, rank: 9, variants: [chalk.hex(colors.textMuted)(label) + pad] };
+      return { id, rank: 3, variants: [chalk.hex(color).bold(label) + pad] };
     };
-    runStrip.push(
-      modeSwitch(
-        'plan',
-        state.planMode !== 'off',
-        isFusion ? t('badge.fusion') : t('badge.plan'),
-        isFusion ? colors.fusionPlanMode : colors.planMode,
-        planSlot,
-      ),
-      modeSwitch('rlm', state.rlmEnabled, t('badge.rlm'), colors.rlmMode),
-      modeSwitch('wolfpack', state.wolfpackMode, t('badge.wolfpack'), colors.wolfpackMode),
-    );
+    if (state.planMode !== 'off') {
+      runStrip.push(
+        modeBadge(
+          'plan',
+          isFusion ? t('badge.fusion') : t('badge.plan'),
+          isFusion ? colors.fusionPlanMode : colors.planMode,
+          planSlot,
+        ),
+      );
+    }
+    if (state.rlmEnabled) runStrip.push(modeBadge('rlm', t('badge.rlm'), colors.rlmMode));
+    if (state.wolfpackMode) runStrip.push(modeBadge('wolfpack', t('badge.wolfpack'), colors.wolfpackMode));
 
     // The goal is rarely on, so unlike the switches it only appears while a
     // goal is active; it shortens before it is dropped.

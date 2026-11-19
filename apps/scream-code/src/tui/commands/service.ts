@@ -10,6 +10,8 @@
  * is first set up.
  */
 
+import { userInfo } from 'node:os';
+
 import { t } from '@scream-code/config';
 import { JobStore } from '@scream-code/scream-code-sdk';
 
@@ -152,6 +154,7 @@ export async function enableService(host: SlashCommandHost): Promise<boolean> {
   }
   const summary = await readServiceSummary();
   spinner.stop({ ok: true, label: t('service.enabled', { when: describeServiceStart(summary.status) }) });
+  if (result.lingerOff === true) host.showStatus(t('service.linger_hint', { user: userInfo().username }));
   return true;
 }
 

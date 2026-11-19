@@ -69,7 +69,10 @@ function stableJson(value: unknown): string {
 }
 
 function memoFileText(memo: MemoryMemo): string {
-  return `${JSON.stringify(JSON.parse(stableJson(memo)) as unknown, null, 2)}\n`;
+  // Recall counters are bookkeeping, not content: mirroring them would turn
+  // every recall into a "memory changed" entry in the history.
+  const { recallCount: _recallCount, lastRecalledAt: _lastRecalledAt, ...content } = memo;
+  return `${JSON.stringify(JSON.parse(stableJson(content)) as unknown, null, 2)}\n`;
 }
 
 async function allMemos(screamHomeDir: string): Promise<MemoryMemo[]> {

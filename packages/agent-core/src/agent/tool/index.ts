@@ -1208,7 +1208,24 @@ export class ToolManager {
     }
     this.enabledDeferredGroups.add(group.name);
     for (const tool of tools) this.enabledTools.add(tool.name);
+    // Recorded so a resumed session offers the group again instead of
+    // silently losing tools the model was using.
+    this.agent.records.logRecord({ type: 'tools.enable_deferred_group', group: group.name });
     return { status: 'enabled', toolNames: tools.map((tool) => tool.name) };
+  }
+
+  /**
+   * A call names a tool of a deferred group that is not enabled yet: enable
+   * the group on the spot, as DiscoverTools would, so the call runs instead
+   * of bouncing. Enabling runs nothing; the call still passes every policy.
+   * Returns whether the tool is enabled now.
+   */
+  enableDeferredToolOnDemand(name: string): boolean {
+    if (!isDeferredBuiltinToolName(name)) return false;
+    const group = DEFERRED_GROUPS.find((candidate) => candidate.toolNames.includes(name));
+    if (group === undefined) return false;
+    const result = this.enableDeferredToolGroup(group.name);
+    return result.status === 'enabled' || result.status === 'already-enabled';
   }
 
   private isMcpToolEnabled(name: string): boolean {
@@ -1297,9 +1314,17 @@ export class ToolManager {
         // their schemas in every request.
         !this.isDeferredMcpTool(name),
     );
+    // Groups the model enabled through the portal are offered at once — from
+    // the next step of the same turn — not held back by the frozen turn
+    // filter: that filter keeps a mid-turn setActiveTools for the next turn,
+    // while enabling a group is the model asking for the tools right now.
+    // Only names still enabled live count, so a later removal holds.
+    const portalNames = [...this.enabledDeferredGroups]
+      .flatMap((group) => getDeferredGroup(group)?.toolNames ?? [])
+      .filter((name) => this.enabledTools.has(name));
     // Mutation goal tools are only offered to the model while a goal exists.
     const hideGoalMutationTools = this.agent.goal.getGoal().goal === null;
-    const tools = uniq([...filter.names, ...mcpNames])
+    const tools = uniq([...filter.names, ...portalNames, ...mcpNames])
       .toSorted((a, b) => a.localeCompare(b))
       .filter(
         (name) =>
@@ -1510,10 +1535,10 @@ export class ToolManager {
         !deferConstruction && this.agent.type === 'main' && new b.SetGoalBudgetTool(this.agent),
         !deferConstruction && this.agent.type === 'main' && new b.WriteGoalNoteTool(this.agent),
         // Memory tools are main-agent-only because the store is global.
-        !deferConstruction &&
-          this.agent.type === 'main' &&
-          this.agent.memoStore &&
-          new b.MemoryLookupTool(this.agent),
+        // Looking up and saving are always declared (not behind the portal):
+        // "how did we fix this last time" and "remember this" must work the
+        // moment the person says them.
+        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryLookupTool(this.agent),
         !deferConstruction &&
           this.agent.type === 'main' &&
           this.agent.memoStore &&
@@ -1526,10 +1551,7 @@ export class ToolManager {
           this.agent.type === 'main' &&
           this.agent.memoStore &&
           new b.MemoryConsolidateApplyTool(this.agent),
-        !deferConstruction &&
-          this.agent.type === 'main' &&
-          this.agent.memoStore &&
-          new b.MemoryWriteTool(this.agent),
+        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryWriteTool(this.agent),
         !deferConstruction &&
           this.agent.type === 'main' &&
           this.agent.knowledgeStore &&

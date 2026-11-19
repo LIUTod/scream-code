@@ -82,6 +82,10 @@ export interface AgentRecordEvents {
   'tools.set_active_tools': {
     names: readonly string[];
   };
+  /** A deferred tool group was enabled (DiscoverTools, or a direct call). */
+  'tools.enable_deferred_group': {
+    group: string;
+  };
 
   'background.stop': {
     taskId: string;

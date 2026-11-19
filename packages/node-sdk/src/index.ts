@@ -142,6 +142,7 @@ export type { InboxDecision, InboxItem } from '@scream-code/agent-core';
 // Self-evolution: the change history of skills and memories, and tool friction.
 export {
   collectFriction,
+  collectMemoryUse,
   evolutionDir,
   listEvolution,
   renderFrictionBlock,

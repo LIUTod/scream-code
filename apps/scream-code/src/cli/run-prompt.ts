@@ -453,6 +453,7 @@ function runPromptTurn(
       case 'compaction.completed':
       case 'compaction.started':
       case 'mcp.server.status':
+      case 'memory.recalled':
       case 'session.meta.updated':
       case 'skill.activated':
       case 'subagent.completed':

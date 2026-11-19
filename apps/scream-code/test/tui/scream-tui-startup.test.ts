@@ -206,7 +206,7 @@ describe("ScreamTUI startup", () => {
   it("resumes the latest session for --continue and marks history for replay", async () => {
     const session = makeSession({ id: "ses-latest" });
     const harness = makeHarness(session, {
-      listSessions: vi.fn(async () => [{ id: "ses-latest" }, { id: "ses-old" }]),
+      listSessions: vi.fn(async () => [{ id: "ses-latest", lastPrompt: "fix the build" }, { id: "ses-old", lastPrompt: "older work" }]),
     });
     const driver = makeDriver(harness, makeStartupInput({ continue: true }));
 
@@ -222,7 +222,7 @@ describe("ScreamTUI startup", () => {
     const startScheduledTasks = vi.fn(async () => true);
     const session = makeSession({ id: "ses-latest", startScheduledTasks, getResumeState: () => undefined });
     const harness = makeHarness(session, {
-      listSessions: vi.fn(async () => [{ id: "ses-latest" }]),
+      listSessions: vi.fn(async () => [{ id: "ses-latest", lastPrompt: "fix the build" }]),
     });
     const driver = makeDriver(harness, makeStartupInput({ continue: true })) as unknown as StartupDriver & {
       finishStartup(shouldReplay: boolean): Promise<void>;
@@ -285,7 +285,7 @@ describe("ScreamTUI startup", () => {
       })),
     });
     const harness = makeHarness(session, {
-      listSessions: vi.fn(async () => [{ id: "ses-latest" }]),
+      listSessions: vi.fn(async () => [{ id: "ses-latest", lastPrompt: "fix the build" }]),
     });
     const driver = makeDriver(
       harness,

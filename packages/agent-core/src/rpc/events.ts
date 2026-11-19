@@ -79,6 +79,17 @@ export interface SessionMetaUpdatedEvent {
   readonly patch?: Record<string, unknown> | undefined;
 }
 
+/**
+ * Earlier experience was brought back for the request the person just made
+ * (see agent/injection/memory-recall.ts). Lets a host say so in one quiet
+ * line; the memos themselves went to the model, not to the transcript.
+ */
+export interface MemoryRecalledEvent {
+  readonly type: 'memory.recalled';
+  readonly count: number;
+  readonly memoIds: readonly string[];
+}
+
 export interface SkillActivatedEvent {
   readonly type: 'skill.activated';
   readonly activationId: string;
@@ -433,6 +444,7 @@ export type AgentEvent =
   | ErrorEvent
   | WarningEvent
   | AgentStatusUpdatedEvent
+  | MemoryRecalledEvent
   | SessionMetaUpdatedEvent
   | SkillActivatedEvent
   | TurnStartedEvent

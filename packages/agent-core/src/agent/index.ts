@@ -51,13 +51,14 @@ import { USER_PROMPT_ORIGIN } from './context/types';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
-import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createEmbeddingEngine, hasEmbeddingModelCache, parseMemoryMemos, sharedMemoStore, type EmbeddingEngine } from '@scream-code/memory';
+import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createEmbeddingEngine, hasEmbeddingModelCache, parseMemoryMemos, sharedMemoStore, stripMemoryTags, type EmbeddingEngine } from '@scream-code/memory';
 import { KnowledgeStore, sharedKnowledgeStore, sharedKnowledgeStoreReady } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
 import { DEFAULT_SECRET_PATTERNS, SecretObfuscator, obfuscateMessages } from './secrets';
 import { WolfPackMode } from './wolfpack';
 import { SessionMemory } from './session-memory';
+import { MEMORY_RECALL_VARIANT } from './injection/memory-recall';
 import { WorkingSet } from './working-set';
 import {
   AgentRecords,
@@ -172,6 +173,9 @@ export interface AgentServices {
   /** Resolve the runtime system prompt (base profile prompt + configured hook). */
   systemPrompt(): string;
 }
+
+/** How long a prompt waits for a first load of the (cached) embedding model. */
+const MEMORY_ENGINE_WAIT_MS = 2000;
 
 export class Agent {
   readonly type: AgentType;
@@ -499,6 +503,39 @@ export class Agent {
         this.log.warn('memory embedding backfill failed', error);
       }
     })();
+  }
+
+  /**
+   * Make the shared embedding model ready for a memory search, without ever
+   * downloading it (that stays the person's call, via the setup card). It is
+   * loaded only when it is already on disk and there are memos with vectors
+   * to compare against, because a loaded model costs a few hundred MB of
+   * memory. Any memo counts, not only this project's: memos are stamped with
+   * the folder a session started in, which is often the home folder or a
+   * subfolder, so a per-project count would leave memory off where it fits.
+   * A first load is waited for at most a couple of seconds.
+   */
+  async ensureMemoryEngine(_options: { readonly projectDir?: string } = {}): Promise<boolean> {
+    const store = this.memoStore;
+    if (store === undefined) return false;
+    await this.memoStoreReady;
+    const engine = store.getEmbeddingEngine();
+    if (engine === undefined) return false;
+    if (engine.available) return true;
+    if (this.embeddingCacheDir === undefined || !hasEmbeddingModelCache(this.embeddingCacheDir)) return false;
+    if (store.countEmbedded() === 0) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const gaveUp = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => {
+        resolve(false);
+      }, MEMORY_ENGINE_WAIT_MS);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([engine.ensureReady().catch(() => false), gaveUp]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private rlmEnabled = false;
@@ -1379,13 +1416,18 @@ export class Agent {
     const sessionTitle = await this.getSessionTitle();
 
     // Sample last 50 messages to stay within reasonable token budget
+    // Recalled memories are already stored: leave them out of the sample so
+    // they are not extracted again as this session's experience.
     const sampleText = history
       .slice(-50)
+      .filter((m) => m.origin?.kind !== 'injection' || m.origin.variant !== MEMORY_RECALL_VARIANT)
       .map((m) => {
-        const text = m.content
-          .filter((p) => p.type === 'text')
-          .map((p) => p.text)
-          .join(' ');
+        const text = stripMemoryTags(
+          m.content
+            .filter((p) => p.type === 'text')
+            .map((p) => p.text)
+            .join(' '),
+        );
         return `[${m.role}] ${text.slice(0, 300)}`;
       })
       .join('\n');

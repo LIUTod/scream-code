@@ -5,7 +5,8 @@
 /// <reference path="./onnxruntime-web.d.ts" />
 export type { MemoryMemo, MemoryMemoRecord, MemoryMemoSummary, MemoryMemoListResult, MemoOrigin, DistilledSource } from './models.js';
 export { createMemoryMemo, toSummary } from './models.js';
-export { MemoryMemoStore, sharedMemoStore, closeSharedMemoStore, type MemoryMemoStoreLogger } from './store.js';
+export { MemoryMemoStore, sharedMemoStore, closeSharedMemoStore, type MemoryMemoStoreLogger, type MemoryUseStats } from './store.js';
+export { isSameProjectDir, recallMemos, RECALL_DEFAULT_LIMIT, RECALL_NEAR_COPY, RECALL_MIN_MARGIN, RECALL_MIN_SIMILARITY, RECALL_OTHER_PROJECT_MIN_SIMILARITY, type RecallRequest, type RecalledMemo } from './recall.js';
 export { parseMemoryMemos, stripMemoryTags, buildExitExtractionPrompt, EXIT_EXTRACTION_SYSTEM_PROMPT } from './extractor.js';
 export { computeRelevanceScore, rankMemos, extractKeywords, buildProjectTagCloud, detectQueryIntent, type ScoredMemo, type QueryIntent } from './scoring.js';
 export { normalizeTags, generateTags } from './tags.js';

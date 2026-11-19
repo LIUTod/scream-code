@@ -786,6 +786,11 @@ export class TurnFlow {
           // enabled-name filter is frozen at turn start, so a mid-turn
           // setActiveTools still waits for the next turn by design.
           buildTools: () => (stepTools.current = this.agent.tools.loopToolsFor(turnToolFilter)),
+          // A direct call to a deferred tool enables its group on the spot.
+          enableMissingTool: (name) =>
+            this.agent.tools.enableDeferredToolOnDemand(name)
+              ? (stepTools.current = this.agent.tools.loopToolsFor(turnToolFilter))
+              : undefined,
           log: this.agent.log,
           // Soft per-turn step budget: the configured value wins, `0` disables
           // the budget, and otherwise the default caps a runaway turn — the

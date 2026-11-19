@@ -169,6 +169,22 @@ describe('SessionEventHandler', () => {
     expect(host.showStatus).toHaveBeenCalledWith('警告： Heads up', 'yellow');
   });
 
+  it('says in one quiet line that earlier experience was recalled', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const recalled = (count: number): void => {
+      handler.handleEvent({ ...baseEvent('memory.recalled'), count, memoIds: [] } as unknown as Event, vi.fn());
+    };
+
+    recalled(1);
+    expect(host.showStatus).toHaveBeenLastCalledWith('· 想起 1 条相关经验（/memory 查看）', host.state.theme.colors.textDim);
+    recalled(2);
+    expect(host.showStatus).toHaveBeenLastCalledWith('· 想起 2 条相关经验（/memory 查看）', host.state.theme.colors.textDim);
+    vi.mocked(host.showStatus).mockClear();
+    recalled(0);
+    expect(host.showStatus).not.toHaveBeenCalled();
+  });
+
   it('transitions through a simple assistant turn', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);

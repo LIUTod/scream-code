@@ -34,6 +34,33 @@ append-only record stream.
 | Rename | `/title` |
 | Close | `/exit`, or the TUI detaching from the session |
 
+Every launch starts a session, so a launch used only for a slash command, or
+quit right away, would leave an empty one behind. An **empty session** — no
+prompt ever sent, no title, not archived — is therefore:
+
+- deleted when you quit (unless its work was handed to the background), and
+  when you switch away from it (`/new`, `/sessions`);
+- left out of `/sessions` and skipped by `-C`;
+- swept at startup for the current project when an earlier one is still
+  around (untouched for 5 minutes, so another terminal's fresh session is
+  safe; a session another process has open is never deleted).
+
+### Titles
+
+The first prompt is only a provisional title. When a turn completes, the model
+reads a short excerpt — the opening request, the two latest requests and the
+latest reply — and names the task in a few words, in the language you write
+in. A greeting or a request too vague to name ("你好", "continue") gets no
+title yet, and the next turn tries again, up to four requests per session in
+all (counted in the session, so reopening it does not start over); after that
+the provisional title stays. Once named, a session keeps its title and no
+further title request is made. A title you
+set with `/title` is never replaced, and background job runs are not titled.
+
+The request goes to the housekeeping model when one is set
+(`loop_control.housekeeping_model` or `/model diy`), else to the session model,
+with thinking off: a few hundred tokens, once per session.
+
 ## Compaction
 
 Three layers, all automatic (unless `loopControl.compactionMode = "off"`):

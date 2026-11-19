@@ -17,7 +17,7 @@ The background host (`scream host`) is a scream process without a window; there 
 | System | How | When it starts |
 |---|---|---|
 | macOS | LaunchAgent (`~/Library/LaunchAgents`) | At login |
-| Linux | systemd user unit (`~/.config/systemd/user`) | At login; after `loginctl enable-linger $USER`, at boot without a login |
+| Linux | systemd user unit (`~/.config/systemd/user`) | At boot, no login needed: install turns on lingering for you where that needs no password (root, or a desktop session). Otherwise at login, and `/service` tells you to run `sudo loginctl enable-linger $USER` |
 | Windows | Logon task (hidden window) | At login |
 
 The service runs a launcher script in `~/.scream-code/bin` that pins the node and scream paths and the `PATH` of the time. Every scream start checks it and rewrites it when an update or a different node version moved those paths.

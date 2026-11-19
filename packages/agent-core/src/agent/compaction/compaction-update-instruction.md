@@ -44,6 +44,7 @@ Guidelines:
 - Include 3-5 semantic "tags" summarizing the task domain, tech stack, or action type.
 - For in-progress work: record it with "outcome": "进行中" and describe where the task stands and what remains — this is what lets the agent resume seamlessly after compaction.
 - Merge closely related sub-tasks into a single record.
+- A `<memories>` block holds experience recalled from earlier sessions; it is already stored. Do not record it again — record only what this conversation did.
 - Use the exact field names and JSON format shown above.
 
 If no task loops (completed or in-progress) are found in the new compacted messages, output:

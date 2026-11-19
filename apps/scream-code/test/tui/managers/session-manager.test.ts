@@ -240,6 +240,22 @@ describe('SessionManager.init — startup decision tree', () => {
     expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-mine', scheduledTasks: false });
   });
 
+  it('continue-last skips empty sessions for the newest real conversation', async () => {
+    const harness = makeMockHarness({
+      listSessions: vi.fn(async () => [
+        summary({ id: 'ses-empty', title: 'New Session' }),
+        summary({ id: 'ses-real', title: 'Fix the build', lastPrompt: 'fix the build' }),
+      ]),
+    });
+    harness.resumeSession.mockResolvedValue(makeMockSession({ id: 'ses-real' }));
+    const { manager } = makeHost({ harness });
+    await manager.init({
+      startup: { continueLast: true, yolo: false, auto: false, plan: false, wolfpack: false },
+      workDir: '/tmp/scream-test',
+    });
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-real', scheduledTasks: false });
+  });
+
   it('continue-last without history creates a session and records a startup notice', async () => {
     const { manager, host, harness } = makeHost();
     const result = await manager.init({
@@ -875,6 +891,44 @@ describe('SessionManager session swap / reset bookkeeping', () => {
     // disposers must not stack across switches
     await manager.setSession(makeMockSession({ id: 'ses-3' }) as never);
     expect(host.reverseRpcDisposers.length).toBe(1);
+  });
+
+  it('switching away from an empty session deletes it, and keeps one with a prompt', async () => {
+    const listSessions = vi.fn(async ({ sessionId }: { sessionId?: string }) =>
+      sessionId === 'ses-empty'
+        ? [summary({ id: 'ses-empty', title: 'New Session' })]
+        : [summary({ id: sessionId ?? '', title: 'Real work', lastPrompt: 'real work' })],
+    );
+    const harness = makeMockHarness({ listSessions });
+    const { manager } = makeHost({ harness, session: makeMockSession({ id: 'ses-empty' }) });
+
+    await manager.setSession(makeMockSession({ id: 'ses-real' }) as never);
+    await vi.waitFor(() => {
+      expect(harness.deleteSession).toHaveBeenCalledWith('ses-empty');
+    });
+
+    harness.deleteSession.mockClear();
+    await manager.setSession(makeMockSession({ id: 'ses-next' }) as never);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(harness.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it('quitting deletes an empty session and reports it', async () => {
+    const harness = makeMockHarness({
+      listSessions: vi.fn(async () => [summary({ id: 'ses-empty', title: 'New Session' })]),
+    });
+    const { manager } = makeHost({ harness, session: makeMockSession({ id: 'ses-empty' }) });
+    await expect(manager.closeSessionOnExit()).resolves.toBe(true);
+    expect(harness.deleteSession).toHaveBeenCalledWith('ses-empty');
+  });
+
+  it('quitting keeps a session that received a prompt', async () => {
+    const harness = makeMockHarness({
+      listSessions: vi.fn(async () => [summary({ id: 'ses-1', title: '你好', lastPrompt: '你好' })]),
+    });
+    const { manager } = makeHost({ harness, session: makeMockSession({ id: 'ses-1' }) });
+    await expect(manager.closeSessionOnExit()).resolves.toBe(false);
+    expect(harness.deleteSession).not.toHaveBeenCalled();
   });
 
   it('closeSession cancels all pending reverse-RPC prompts and clears the session', async () => {

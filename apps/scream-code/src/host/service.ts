@@ -17,9 +17,9 @@
  * path, so a second home (`SCREAM_CODE_HOME`) gets a service of its own.
  *
  * What "starts automatically" means differs by platform, and the status says
- * so: macOS and Windows start it at login; Linux starts it at login, or at
- * boot without a login once lingering is enabled for the user
- * (`loginctl enable-linger`).
+ * so: macOS and Windows start it at login; Linux starts it at boot when
+ * lingering is on for the user (install turns it on where that needs no
+ * password, see {@link ensureLinger}), and at login otherwise.
  */
 
 import { execFile } from 'node:child_process';
@@ -269,6 +269,23 @@ async function lingerEnabled(): Promise<boolean | undefined> {
   return result.output.includes('Linger=yes');
 }
 
+/**
+ * Turn lingering on, so the user unit starts at boot rather than at the first
+ * login — without it a headless server (or root on one) only runs the service
+ * after someone logs in. Allowed without a password for root and, under the
+ * default polkit policy, for a user in an active local session; elsewhere it
+ * would ask for a password, which `--no-ask-password` turns into a plain
+ * failure instead of a hang. Returns the linger state afterwards (undefined
+ * when loginctl is missing). Uninstall leaves it on: lingering may have been
+ * enabled for other reasons, and it costs nothing on its own.
+ */
+async function ensureLinger(): Promise<boolean | undefined> {
+  const before = await lingerEnabled();
+  if (before !== false) return before;
+  await run('loginctl', ['--no-ask-password', 'enable-linger', userInfo().username]);
+  return lingerEnabled();
+}
+
 export async function readServiceStatus(): Promise<ServiceStatus> {
   const paths = servicePaths();
   if (paths === undefined) return { manager: undefined, installed: false };
@@ -319,7 +336,7 @@ export async function installService(): Promise<ServiceResult> {
     if (!reload.ok) return { ok: false, error: reload.output };
     const enabled = await run('systemctl', ['--user', 'enable', '--now', paths.name]);
     if (!enabled.ok) return { ok: false, error: enabled.output };
-    return { ok: true, lingerOff: (await lingerEnabled()) === false };
+    return { ok: true, lingerOff: (await ensureLinger()) === false };
   }
 
   // Windows: a logon task running the launcher in a hidden console. The task

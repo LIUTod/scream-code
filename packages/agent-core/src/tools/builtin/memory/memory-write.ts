@@ -11,31 +11,31 @@ export const MemoryWriteInputSchema = z.object({
   userNeed: z
     .string()
     .min(1)
-    .describe('The user need or goal, summarized in one sentence.'),
+    .describe('The goal, in one sentence.'),
   approach: z
     .string()
     .min(1)
-    .describe('The approach taken — what was actually done.'),
+    .describe('What was done.'),
   outcome: z
     .string()
     .min(1)
-    .describe('Final outcome, e.g. "完成", "部分完成", "失败".'),
+    .describe('How it ended, e.g. "完成", "失败: reason".'),
   whatFailed: z
     .string()
     .optional()
-    .describe('Dead ends tried — things that did not work. Use "none" if nothing notable.'),
+    .describe('What did not work, or "none".'),
   whatWorked: z
     .string()
     .optional()
-    .describe('What ultimately worked — key actions that led to success. Use "none" if nothing notable.'),
+    .describe('What worked, or "none".'),
   tags: z
     .array(z.string())
     .optional()
-    .describe('3-5 semantic tags summarizing the task domain, tech stack, or action type (e.g. ["react", "auth", "部署"]).'),
+    .describe('3-5 tags: domain, stack or action, e.g. ["react", "auth"].'),
   note: z
     .string()
     .optional()
-    .describe('Optional advisory note that helps future AI understand/reuse this memo faster — a soft suggestion, not a user-enforced rule.'),
+    .describe('Optional one-line advice for reusing it.'),
 });
 
 export type MemoryWriteInput = z.infer<typeof MemoryWriteInputSchema>;
@@ -48,9 +48,8 @@ export type MemoryWriteInput = z.infer<typeof MemoryWriteInputSchema>;
 export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
   readonly name = 'MemoryWrite' as const;
   readonly description =
-    'Write a new memory memo to the global memory memo store. ' +
-    'Call this when the user explicitly asks to save an experience, lesson, or summary to memory, ' +
-    'for example "保存到记忆", "保存到备忘录", "总结并保存", "永久记忆", "记录我的记忆", "记住这个", "添加到记忆", or "存入记忆库".';
+    'Save an experience to memory when the user asks you to remember it ("记住这个", "记一下", "以后记得", "save this to memory"), ' +
+    'written so a later session can reuse it.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(MemoryWriteInputSchema);
 
   constructor(private readonly agent: Agent) {}

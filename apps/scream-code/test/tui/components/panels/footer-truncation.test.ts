@@ -37,7 +37,7 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
 const uiMock = { requestRender: () => {} } as any;
 
 /**
- * Build a footer with a long LEFT (plan switch on + goal + model + two running
+ * Build a footer with a long LEFT (all three modes on + goal + model + two running
  * counters) and a long RIGHT (channel + context gauge + idle status), so item
  * fitting has something to chew on. `workDir` stays `/tmp` (not a git repo) so
  * the git badge is absent and the LEFT width is stable.
@@ -46,6 +46,8 @@ function wideFooter(): FooterComponent {
   const footer = new FooterComponent(
     baseState({
       planMode: 'plan',
+      rlmEnabled: true,
+      wolfpackMode: true,
       goalActive: true,
       goal: {
         objective: 'ship footer truncation',
@@ -231,7 +233,11 @@ describe('FooterComponent - line 2 fitting', () => {
   });
 
   it('shortens the cache label before it drops any switch', () => {
-    const footer = new FooterComponent(baseState({ model: 'scream-k2-5' }), darkColors, uiMock);
+    const footer = new FooterComponent(
+      baseState({ model: 'scream-k2-5', planMode: 'plan', rlmEnabled: true, wolfpackMode: true }),
+      darkColors,
+      uiMock,
+    );
     let sawFull = false;
     let sawShortWithAllSwitches = false;
     for (let width = 24; width <= 120; width++) {
@@ -276,7 +282,11 @@ describe('FooterComponent - line 2 fitting', () => {
   });
 
   it('collapses the running counters before any switch is dropped', () => {
-    const footer = new FooterComponent(baseState({ model: 'scream-k2-5' }), darkColors, uiMock);
+    const footer = new FooterComponent(
+      baseState({ model: 'scream-k2-5', planMode: 'plan', rlmEnabled: true, wolfpackMode: true }),
+      darkColors,
+      uiMock,
+    );
     footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 1, foregroundSubagents: 3 });
     let sawLongWithAllSwitches = false;
     let sawTotalWithAllSwitches = false;
@@ -335,21 +345,21 @@ describe('FooterComponent - line 2 fitting', () => {
     footer.dispose();
   });
 
-  it('drops a switch that is off before one that is lit, and keeps a lit one past the counters and goal', () => {
+  it('keeps a lit mode badge past the counters and goal', () => {
     const footer = busyFooter({ planMode: 'off', wolfpackMode: false, rlmEnabled: true });
     let litAloneSeen = false;
     for (let width = 24; width <= 200; width++) {
       const row = row2(footer, width);
       if (!row.includes('RLM')) {
-        // The lit switch is gone: so is everything that ranks below it.
-        for (const dimmed of ['计划', '群狼']) expect(row, `${dimmed} at ${String(width)}`).not.toContain(dimmed);
+        // The lit badge is gone: so is everything that ranks below it.
         expect(row, `goal at ${String(width)}`).not.toContain('目标');
         expect(row, `counters at ${String(width)}`).not.toMatch(/后台任务|运行中/);
-      } else if (!row.includes('计划') && !row.includes('群狼')) {
+      } else {
+        // Modes that are off never show.
+        expect(row, `width ${String(width)}`).not.toMatch(/计划|群狼/);
         litAloneSeen = true;
       }
     }
-    // …and there is a width where only the lit switch is left of the three.
     expect(litAloneSeen).toBe(true);
     footer.dispose();
   });

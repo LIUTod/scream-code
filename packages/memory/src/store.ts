@@ -30,6 +30,17 @@ export interface MemoryMemoStoreLogger {
  */
 export const EMBEDDING_FLUSH_CHUNK_SIZE = 1;
 
+/** How memories were used over a window; numbers only. */
+export interface MemoryUseStats {
+  readonly total: number;
+  readonly added: number;
+  readonly recalled: number;
+  /** Never recalled, although older than the idle threshold. */
+  readonly neverRecalledOld: number;
+  /** The most-recalled memos of the window, by id. */
+  readonly topRecalled: ReadonlyArray<{ readonly id: string; readonly count: number }>;
+}
+
 export class MemoryMemoStore {
   private readonly projectDir: string;
   private readonly jsonlPath: string;
@@ -45,6 +56,13 @@ export class MemoryMemoStore {
   private embeddingConsecutiveFailures = 0;
   private lastEmbeddingError: Error | undefined;
   private readonly log: MemoryMemoStoreLogger;
+  /**
+   * Parsed vectors by memo id, tagged with the row's `created_at`: recall
+   * scores every vector on every prompt, and parsing thousands of JSON
+   * arrays each time would cost more than the comparison. A re-embedded memo
+   * gets a new `created_at`, so its stale entry is never used.
+   */
+  private readonly vectorCache = new Map<string, { createdAt: number; vector: Float32Array }>();
 
   constructor(projectDir: string, log?: MemoryMemoStoreLogger) {
     this.projectDir = projectDir;
@@ -451,7 +469,9 @@ export class MemoryMemoStore {
         distilled TEXT NOT NULL DEFAULT '',
         origin TEXT NOT NULL DEFAULT 'session',
         distilled_from TEXT,
-        distilled_at INTEGER
+        distilled_at INTEGER,
+        recall_count INTEGER NOT NULL DEFAULT 0,
+        last_recalled_at INTEGER
       );
 
       CREATE INDEX IF NOT EXISTS idx_memos_project_dir ON memos(project_dir);
@@ -516,6 +536,12 @@ export class MemoryMemoStore {
     const hasDistilledAt = info.some((col) => col.name === 'distilled_at');
     if (!hasDistilledAt) {
       this.db.exec('ALTER TABLE memos ADD COLUMN distilled_at INTEGER');
+    }
+    if (!info.some((col) => col.name === 'recall_count')) {
+      this.db.exec('ALTER TABLE memos ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!info.some((col) => col.name === 'last_recalled_at')) {
+      this.db.exec('ALTER TABLE memos ADD COLUMN last_recalled_at INTEGER');
     }
     // Ensure indexes exist even for databases created before these indexes were added.
     this.db.exec(`
@@ -818,6 +844,140 @@ export class MemoryMemoStore {
   /** Access the embedding engine (may be undefined if not configured). */
   getEmbeddingEngine(): EmbeddingEngine | undefined {
     return this.embeddingEngine;
+  }
+
+  /**
+   * How many memos carry a vector — of one project (legacy memos without a
+   * project count for every project, as in search) or of all of them.
+   */
+  countEmbedded(projectDir?: string): number {
+    if (this.db === undefined) return 0;
+    const row = (
+      projectDir === undefined
+        ? this.db.prepare('SELECT COUNT(*) AS count FROM memory_embeddings').get()
+        : this.db
+            .prepare(
+              `SELECT COUNT(*) AS count FROM memory_embeddings e
+               JOIN memos m ON m.id = e.memory_id
+               WHERE m.project_dir = ? OR m.project_dir = ''`,
+            )
+            .get(projectDir)
+    ) as { count: number } | undefined;
+    return row?.count ?? 0;
+  }
+
+  /**
+   * Cosine similarity of the query to every stored vector (newest first, up
+   * to `candidateLimit`), highest first. Reads no memo rows, so a caller can
+   * look at the whole distribution and load only the few memos it keeps.
+   */
+  async scoreByVector(
+    queryEmbedding: Float32Array,
+    options: { readonly candidateLimit?: number } = {},
+  ): Promise<Array<{ id: string; score: number }>> {
+    await this.init();
+    const engine = this.embeddingEngine;
+    if (this.db === undefined || engine === undefined) return [];
+    const rows = this.db
+      .prepare('SELECT memory_id, created_at FROM memory_embeddings ORDER BY created_at DESC LIMIT ?')
+      .all(options.candidateLimit ?? 2000) as Array<{ memory_id: string; created_at: number }>;
+    const readVector = this.db.prepare('SELECT embedding_json FROM memory_embeddings WHERE memory_id = ?');
+    const live = new Set<string>();
+    const scored: Array<{ id: string; score: number }> = [];
+    for (const row of rows) {
+      live.add(row.memory_id);
+      let cached = this.vectorCache.get(row.memory_id);
+      if (cached === undefined || cached.createdAt !== row.created_at) {
+        const stored = readVector.get(row.memory_id) as { embedding_json: string } | undefined;
+        if (stored === undefined) continue;
+        try {
+          cached = { createdAt: row.created_at, vector: new Float32Array(JSON.parse(stored.embedding_json) as number[]) };
+        } catch {
+          continue; // a corrupted vector
+        }
+        this.vectorCache.set(row.memory_id, cached);
+      }
+      if (cached.vector.length !== queryEmbedding.length) continue;
+      scored.push({ id: row.memory_id, score: engine.cosineSimilarity(queryEmbedding, cached.vector) });
+    }
+    // Forget vectors of memos that are gone.
+    for (const id of this.vectorCache.keys()) if (!live.has(id)) this.vectorCache.delete(id);
+    return scored.toSorted((a, b) => b.score - a.score);
+  }
+
+  /** One memo's stored vector, from the cache `scoreByVector` fills. */
+  vectorOf(id: string): Float32Array | undefined {
+    const cached = this.vectorCache.get(id);
+    if (cached !== undefined) return cached.vector;
+    if (this.db === undefined) return undefined;
+    const row = this.db
+      .prepare('SELECT embedding_json, created_at FROM memory_embeddings WHERE memory_id = ?')
+      .get(id) as { embedding_json: string; created_at: number } | undefined;
+    if (row === undefined) return undefined;
+    try {
+      const vector = new Float32Array(JSON.parse(row.embedding_json) as number[]);
+      this.vectorCache.set(id, { createdAt: row.created_at, vector });
+      return vector;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Record that these memos were brought back into a conversation (recalled
+   * automatically, or returned by a lookup). Bookkeeping only: the content,
+   * its vector and the full-text index are untouched, and the change history
+   * leaves these counters out.
+   */
+  async markRecalled(ids: readonly string[], at: number = Date.now()): Promise<void> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return;
+    await this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return;
+      const mark = this.db.prepare(
+        'UPDATE memos SET recall_count = recall_count + 1, last_recalled_at = ? WHERE id = ?',
+      );
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        for (const id of unique) mark.run(at, id);
+        this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * How memories were used, as numbers only (what the weekly self-review is
+   * given): how many exist, how many were added and how many were brought
+   * back since `since`, the most-recalled ones of that window by id, and how
+   * many were never recalled although older than `idleBefore`.
+   */
+  async useStats(since: number, idleBefore: number): Promise<MemoryUseStats> {
+    await this.init();
+    const empty: MemoryUseStats = { total: 0, added: 0, recalled: 0, neverRecalledOld: 0, topRecalled: [] };
+    if (this.db === undefined) return empty;
+    const count = (sql: string, ...params: number[]): number =>
+      ((this.db!.prepare(sql).get(...params) as { count: number } | undefined)?.count ?? 0);
+    const topRecalled = (
+      this.db
+        .prepare(
+          'SELECT id, recall_count AS count FROM memos WHERE last_recalled_at >= ? ORDER BY recall_count DESC, last_recalled_at DESC LIMIT 5',
+        )
+        .all(since) as Array<{ id: string; count: number }>
+    ).map((row) => ({ id: row.id, count: row.count }));
+    return {
+      total: count('SELECT COUNT(*) AS count FROM memos'),
+      added: count('SELECT COUNT(*) AS count FROM memos WHERE recorded_at >= ?', since),
+      recalled: count('SELECT COUNT(*) AS count FROM memos WHERE last_recalled_at >= ?', since),
+      neverRecalledOld: count(
+        'SELECT COUNT(*) AS count FROM memos WHERE recall_count = 0 AND recorded_at < ?',
+        idleBefore,
+      ),
+      topRecalled,
+    };
   }
 
   /**
@@ -1215,6 +1375,8 @@ function rowToMemo(row: Record<string, unknown>): MemoryMemo {
   const distilled = row['distilled'];
   const note = row['note'];
   const distilledAt = row['distilled_at'];
+  const recallCount = row['recall_count'];
+  const lastRecalledAt = row['last_recalled_at'];
   return {
     id: String(row['id']),
     sourceSessionId: String(row['source_session_id']),
@@ -1234,6 +1396,9 @@ function rowToMemo(row: Record<string, unknown>): MemoryMemo {
     projectDir: typeof projectDir === 'string' ? projectDir : '',
     tags: parseTags(row['tags']),
     note: typeof note === 'string' && note.length > 0 ? note : undefined,
+    recallCount: typeof recallCount === 'number' && recallCount > 0 ? recallCount : undefined,
+    lastRecalledAt:
+      typeof lastRecalledAt === 'number' && Number.isFinite(lastRecalledAt) ? lastRecalledAt : undefined,
   };
 }
 

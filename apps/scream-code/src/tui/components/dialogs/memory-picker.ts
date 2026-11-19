@@ -586,6 +586,9 @@ export class MemoryPickerComponent extends Container implements Focusable {
     if (isRule && sources.length > 0) {
       trailingParts.push(t('memory.source_count', { count: String(sources.length) }));
     }
+    if ((memo.recallCount ?? 0) > 0) {
+      trailingParts.push(t('memory.recalled_count', { count: String(memo.recallCount) }));
+    }
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
     const headerPrefixWidth = visibleWidth(pointer) + 1 + visibleWidth(check) + 1;
@@ -684,6 +687,17 @@ export class MemoryPickerComponent extends Container implements Focusable {
     }
     lines.push(chalk.hex(c.textMuted)(
       truncateToWidth(`${indent}${t('memory.id_label')}${memo.id}`, width, ELLIPSIS),
+    ));
+    lines.push(chalk.hex(c.textMuted)(
+      truncateToWidth(
+        `${indent}${
+          (memo.recallCount ?? 0) > 0 && memo.lastRecalledAt !== undefined
+            ? t('memory.recalled_detail', { count: String(memo.recallCount), when: formatDate(memo.lastRecalledAt) })
+            : t('memory.recalled_never')
+        }`,
+        width,
+        ELLIPSIS,
+      ),
     ));
     lines.push('');
 

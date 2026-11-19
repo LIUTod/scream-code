@@ -1,4 +1,5 @@
 import { ErrorCodes, ScreamError } from '#/errors';
+import { TITLE_ATTEMPTS_KEY, TITLE_SOURCE_KEY } from './auto-title';
 import type {
   ActivateSkillPayload,
   AgentAPI,
@@ -88,6 +89,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
       ...this.session.metadata,
       ...payload.metadata,
       agents: this.session.metadata.agents,
+      // The SDK replaces `custom` with the copy it read at open, which predates
+      // a model-written title: keep the title bookkeeping it cannot know about,
+      // or the session would be titled (and charged) again.
+      custom: keepTitleBookkeeping(this.session.metadata.custom, payload.metadata['custom']),
     };
     await this.session.writeMetadata();
   }
@@ -156,6 +161,7 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
   async prompt({ agentId, ...payload }: AgentScopedPayload<PromptPayload>) {
     if (agentId === 'main') {
       await this.updatePromptMetadata(promptMetadataTextFromPayload(payload));
+      this.session.autoTitle.watch();
     }
     return this.getAgent(agentId).prompt(payload);
   }
@@ -426,4 +432,13 @@ function isUntitled(title: unknown): boolean {
 function hasCustomTitle(metadata: SessionMeta): boolean {
   if (metadata.isCustomTitle) return true;
   return typeof (metadata as SessionMeta & { customTitle?: unknown }).customTitle === 'string';
+}
+
+function keepTitleBookkeeping(current: SessionMeta['custom'], next: unknown): SessionMeta['custom'] {
+  if (typeof next !== 'object' || next === null || Array.isArray(next)) return current;
+  const merged: Record<string, unknown> = { ...(next as Record<string, unknown>) };
+  for (const key of [TITLE_SOURCE_KEY, TITLE_ATTEMPTS_KEY]) {
+    if (!(key in merged) && current?.[key] !== undefined) merged[key] = current[key];
+  }
+  return merged;
 }

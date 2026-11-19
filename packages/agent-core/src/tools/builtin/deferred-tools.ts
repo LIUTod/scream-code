@@ -9,8 +9,9 @@
  * removed from the default tool table (about 23 schemas) and offered through this one portal
  * tool instead. A group's tools are NOT constructed while deferred; enabling
  * a group constructs its instances and puts their names into the enabled
- * set, so they are callable from the model's next turn (the turn loop
- * freezes the enabled-name filter at turn start — see agent/turn/index.ts).
+ * set; they are offered from the very next step of the same turn
+ * (`ToolManager.loopToolsFor`), and a direct call to one of them enables its
+ * group on the spot (`enableDeferredToolOnDemand`).
  *
  * `loopControl.toolPortal: 'off'` in the config restores the pre-portal
  * behavior byte-for-byte: the group tools are constructed eagerly by the
@@ -48,8 +49,6 @@ import {
   MemoryConsolidatePlanTool,
 } from './memory/memory-consolidate';
 import { MemoryEditTool } from './memory/memory-edit';
-import { MemoryLookupTool } from './memory/memory-lookup';
-import { MemoryWriteTool } from './memory/memory-write';
 import { ManagePluginTool } from './plugin/manage-plugin';
 import { MakeSkillApplyTool } from './skill/make-skill-apply';
 import { MakeSkillPlanTool } from './skill/make-skill-plan';
@@ -160,22 +159,17 @@ export const DEFERRED_GROUPS: readonly DeferredToolGroup[] = [
         : [],
   },
   {
+    // MemoryLookup and MemoryWrite are always declared (see ToolManager);
+    // correcting and consolidating memories are the rare part.
     name: 'memory',
-    toolNames: [
-      'MemoryLookup',
-      'MemoryEdit',
-      'MemoryWrite',
-      'MemoryConsolidatePlan',
-      'MemoryConsolidateApply',
-    ],
+    toolNames: ['MemoryEdit', 'MemoryConsolidatePlan', 'MemoryConsolidateApply'],
+    useWhen: 'correct or delete a memory that is wrong or outdated, or merge near-duplicate memories (/dream)',
     construct: (context) =>
       mainOnly(context, () =>
         context.agent.memoStore === undefined
           ? []
           : [
-              new MemoryLookupTool(context.agent),
               new MemoryEditTool(context.agent),
-              new MemoryWriteTool(context.agent),
               new MemoryConsolidatePlanTool(context.agent),
               new MemoryConsolidateApplyTool(context.agent),
             ],
@@ -295,7 +289,7 @@ export class DiscoverToolsTool implements BuiltinTool<DiscoverToolsInput> {
     'every request until you enable one here (the built-in counterpart of DiscoverMcpTools). ' +
     `Groups: ${buildDeferredGroupsDescription()}. ` +
     'Call with { group } to enable one for this session — its tools are constructed and ' +
-    'available from your next turn. Enabling is idempotent.';
+    'available from your next step. Enabling is idempotent.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(DiscoverToolsInputSchema);
 
   constructor(private readonly tools: ToolManager) {}
@@ -308,7 +302,7 @@ export class DiscoverToolsTool implements BuiltinTool<DiscoverToolsInput> {
         const result = this.tools.enableDeferredToolGroup(args.group);
         if (result.status === 'enabled') {
           return {
-            output: `Enabled ${args.group}: ${result.toolNames.join(', ')}. They are available from your next turn.`,
+            output: `Enabled ${args.group}: ${result.toolNames.join(', ')}. Call them in your next step.`,
             isError: false as const,
           };
         }

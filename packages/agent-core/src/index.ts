@@ -75,7 +75,7 @@ export {
   snapshotEvolution,
 } from './evolution/history';
 export type { EvolutionChange, EvolutionResult } from './evolution/history';
-export { collectFriction, renderFrictionBlock } from './evolution/friction';
+export { collectFriction, collectMemoryUse, renderFrictionBlock } from './evolution/friction';
 export type { FrictionReport, ToolFriction } from './evolution/friction';
 export type {
   BusyProcessLock,

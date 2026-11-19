@@ -76,6 +76,36 @@ function makeComponent(
 
 const detailHint = 'e 编辑';
 
+describe('MemoryPickerComponent — recall counts', () => {
+  let originalLocale: ReturnType<typeof getLocale>;
+  beforeEach(() => {
+    originalLocale = getLocale();
+    setLocale('zh');
+  });
+  afterEach(() => {
+    setLocale(originalLocale);
+  });
+
+  it('shows how often a memory was recalled, and nothing for one never recalled', () => {
+    const component = makeComponent([
+      makeSummary({ id: 'memo-used', userNeed: '修复令牌刷新', recallCount: 3, lastRecalledAt: Date.now() }),
+      makeSummary({ id: 'memo-new', userNeed: '升级依赖' }),
+    ]);
+    const lines = stripAnsi(component.render(160).join('\n')).split('\n');
+    expect(lines.find((line) => line.includes('修复令牌刷新'))).toContain('想起 3 次');
+    expect(lines.find((line) => line.includes('升级依赖'))).not.toContain('想起');
+  });
+
+  it('says when it was last recalled in the detail view', async () => {
+    const used = makeSummary({ recallCount: 2, lastRecalledAt: new Date(2026, 10, 18, 9).getTime() });
+    const component = makeComponent([used], { detail: { ...makeDetail(used), recallCount: 2, lastRecalledAt: used.lastRecalledAt } });
+    component.handleInput('\r');
+    await vi.waitFor(() => {
+      expect(stripAnsi(component.render(200).join('\n'))).toContain('被想起：2 次（上次');
+    });
+  });
+});
+
 describe('MemoryPickerComponent — latest distillation', () => {
   let originalLocale: ReturnType<typeof getLocale>;
 

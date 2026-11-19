@@ -22,7 +22,11 @@ function makeMemo(partial: Omit<MemoryMemo, 'id' | 'recordedAt' | 'projectDir'> 
   };
 }
 
+/** Ids the tool reported as recalled, across calls of one test. */
+let recalled: string[] = [];
+
 function makeStore(memos: MemoryMemo[]): { store: NonNullable<Agent['memoStore']> } {
+  recalled = [];
   return {
     store: {
       read: async function* (options?: { projectDir?: string }) {
@@ -40,6 +44,9 @@ function makeStore(memos: MemoryMemo[]): { store: NonNullable<Agent['memoStore']
       getEmbeddingEngine: () => undefined,
       hasEmbeddings: () => false,
       searchByVector: async () => [],
+      markRecalled: async (ids: readonly string[]) => {
+        recalled.push(...ids);
+      },
       search: async (query: string, options?: { projectDir?: string }) => {
         const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
         return memos.filter((memo) => {
@@ -74,6 +81,7 @@ function makeAgent(memos: MemoryMemo[], cwd = '/workspace/project'): { agent: Ag
     agent: {
       memoStore: store,
       config: { cwd },
+      ensureMemoryEngine: async () => false,
     } as unknown as Agent,
   };
 }
@@ -85,7 +93,7 @@ describe('MemoryLookupTool', () => {
 
     expect(tool.name).toBe('MemoryLookup');
     expect(tool.description.length).toBeGreaterThan(0);
-    expect(tool.description).toContain('memory memo store');
+    expect(tool.description).toContain('earlier sessions');
     expect(MemoryLookupInputSchema.safeParse({ query: 'test' }).success).toBe(true);
     expect(MemoryLookupInputSchema.safeParse({}).success).toBe(false);
     expect(tool.parameters).toMatchObject({
@@ -138,6 +146,9 @@ describe('MemoryLookupTool', () => {
     expect(result.output).toContain('Storing tokens in redis with TTL');
     expect(result.output).toContain('from: Auth refactor');
     expect(result.output).not.toContain('Resolve OAuth redirect loop');
+    // What a lookup returns counts as recalled, like an automatic recall.
+    await Promise.resolve();
+    expect(recalled).toEqual(['m1']);
   });
 
   it('surfaces the latest distillation and note', async () => {

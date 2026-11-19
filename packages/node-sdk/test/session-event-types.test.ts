@@ -73,6 +73,7 @@ describe('Event public types', () => {
         case 'agent.status.updated':
         case 'session.meta.updated':
         case 'skill.activated':
+        case 'memory.recalled':
         case 'error':
         case 'warning':
         case 'turn.started':

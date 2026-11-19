@@ -5,7 +5,7 @@ export interface RelevanceFactors {
   keywordOverlap: number; // 0-1
   /** Recency score: 1.0 for today, decays to 0 for >90 days. */
   recency: number; // 0-1
-  /** Usage boost: +0.1 per previous injection, capped at 0.3. */
+  /** Usage boost: +0.1 per earlier recall (`recallCount`), capped at 0.3. */
   usageBoost: number; // 0-0.3
   /** Project affinity: 1.0 same project, 0.3 same parent dir, 0 otherwise. */
   projectBoost: number; // 0-1
@@ -88,8 +88,8 @@ export function computeRelevanceScore(
   const factors: RelevanceFactors = {
     keywordOverlap: computeKeywordOverlap(memo, query),
     recency: computeRecency(memo.recordedAt),
-    // NOTE: usageCount is always 0 — per-memo usage counting is not yet
-    // implemented in the store. When added, increment on each search hit.
+    // A memo that keeps being brought back ranks a little higher; the store
+    // counts recalls (`markRecalled`), automatic and looked-up alike.
     usageBoost: Math.min(0.3, usageCount * 0.1),
     projectBoost: computeProjectBoost(memo.projectDir, currentProjectDir),
     tagOverlap: computeTagOverlap(memo.tags, projectTagCloud),
@@ -130,7 +130,7 @@ export function rankMemos(
   return memos
     .map((memo) => {
       const keywordScore = computeRelevanceScore(
-        memo, query, 0, currentProjectDir, projectTagCloud, intent,
+        memo, query, memo.recallCount ?? 0, currentProjectDir, projectTagCloud, intent,
       );
       const vectorScore = vectorScores?.get(memo.id) ?? 0;
       // Blend: 60% keyword + 40% vector when both are available.

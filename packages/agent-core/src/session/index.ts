@@ -47,6 +47,7 @@ import { SessionSubagentHost, type ModelTierBindings } from './subagent-host';
 import type { SubagentCapabilityMode } from './subagent-capability';
 import { SessionDisposables } from './dispose-registry';
 import { SubagentMessageBus } from './subagent-messages';
+import { SessionAutoTitle } from './auto-title';
 import type { ToolServices } from '../tools/support/services';
 import type { LspProcessSupervisor } from '../lsp/process-supervisor';
 import { SessionTokenMeter, type SessionTokenBudget } from '../agent/usage/token-meter';
@@ -236,6 +237,8 @@ export class Session {
   readonly rpc: SDKSessionRPC;
   readonly skills: SkillRegistry;
   readonly agents: Map<string, Agent> = new Map();
+  /** Names the session with the model once a turn gives it a task (see auto-title.ts). */
+  readonly autoTitle: SessionAutoTitle = new SessionAutoTitle(this);
   readonly mcp: McpConnectionManager;
   readonly log: Logger;
   private readonly logHandle: SessionLogHandle | undefined;
@@ -521,6 +524,7 @@ export class Session {
     for (const manager of this.liveBackgroundManagers()) {
       manager.markSessionClosed();
     }
+    this.autoTitle.dispose();
     const main = this.agents.get('main');
     if (main !== undefined) {
       const recap = main.sessionMemory.getSessionSummary();

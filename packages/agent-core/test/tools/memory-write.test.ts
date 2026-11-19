@@ -38,7 +38,7 @@ describe('MemoryWriteTool', () => {
 
     expect(tool.name).toBe('MemoryWrite');
     expect(tool.description.length).toBeGreaterThan(0);
-    expect(tool.description).toContain('memory memo store');
+    expect(tool.description).toContain('记住这个');
     expect(MemoryWriteInputSchema.safeParse({
       userNeed: 'Fix auth',
       approach: 'Add refresh logic',

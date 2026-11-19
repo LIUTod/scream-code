@@ -218,6 +218,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   readonly inputController: InputController;
 
   public onExit?: (exitCode?: number) => Promise<void>;
+  /** stop() deleted the session because it was an empty shell. */
+  private sessionDroppedOnExit = false;
 
   /**
    * Execute a compound UI update without intermediate renders. All
@@ -546,7 +548,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // teardown step throws, this path still ran and the next launch must not
     // report a crash that did not happen.
     clearRuntimeMarker(getDataDir());
-    await this.closeSession();
+    // Work handed to the background keeps its session whatever it holds.
+    if (handoff === 'handoff') await this.closeSession();
+    else this.sessionDroppedOnExit = await this.sessionManager.closeSessionOnExit();
     await this.harness.close();
     const handedOffNote = handoff === 'handoff' ? await this.startHostForHandoff() : undefined;
     this.state.ui.stop();
@@ -942,7 +946,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   hasSessionContent(): boolean {
-    return this.state.transcriptEntries.length > 0;
+    // An empty session deleted on exit has nothing to resume (see stop()).
+    return !this.sessionDroppedOnExit && this.state.transcriptEntries.length > 0;
   }
 
   getCurrentWorkDir(): string {

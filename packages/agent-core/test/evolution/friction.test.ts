@@ -41,6 +41,19 @@ describe('collectFriction', () => {
     expect(block).toContain('Edit: 2 calls, 1 errors (50%); most in sessions ses-a');
     expect(block).toContain('never invoked: old-skill');
     expect(block).not.toContain('API_KEY');
+    // Without memory numbers there is no memory section.
+    expect(block).not.toContain('<memory-use');
+    const withMemory = renderFrictionBlock(report, report, [], undefined, {
+      total: 106,
+      added: 4,
+      recalled: 2,
+      neverRecalledOld: 40,
+      topRecalled: [{ id: 'memo-a-1', count: 3 }],
+    });
+    expect(withMemory).toContain('<memory-use window="7 days">');
+    expect(withMemory).toContain('memories: 106 (4 added this week)');
+    expect(withMemory).toContain('recalled this week: 2; most: memo-a-1 (3 times in all)');
+    expect(withMemory).toContain('never recalled and older than 30 days: 40');
     expect(JSON.stringify(report)).not.toContain('API_KEY');
   });
 });

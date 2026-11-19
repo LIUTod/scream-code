@@ -52,6 +52,8 @@ export interface ExecuteLoopStepDeps {
    * on the very next step and runtime tool visibility stays fresh.
    */
   readonly buildTools?: (() => readonly ExecutableTool[]) | undefined;
+  /** See ToolCallStepContext.enableMissingTool. */
+  readonly enableMissingTool?: ((name: string) => readonly ExecutableTool[] | undefined) | undefined;
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
   readonly currentStep: number;
@@ -137,6 +139,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     llm,
     tools,
     buildTools,
+    enableMissingTool,
     hooks,
     log,
     currentStep,
@@ -174,6 +177,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
 
   const step: ToolCallStepContext = {
     tools: effectiveTools,
+    enableMissingTool,
     hooks,
     log,
     dispatchEvent,

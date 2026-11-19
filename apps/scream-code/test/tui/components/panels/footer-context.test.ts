@@ -428,24 +428,19 @@ describe('FooterComponent — mode switches', () => {
     }
   }
 
-  it('always lists plan → RLM → 群狼 as plain labels, with the goal absent while no goal runs', () => {
+  it('shows no mode badge while every mode is off, and no goal while no goal runs', () => {
     const row = strip(line2Of({}));
-    expect(row).toContain('计划  RLM  群狼');
-    expect(row).not.toContain('目标');
-    // No emoji marks any more — colour alone says on/off.
+    for (const label of ['计划', '融合', 'RLM', '群狼', '目标']) expect(row).not.toContain(label);
+    // No emoji marks either — colour alone carries the mode.
     for (const mark of ['🗒️', '🪐', '🐺']) expect(row).not.toContain(mark);
   });
 
-  it('mutes a switch while it is off', () => {
-    withTrueColor(() => {
-      const row = line2Of({});
-      for (const label of ['计划', 'RLM', '群狼']) {
-        expect(row).toContain(`${hexToSgr(darkColors.textMuted)}${label}`);
-      }
-      for (const color of [darkColors.planMode, darkColors.rlmMode, darkColors.wolfpackMode]) {
-        expect(row).not.toContain(hexToSgr(color));
-      }
-    });
+  it('shows only the modes that are on, in the order plan → RLM → 群狼', () => {
+    expect(strip(line2Of({ rlmEnabled: true }))).toContain('RLM');
+    expect(strip(line2Of({ rlmEnabled: true }))).not.toContain('计划');
+    expect(strip(line2Of({ rlmEnabled: true }))).not.toContain('群狼');
+    const all = strip(line2Of({ planMode: 'plan', rlmEnabled: true, wolfpackMode: true }));
+    expect(all).toContain('计划  RLM  群狼');
   });
 
   it('lights a switch with its own colour, in bold, while it is on', () => {
@@ -468,27 +463,14 @@ describe('FooterComponent — mode switches', () => {
     });
   });
 
-  it('keeps RLM and 群狼 in place whether plan is off, plan, or fusion', () => {
+  it('keeps RLM and 群狼 in place when plan switches between plan and fusion', () => {
     const columns = (overrides: Partial<AppState>): number[] => {
-      const row = strip(line2Of(overrides, 120));
+      const row = strip(line2Of({ rlmEnabled: true, wolfpackMode: true, ...overrides }, 120));
       return ['RLM', '群狼'].map((label) => row.indexOf(label));
     };
-    const off = columns({});
-    expect(off.every((at) => at > 0)).toBe(true);
-    expect(columns({ planMode: 'plan' })).toEqual(off);
-    expect(columns({ planMode: 'fusionplan' })).toEqual(off);
-  });
-
-  it('keeps every switch where it is when another one is turned on', () => {
-    const columns = (overrides: Partial<AppState>): number[] => {
-      const row = strip(line2Of(overrides, 120));
-      return ['计划', 'RLM', '群狼'].map((label) => row.indexOf(label));
-    };
-    const idle = columns({});
-    expect(idle.every((at) => at > 0)).toBe(true);
-    expect(columns({ rlmEnabled: true })).toEqual(idle);
-    expect(columns({ planMode: 'plan', wolfpackMode: true })).toEqual(idle);
-    expect(columns({ planMode: 'plan', rlmEnabled: true, wolfpackMode: true })).toEqual(idle);
+    const plan = columns({ planMode: 'plan' });
+    expect(plan.every((at) => at > 0)).toBe(true);
+    expect(columns({ planMode: 'fusionplan' })).toEqual(plan);
   });
 
   it('shows the goal only while a goal is active, in the primary colour and bold', () => {

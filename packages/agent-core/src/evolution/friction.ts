@@ -10,6 +10,7 @@
  * messages are parsed only to read those fields and are dropped at once.
  */
 
+import { sharedMemoStore, type MemoryUseStats } from '@scream-code/memory';
 import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
@@ -137,9 +138,29 @@ export async function collectFriction(
 }
 
 /**
- * The block a self-review run is given: friction over the last week, and
- * which of the person's own skills went unused for four weeks. Model-facing,
- * so English. `userSkills` are the names of the skills in `<home>/skills`.
+ * How memories were used since `since`, numbers only (no memo text): what
+ * the self-review needs to say which memories helped and which went unused.
+ * Undefined when the memory store cannot be opened.
+ */
+export async function collectMemoryUse(
+  screamHomeDir: string,
+  since: number,
+  idleBefore: number,
+): Promise<MemoryUseStats | undefined> {
+  try {
+    const store = sharedMemoStore(screamHomeDir);
+    await store.init();
+    return await store.useStats(since, idleBefore);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The block a self-review run is given: friction over the last week, which
+ * of the person's own skills went unused for four weeks, and how memories
+ * were used. Model-facing, so English. `userSkills` are the names of the
+ * skills in `<home>/skills`.
  */
 export function renderFrictionBlock(
   week: FrictionReport,
@@ -147,6 +168,8 @@ export function renderFrictionBlock(
   userSkills: readonly string[],
   /** The week before, to tell whether friction went down after last week's changes. */
   previousWeek?: FrictionReport,
+  /** Memory use over the same week; "never recalled" counts memories older than a month. */
+  memoryUse?: MemoryUseStats,
 ): string {
   const rateOf = (entry: { calls: number; errors: number }): number =>
     entry.calls === 0 ? 0 : Math.round((entry.errors / entry.calls) * 100);
@@ -166,5 +189,17 @@ export function renderFrictionBlock(
   const unused = userSkills.filter((skill) => month.skillCalls[skill] === undefined);
   if (unused.length > 0) lines.push(`- never invoked: ${unused.join(', ')}`);
   lines.push('</skill-use>');
+  if (memoryUse !== undefined) {
+    lines.push(
+      '<memory-use window="7 days">',
+      `memories: ${String(memoryUse.total)} (${String(memoryUse.added)} added this week)`,
+      `recalled this week: ${String(memoryUse.recalled)}` +
+        (memoryUse.topRecalled.length === 0
+          ? ''
+          : `; most: ${memoryUse.topRecalled.map((entry) => `${entry.id} (${String(entry.count)} times in all)`).join(', ')}`),
+      `never recalled and older than 30 days: ${String(memoryUse.neverRecalledOld)}`,
+      '</memory-use>',
+    );
+  }
   return lines.join('\n');
 }

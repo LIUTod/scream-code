@@ -35,6 +35,22 @@ function memo(dir: string, need: string) {
 }
 
 describe('evolution history', () => {
+  it('does not record a recall as a change to the memory', async () => {
+    const dir = home();
+    const store = sharedMemoStore(dir);
+    await store.init();
+    const entry = memo(dir, 'fix the flaky login test');
+    await store.append(entry);
+    expect((await snapshotEvolution(dir, 'add a memory')).ok).toBe(true);
+    await store.markRecalled([entry.id]);
+    await store.markRecalled([entry.id]);
+    // The counters moved, the content did not: nothing to record.
+    expect(await snapshotEvolution(dir, 'recalled twice')).toEqual({ ok: true });
+    const mirrored = readFileSync(join(dir, 'evolution', 'memory', `${entry.id}.json`), 'utf8');
+    expect(mirrored).not.toContain('recallCount');
+    expect(mirrored).not.toContain('lastRecalledAt');
+  });
+
   it('records a skill change and rolls it back', async () => {
     const dir = home();
     mkdirSync(join(dir, 'skills', 'fix-flaky'), { recursive: true });

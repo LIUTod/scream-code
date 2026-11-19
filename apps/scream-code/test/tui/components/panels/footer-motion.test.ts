@@ -199,28 +199,26 @@ describe('FooterComponent — exit hint on a narrow terminal', () => {
   });
 });
 
-describe('FooterComponent — plan switch slot', () => {
+describe('FooterComponent — plan badge slot', () => {
   const cols = (planMode: AppState['planMode'], width = 120): number[] => {
-    const footer = new FooterComponent(baseState({ planMode }), darkColors, ui);
+    const footer = new FooterComponent(baseState({ planMode, rlmEnabled: true, wolfpackMode: true }), darkColors, ui);
     const row = strip(footer.render(width)[1]!);
     footer.dispose();
     return ['RLM', '群狼', 'Wolfpack'].map((label) => row.indexOf(label));
   };
 
   it('Chinese: 计划 and 融合 are the same width, so nothing after them moves', () => {
-    const off = cols('off');
-    expect(off[0]).toBeGreaterThan(0);
-    expect(cols('plan')).toEqual(off);
-    expect(cols('fusionplan')).toEqual(off);
+    const plan = cols('plan');
+    expect(plan[0]).toBeGreaterThan(0);
+    expect(cols('fusionplan')).toEqual(plan);
   });
 
   it('English: Plan is padded to the width of Fusion, so nothing after it moves', () => {
     setLocale('en');
-    const off = cols('off');
-    expect(off[2]).toBeGreaterThan(0);
-    expect(cols('plan')).toEqual(off);
-    expect(cols('fusionplan')).toEqual(off);
-    const footer = new FooterComponent(baseState(), darkColors, ui);
+    const plan = cols('plan');
+    expect(plan[2]).toBeGreaterThan(0);
+    expect(cols('fusionplan')).toEqual(plan);
+    const footer = new FooterComponent(baseState({ planMode: 'plan', rlmEnabled: true }), darkColors, ui);
     expect(strip(footer.render(120)[1]!)).toContain('Plan    RLM'); // 'Plan' + 2 pad + 2 gap
     footer.dispose();
   });

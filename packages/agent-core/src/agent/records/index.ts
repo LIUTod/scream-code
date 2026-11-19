@@ -206,6 +206,9 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
     case 'tools.set_active_tools':
       agent.tools.setActiveTools(input.names);
       return;
+    case 'tools.enable_deferred_group':
+      agent.tools.enableDeferredToolGroup(input.group);
+      return;
     case 'tools.update_store':
       agent.tools.updateStore(input.key, input.value);
       return;

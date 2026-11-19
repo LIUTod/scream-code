@@ -1263,7 +1263,7 @@ const LIVE_HOUSEKEEPING_SOURCE = 'modelTiers.housekeeping';
  * stale LIVE alias falls through to the configured alias rather than straight
  * to the session model: the config value is the earlier, still-valid choice.
  */
-function resolveHousekeeping(agent: Agent): ResolvedChatModel | undefined {
+export function resolveHousekeeping(agent: Agent): ResolvedChatModel | undefined {
   // The live binding arrives through the session's subagent host, the only
   // session-scoped handle an agent holds (same reference a spawn reads). An
   // agent built outside a session has no host and reads config.toml only.

@@ -163,8 +163,15 @@ describe('DiscoverTools portal tool', () => {
     );
     // Jobs are not behind the portal: they are always declared.
     expect(tool.description).not.toContain('jobs (JobCreate');
+    // Looking up and saving memories are always declared; the portal only
+    // offers correcting and consolidating them, with a hint for when.
+    expect(tool.description).toContain(
+      'memory (MemoryEdit, MemoryConsolidatePlan, MemoryConsolidateApply; correct or delete a memory that is wrong or outdated',
+    );
+    expect(tool.description).not.toContain('MemoryLookup');
+    expect(tool.description).not.toContain('MemoryWrite');
     // Groups without a hint keep the bare form.
-    expect(tool.description).toMatch(/memory \([A-Za-z, ]+\)/);
+    expect(tool.description).toMatch(/knowledge \([A-Za-z, ]+\)/);
   });
 
   it('input schema rejects unknown group names', () => {
@@ -325,7 +332,7 @@ describe('tool portal in the registry (default mode)', () => {
     const result = await callPortal(tools, 'cron');
     expect(result.isError).toBe(false);
     expect(result.output).toBe(
-      'Enabled cron: CronCreate, CronList, CronDelete. They are available from your next turn.',
+      'Enabled cron: CronCreate, CronList, CronDelete. Call them in your next step.',
     );
     expect(tools.getBuiltinTool('CronCreate')).toBeDefined();
     // The enable adds the group's tools and loses nothing that was offered
@@ -338,16 +345,26 @@ describe('tool portal in the registry (default mode)', () => {
     expect(tools.data().find((info) => info.name === 'CronCreate')?.active).toBe(true);
   });
 
-  it('a frozen turn filter keeps the enable on the next turn', () => {
+  it('a group enabled mid-turn is offered from the next step, despite the frozen turn filter', () => {
     // The turn loop freezes the enabled-name filter at turn start
     // (snapshotEnabledTools) and rebuilds the table through loopToolsFor.
-    // An enable that happens mid-turn must NOT appear until the next turn.
+    // That keeps a mid-turn setActiveTools for the next turn, but a group
+    // the model enabled is meant for now: waiting a turn made it skip the tool.
     const { tools } = portalCtx();
     const beforeEnable = tools.snapshotEnabledTools();
     const outcome = tools.enableDeferredToolGroup('goal');
     expect(outcome.status).toBe('enabled');
-    expect(tools.loopToolsFor(beforeEnable).map((tool) => tool.name)).not.toContain('CreateGoal');
-    expect(tools.loopTools.map((tool) => tool.name)).toContain('CreateGoal');
+    expect(tools.loopToolsFor(beforeEnable).map((tool) => tool.name)).toContain('CreateGoal');
+  });
+
+  it('a direct call to a deferred tool enables its group on the spot', () => {
+    const { tools } = portalCtx();
+    const frozen = tools.snapshotEnabledTools();
+    expect(tools.loopToolsFor(frozen).map((tool) => tool.name)).not.toContain('CronCreate');
+    expect(tools.enableDeferredToolOnDemand('CronCreate')).toBe(true);
+    expect(tools.loopToolsFor(frozen).map((tool) => tool.name)).toContain('CronCreate');
+    // A name that is no deferred tool enables nothing.
+    expect(tools.enableDeferredToolOnDemand('NoSuchTool')).toBe(false);
   });
 
   it('second enable of the same group is idempotent', async () => {

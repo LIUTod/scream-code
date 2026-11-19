@@ -41,6 +41,7 @@ Guidelines:
 - "note" is optional: a one-sentence advisory note that helps future AI understand/reuse the record faster. It is a soft suggestion, not a user-enforced rule.
 - For in-progress work: record it with "outcome": "进行中" and describe where the task stands and what remains — this is what lets the agent resume seamlessly after compaction.
 - Merge closely related sub-tasks into a single record.
+- A `<memories>` block holds experience recalled from earlier sessions; it is already stored. Do not record it again — record only what this conversation did.
 - Use the exact field names and JSON format shown above (no extra fields beyond "note").
 
 If no task loops (completed or in-progress) are found in the compacted messages, output:

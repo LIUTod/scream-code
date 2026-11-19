@@ -52,6 +52,8 @@ export interface RunTurnInput {
    * on the very next step and runtime tool visibility stays fresh.
    */
   readonly buildTools?: (() => readonly ExecutableTool[]) | undefined;
+  /** See ToolCallStepContext.enableMissingTool. */
+  readonly enableMissingTool?: ((name: string) => readonly ExecutableTool[] | undefined) | undefined;
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
   readonly maxSteps?: number | undefined;
@@ -98,6 +100,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
     dispatchEvent,
     tools,
     buildTools,
+    enableMissingTool,
     hooks,
     log,
     maxSteps,
@@ -166,6 +169,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         llm,
         tools,
         buildTools,
+        enableMissingTool,
         hooks,
         log,
         currentStep: steps,

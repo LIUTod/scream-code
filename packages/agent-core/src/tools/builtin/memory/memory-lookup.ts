@@ -45,7 +45,7 @@ export const MemoryLookupInputSchema = z.object({
     .string()
     .min(1)
     .describe(
-      'Search query describing the current task, error, approach, or keywords to look up in the memory memo store.',
+      'The task, error or keywords to look up.',
     ),
   limit: z
     .number()
@@ -53,18 +53,18 @@ export const MemoryLookupInputSchema = z.object({
     .min(1)
     .max(MAX_LIMIT)
     .optional()
-    .describe(`Maximum number of memos to return (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).`),
+    .describe(`Most results (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).`),
   min_score: z
     .number()
     .min(0)
     .max(1)
     .optional()
-    .describe(`Minimum relevance score threshold from 0 to 1 (default ${DEFAULT_MIN_SCORE}).`),
+    .describe(`Lowest relevance, 0-1 (default ${DEFAULT_MIN_SCORE}).`),
   scope: z
     .enum(['project', 'global'])
     .optional()
     .describe(
-      `Search scope: 'global' (default) searches across all projects; 'project' limits results to the current working directory.`,
+      `'global' (default) or 'project' (this working directory only).`,
     ),
 });
 
@@ -78,11 +78,8 @@ export type MemoryLookupInput = z.infer<typeof MemoryLookupInputSchema>;
 export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
   readonly name = 'MemoryLookup' as const;
   readonly description =
-    'Search the memory memo store for historical experiences from past user tasks. ' +
-    'Call this when the current task may benefit from prior work, when you encounter a ' +
-    'repeating error or pattern, or when you are unsure of the best approach. ' +
-    'Returns memos ranked by relevance, including the latest distillation written ' +
-    'by /dream, the approach taken, the outcome, what failed, what worked, the note, project, and tags.';
+    'Search the memories of earlier sessions: what was tried, what worked, what failed. ' +
+    'Use it when the user points at earlier work or an error looks familiar. Memos of this project rank first.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(MemoryLookupInputSchema);
 
   constructor(private readonly agent: Agent) {}
@@ -123,7 +120,7 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
         // Try vector search as a supplementary signal. Only runs if embeddings
         // exist and the engine loaded successfully.
         let vectorScores: Map<string, number> | undefined;
-        const engine = store.getEmbeddingEngine();
+        const engine = (await this.agent.ensureMemoryEngine()) ? store.getEmbeddingEngine() : undefined;
         if (engine?.available && store.hasEmbeddings()) {
           try {
             const cachedVec = getCachedQueryEmbedding(query);
@@ -175,6 +172,8 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
             output: `No relevant memory memos found for query "${query}".`,
           };
         }
+
+        void store.markRecalled(ranked.map(({ memo }) => memo.id)).catch(() => {});
 
         const lines = [
           `Found ${ranked.length} relevant memory memo${ranked.length === 1 ? '' : 's'} for query "${query}":`,

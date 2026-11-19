@@ -50,6 +50,13 @@ export interface MemoryMemo {
    * supplement (e.g. a reusable behavioural hint) that helps future turns
    * understand the memo. Advisory only, not a user-enforced preference. */
   note?: string;
+  /** Bookkeeping, not content: how many times this memo was brought back into
+   * a conversation (recalled automatically or returned by a lookup). Set by
+   * the store only — `update()` never writes it, and the change history
+   * leaves it out. */
+  recallCount?: number;
+  /** Bookkeeping like `recallCount`: epoch ms of the latest recall. */
+  lastRecalledAt?: number;
 }
 
 /** JSONL envelope — one line in entries.jsonl. */
@@ -78,6 +85,8 @@ export interface MemoryMemoSummary {
   projectDir: string;
   tags?: string[];
   note?: string;
+  recallCount?: number;
+  lastRecalledAt?: number;
 }
 
 /** Result of listing/filtering memos. */
@@ -152,5 +161,7 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     projectDir: memo.projectDir,
     tags: memo.tags,
     note: memo.note,
+    recallCount: memo.recallCount,
+    lastRecalledAt: memo.lastRecalledAt,
   };
 }

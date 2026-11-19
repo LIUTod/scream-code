@@ -440,6 +440,7 @@ export class SessionEventHandler {
       case 'agent.status.updated': this.handleStatusUpdate(event); break;
       case 'session.meta.updated': this.handleSessionMetaChanged(event); break;
       case 'skill.activated': this.handleSkillActivated(event); break;
+      case 'memory.recalled': this.handleMemoryRecalled(event.count); break;
       case 'error': this.handleSessionError(event); break;
       case 'warning': this.handleSessionWarning(event); break;
       case 'compaction.started': this.handleCompactionBegin(event); break;
@@ -1255,6 +1256,15 @@ export class SessionEventHandler {
     // explicit user action (`/model` → performModelSwitch) or syncRuntimeState
     // on session switch — both call setAppState directly.
     if (Object.keys(patch).length > 0) this.host.setAppState(patch);
+  }
+
+  /** One quiet line under the prompt: Scream remembered something relevant. */
+  private handleMemoryRecalled(count: number): void {
+    if (count <= 0) return;
+    this.host.showStatus(
+      count === 1 ? t('memory.recalled_one') : t('memory.recalled_many', { count: String(count) }),
+      this.host.state.theme.colors.textDim,
+    );
   }
 
   private handleSessionMetaChanged(event: SessionMetaUpdatedEvent): void {

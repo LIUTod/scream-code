@@ -3,6 +3,8 @@ import type { DynamicInjector } from './injector';
 import { EditRecoveryInjector } from './edit-recovery';
 import { GoalInjector } from './goal';
 import { LocalDateInjector } from './local-date';
+import { MemoryOverviewInjector } from './memory-overview';
+import { MemoryRecallInjector } from './memory-recall';
 import { createMcpCapabilityGuideInjectors } from './mcp-capability-guides';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
@@ -26,6 +28,8 @@ export class InjectionManager {
       new GoalInjector(agent),
       new WorkingSetInjector(agent),
       new EditRecoveryInjector(agent),
+      new MemoryOverviewInjector(agent),
+      new MemoryRecallInjector(agent),
       new UserPrefsInjector(agent),
       new LocalDateInjector(agent),
     ];
