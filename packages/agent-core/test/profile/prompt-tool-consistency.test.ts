@@ -127,7 +127,7 @@ function listTypeScriptFiles(directory: string): string[] {
 
 function collectRegistryNames(): Set<string> {
   const names = new Set<string>();
-  for (const area of ['builtin', 'background', 'cron']) {
+  for (const area of ['builtin', 'background', 'cron', 'jobs']) {
     for (const file of listTypeScriptFiles(join(PACKAGE_ROOT, 'src', 'tools', area))) {
       const text = readFileSync(file, 'utf8');
       const constants = new Map<string, string>();

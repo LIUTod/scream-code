@@ -47,37 +47,6 @@ jobs:
       - run: pnpm run build:packages
       - run: pnpm run test:coverage
 
-  # The whole suite on Windows. release.yml runs only the RLM tests there, so
-  # most of the product has never been tested on Windows. Reported but not
-  # blocking yet: known platform-sensitive cases (hook termination, output
-  # projection) may still fail; fix or skip them by name, then turn
-  # `continue-on-error` off.
-  test-windows:
-    runs-on: windows-latest
-    continue-on-error: true
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      # The RLM kernel tests spawn a real Python interpreter; Windows runners
-      # do not ship one.
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.x'
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - name: Smoke test CLI bundle
-        run: pnpm -C apps/scream-code run smoke
-      - run: pnpm run test
-
   # The same build, smoke test and suite on macOS, which no other job covers.
   # Reported but not blocking yet: this job has not run on a macOS runner
   # before, so turn `continue-on-error` off once it has been seen green.

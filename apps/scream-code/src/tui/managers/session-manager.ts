@@ -17,6 +17,7 @@ import {
   consumeInterruptedTurn,
   isSessionInUse,
   sessionHolder,
+  hostWorkInProgress,
   takeOverFromHost,
 } from '../utils/session-takeover';
 import { syncDiagramCapabilityPrompt } from '../utils/terminal-diagram-prompt';
@@ -113,6 +114,11 @@ export interface SessionManagerHost {
    * working on it. Absent (tests, headless hosts): never take over.
    */
   confirmTakeover?(sessionId: string): Promise<boolean>;
+  /**
+   * A session was taken over while the host was working on it: carry that
+   * work on here (drive the goal again, continue the turn). Absent: nothing.
+   */
+  continueTakenOverWork?(work: { readonly kind: string }): void;
 }
 
 /**
@@ -477,6 +483,8 @@ export class SessionManager {
 
   /** Set when the last `openSession` took its session over from the host. */
   private tookOver = false;
+  /** What the host was doing in it at that moment, if it was working. */
+  private takenOverWork: { readonly kind: string } | undefined;
 
   /**
    * Open a session (scheduled tasks held; see `startScheduledTasks`). When
@@ -501,8 +509,10 @@ export class SessionManager {
     if (holder.kind === 'host') {
       // `scream -r` / `-C` name the session outright: that is the decision.
       if (options.interactive && !((await this.host.confirmTakeover?.(sessionId)) ?? false)) return undefined;
+      const work = hostWorkInProgress(sessionId);
       if (!(await takeOverFromHost(sessionId))) throw new Error(t('session.takeover_failed'));
       this.tookOver = true;
+      this.takenOverWork = work;
     }
     return this.host.harness.resumeSession({ id: sessionId, scheduledTasks: false });
   }
@@ -517,9 +527,12 @@ export class SessionManager {
   /** Tell the person what they opened into: a take-over, or a turn that was cut off. */
   private noteOpenedSession(sessionId: string, when: 'startup' | 'switch'): void {
     const notes: string[] = [];
-    if (this.tookOver) notes.push(t('session.taken_over'));
+    const work = this.tookOver ? this.takenOverWork : undefined;
+    if (this.tookOver) notes.push(t(work === undefined ? 'session.taken_over' : 'session.taken_over_continuing'));
     else if (consumeInterruptedTurn(sessionId)) notes.push(t('session.interrupted_notice'));
     this.tookOver = false;
+    this.takenOverWork = undefined;
+    if (work !== undefined) this.host.continueTakenOverWork?.(work);
     if (notes.length === 0) return;
     const text = notes.join('\n');
     if (when === 'startup') {

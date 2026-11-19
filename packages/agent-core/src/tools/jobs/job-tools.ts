@@ -139,7 +139,7 @@ export class JobCreateTool implements BuiltinTool<JobCreateInput> {
             describeJob(job),
             running
               ? 'host: running — the task runs on schedule.'
-              : 'host: not running yet — it starts by itself the next time the person opens a terminal, and then keeps running after the terminal closes until the computer restarts. Tell the person: /service also starts it after a restart.',
+              : 'host: not running yet — an open terminal starts it within a minute (and a terminal opened later does too); it then keeps running after the terminal closes until the computer restarts. Tell the person: /service also starts it after a restart.',
             clockLines(nowMs),
           ].join('\n'),
         };

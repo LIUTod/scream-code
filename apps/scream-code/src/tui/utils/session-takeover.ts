@@ -32,6 +32,16 @@ export async function sessionHolder(sessionId: string): Promise<SessionHolder> {
   return { kind: 'other', pid };
 }
 
+/**
+ * What the host is working on in `sessionId` right now (its running-work
+ * record), read before taking it over: the terminal then carries that work
+ * on instead of leaving it stopped where the host let go.
+ */
+export function hostWorkInProgress(sessionId: string): { readonly kind: string } | undefined {
+  const record = readRunningWork(getDataDir(), sessionId);
+  return record === undefined ? undefined : { kind: record.kind };
+}
+
 /** Ask the background host to hand `sessionId` over; true once it let go. */
 export function takeOverFromHost(sessionId: string): Promise<boolean> {
   return requestSessionHandover(getDataDir(), sessionId);

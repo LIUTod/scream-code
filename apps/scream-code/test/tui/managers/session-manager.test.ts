@@ -32,8 +32,10 @@ const takeover = vi.hoisted(() => ({
   sessionHolder: vi.fn(async (): Promise<unknown> => ({ kind: 'none' })),
   takeOverFromHost: vi.fn(async (): Promise<boolean> => true),
   consumeInterruptedTurn: vi.fn((): boolean => false),
+  hostWorkInProgress: vi.fn((): { kind: string } | undefined => undefined),
 }));
 vi.mock('#/tui/utils/session-takeover', () => ({
+  hostWorkInProgress: takeover.hostWorkInProgress,
   isSessionInUse: (error: unknown) => (error as { code?: unknown } | undefined)?.code === 'session.in_use',
   sessionHolder: takeover.sessionHolder,
   takeOverFromHost: takeover.takeOverFromHost,
@@ -961,6 +963,23 @@ describe('SessionManager.resumeSession — a session another process holds', () 
     expect(takeover.takeOverFromHost).toHaveBeenCalledWith('ses-held');
     expect(result).toMatchObject({ switched: true });
     expect(host.showStatus).toHaveBeenCalledWith(t('session.taken_over'));
+  });
+
+  it('carries the work on when the host was working on the session it took over', async () => {
+    const resumed = makeMockSession({ id: 'ses-held' });
+    const harness = makeMockHarness({
+      resumeSession: vi.fn().mockRejectedValueOnce(inUse).mockResolvedValueOnce(resumed),
+    });
+    const { manager, host } = makeHost({ harness });
+    host.confirmTakeover = vi.fn(async () => true);
+    host.continueTakenOverWork = vi.fn();
+    takeover.sessionHolder.mockResolvedValueOnce({ kind: 'host', pid: 4242 });
+    takeover.hostWorkInProgress.mockReturnValueOnce({ kind: 'goal' });
+
+    await manager.resumeSession('ses-held');
+
+    expect(host.continueTakenOverWork).toHaveBeenCalledWith({ kind: 'goal' });
+    expect(host.showStatus).toHaveBeenCalledWith(t('session.taken_over_continuing'));
   });
 
   it('stays put when the person declines the take-over', async () => {

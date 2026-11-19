@@ -347,6 +347,12 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       this.lifecycleController.startEventLoop();
       try {
         await this.finishStartup(shouldReplayHistory);
+        this.startupFinished = true;
+        if (this.pendingTakeoverWork !== undefined) {
+          const work = this.pendingTakeoverWork;
+          this.pendingTakeoverWork = undefined;
+          this.continueTakenOverWork(work);
+        }
         // Register this instance, then report (once) any instance that never
         // shut down. Both are advisory: a marker problem must never block the UI.
         this.refreshRuntimeMarker();
@@ -565,7 +571,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     if (!goalActive && !isStreaming(this.state.appState)) return 'stop';
     let choice: 'handoff' | 'stop' | 'stay';
     if (fromSignal) {
-      choice = goalActive || this.state.appState.permissionMode === 'bot' ? 'handoff' : 'stop';
+      // Nobody can be asked (window closed, SSH dropped, OS shutdown): work in
+      // progress — a goal or a turn — goes to the background, which continues
+      // it, rather than stopping where the person left it.
+      choice = 'handoff';
     } else {
       choice = await new Promise((resolve) => {
         const picker = new ChoicePickerComponent({
@@ -612,6 +621,36 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     } catch (error) {
       return t('exit.handoff_failed', { error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  /** Taken-over work waiting for startup to finish before it continues. */
+  private pendingTakeoverWork: { readonly kind: string } | undefined;
+  private startupFinished = false;
+
+  /**
+   * The person took a session over while the host was working on it: carry
+   * the work on here instead of leaving it where the host let go. A goal was
+   * paused by the handover (reopening pauses it); drive it again, then
+   * continue the turn. During startup this waits until the UI is up.
+   */
+  continueTakenOverWork(work: { readonly kind: string }): void {
+    if (!this.startupFinished) {
+      this.pendingTakeoverWork = work;
+      return;
+    }
+    void (async () => {
+      const session = this.session;
+      if (session === undefined) return;
+      if (work.kind === 'goal') {
+        try {
+          const goal = (await session.getGoal()).goal;
+          if (goal?.status === 'paused') await session.updateGoalStatus('active');
+        } catch {
+          // The continuation below still runs.
+        }
+      }
+      this.sendNormalUserInput(t('session.takeover_continue_prompt'));
+    })();
   }
 
   /**

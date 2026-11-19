@@ -217,6 +217,40 @@ describe('ScreamTUI signal handlers', () => {
     driver.unregisterSignalHandlers();
   });
 
+  it('hands an unfinished plain turn to the background when nobody can be asked, and /exit works mid-turn', async () => {
+    const { driver, tui } = makeDriver();
+    const handOff = vi.fn(async () => ({ handedOff: true }));
+    const internals = tui as unknown as {
+      session: unknown;
+      state: { appState: { streamingPhase: string; goal: unknown; permissionMode: string } };
+      decideExitHandoff(fromSignal: boolean): Promise<string>;
+    };
+    internals.session = { handOff };
+    internals.state.appState.streamingPhase = 'streaming';
+    internals.state.appState.goal = undefined;
+    internals.state.appState.permissionMode = 'auto';
+    expect(await internals.decideExitHandoff(true)).toBe('handoff');
+    expect(handOff).toHaveBeenCalled();
+    const { BUILTIN_SLASH_COMMANDS } = await import('#/tui/commands/registry');
+    expect((BUILTIN_SLASH_COMMANDS as readonly { name: string; availability?: unknown }[]).find((c) => c.name === 'exit')?.availability).toBe('always');
+    driver.unregisterSignalHandlers();
+  });
+
+  it('carries taken-over work on: drives a paused goal again, then continues the turn', async () => {
+    const { tui } = makeDriver();
+    const updateGoalStatus = vi.fn(async () => null);
+    const internals = tui as unknown as { session: unknown; startupFinished: boolean };
+    internals.session = { getGoal: async () => ({ goal: { status: 'paused' } }), updateGoalStatus };
+    internals.startupFinished = true;
+    const send = vi.spyOn(tui, 'sendNormalUserInput').mockImplementation(() => {});
+    tui.continueTakenOverWork({ kind: 'goal' });
+    await vi.waitFor(() => {
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+    expect(updateGoalStatus).toHaveBeenCalledWith('active');
+    send.mockRestore();
+  });
+
   it('SIGTERM handler falls back to emergency exit (code 143) when stop() rejects', async () => {
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
     const { driver, tui } = makeDriver();

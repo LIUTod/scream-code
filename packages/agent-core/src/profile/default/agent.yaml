@@ -38,6 +38,12 @@ tools:
   - CronCreate
   - CronList
   - CronDelete
+  # Background jobs: always offered to the main agent (not behind the
+  # DiscoverTools portal). Constructed for main agents with a Scream home only,
+  # so a subagent profile listing them would receive nothing.
+  - JobCreate
+  - JobList
+  - JobDelete
   # Meta tool for on-demand MCP tools (server `exposure: on-demand`, the
   # default): withheld tool schemas stay out of every request until the model
   # enables specific ones through this tool.

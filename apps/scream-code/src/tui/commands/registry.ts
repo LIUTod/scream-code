@@ -422,6 +422,9 @@ export const BUILTIN_SLASH_COMMANDS = [
     aliases: ['quit', 'q'],
     description: 'registry.exit_desc',
     priority: 10,
+    // Usable mid-turn: quitting while work runs is exactly when the
+    // "hand it to the background?" question matters.
+    availability: 'always',
   },
 ] as const satisfies readonly ScreamSlashCommand[];
 

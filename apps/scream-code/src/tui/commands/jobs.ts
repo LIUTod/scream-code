@@ -26,7 +26,7 @@ import {
   type Job,
 } from '@scream-code/scream-code-sdk';
 
-import { readHostStatus, wakeHost } from '#/host/control';
+import { readHostStatus, startHostDetached, wakeHost } from '#/host/control';
 import { pauseAllBackgroundWork } from '#/host/pause-all';
 import { addSelfReviewJob, isSelfReviewJob, selfReviewPrompt } from '#/host/self-review';
 import { loadLastChat } from '#/line/session-driver';
@@ -134,7 +134,12 @@ export async function handleJobsCommand(host: SlashCommandHost, args: string): P
 
 async function openJobsPanel(host: SlashCommandHost): Promise<void> {
   const jobs = store().list();
-  const hostStatus = await readHostStatus();
+  let hostStatus = await readHostStatus();
+  if (jobs.some((job) => job.enabled) && !hostStatus.running) {
+    // Jobs need the background: start it rather than only saying so.
+    await startHostDetached().catch(() => undefined);
+    hostStatus = await readHostStatus();
+  }
   let reminderCount = 0;
   try {
     reminderCount = (await host.session?.listCronTasks())?.length ?? 0;
@@ -419,8 +424,22 @@ export async function enableSelfReview(host: SlashCommandHost): Promise<void> {
     const chat = await loadLastChat().catch(() => undefined);
     await addSelfReviewJob(getDataDir(), { deliverTo: chat });
     host.showStatus(t('jobs.self_review_enabled'));
+    await ensureBackground(host);
   } catch (error) {
     host.showError(error instanceof JobError ? error.message : formatErrorMessage(error));
+  }
+}
+
+/**
+ * A job just made runs in the background: start it now when it is not up,
+ * rather than telling the person to. Only a failed start is reported.
+ */
+async function ensureBackground(host: SlashCommandHost): Promise<void> {
+  if ((await readHostStatus()).running) return;
+  try {
+    await startHostDetached();
+  } catch {
+    host.showStatus(t('jobs.host_not_running'), host.state.theme.colors.warning);
   }
 }
 
@@ -456,7 +475,7 @@ async function newJobWizard(host: SlashCommandHost): Promise<void> {
       createdBy: 'person',
     });
     host.showStatus(t('jobs.created', { title: job.title, next: job.nextRunAt === undefined ? '—' : localTime(job.nextRunAt) }));
-    if (!(await readHostStatus()).running) host.showStatus(t('jobs.host_not_running'), host.state.theme.colors.warning);
+    await ensureBackground(host);
   } catch (error) {
     host.showError(error instanceof JobError ? error.message : formatErrorMessage(error));
   }
