@@ -40,6 +40,20 @@ const stdioFixture = join(here, 'fixtures', 'mock-stdio-server.mjs');
 const slowStdioFixture = join(here, 'fixtures', 'slow-stdio-server.mjs');
 const crashAfterConnectFixture = join(here, 'fixtures', 'crash-after-connect-stdio-server.mjs');
 const stderrThenExitFixture = join(here, 'fixtures', 'stderr-then-exit-stdio-server.mjs');
+/**
+ * Budget for a turn that is expected to *finish*, not to stay blocked.
+ *
+ * The startup gate is allowed to hold the first step for each server's own
+ * `startupTimeoutMs` (2s where it is configured explicitly) and the turn caps
+ * the aggregate wait at 10s, so anything under that is legitimate startup
+ * latency rather than a defect. A contended macOS CI runner — spawning node,
+ * importing the MCP SDK and sleeping the fixture's 250ms under load — has been
+ * observed past one second, so a 1s budget turned a correctness assertion into
+ * a wall-clock assertion and went red. This is deliberately generous: the
+ * property under test is ordering (no model call before startup completes),
+ * and it still fails if the turn never ends.
+ */
+const TURN_ENDED_BUDGET_MS = 5_000;
 const MOCK_PROVIDER: ProviderConfig = {
   type: 'scream',
   apiKey: 'test-key',
@@ -874,7 +888,7 @@ describe('Session MCP startup', () => {
 
       await Promise.race([
         turnEnded,
-        sleep(1_000).then(() => {
+        sleep(TURN_ENDED_BUDGET_MS).then(() => {
           throw new Error('Timed out waiting for turn.ended');
         }),
       ]);
@@ -886,7 +900,7 @@ describe('Session MCP startup', () => {
       await session.close();
       await rm(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
     }
-  }, 7000);
+  }, TURN_ENDED_BUDGET_MS + 5_000);
 
   it('emits tool.list.updated(mcp.disconnected) when reconnect drops the live tools', async () => {
     const tmp = await mkdtemp(join(tmpdir(), 'scream-session-mcp-reconnect-'));
