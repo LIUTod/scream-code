@@ -148,6 +148,10 @@ export class EditorKeyboardController {
     editor.onCtrlR = () => {
       const last = sessionToResume(host.state);
       if (last === undefined) return false;
+      // Immediate feedback: a large session takes a few seconds to replay, and
+      // with no signal the keypress feels ignored. This status line is replaced
+      // by `session.resumed` once switchToSession finishes (or by an error).
+      host.showStatus(t('session.resuming'));
       void host.resumeSession(last.id).catch((error: unknown) => {
         host.showError(error instanceof Error ? error.message : String(error));
       });

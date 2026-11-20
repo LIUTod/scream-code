@@ -921,6 +921,8 @@ export const zh: Record<string, string> = {
   'session.switch_streaming': '流式传输期间无法切换会话 — 请先按 Esc 或 Ctrl-C。',
   'session.switch_replaying': '历史回放期间无法切换会话。',
   'session.resume_failed': '恢复会话 {sessionId} 失败：{msg}',
+  'session.resuming': '正在恢复会话…',
+  'session.resume_cancelled': '已取消恢复会话。',
   'session.resumed': '已恢复会话 ({sessionId})。',
   'session.replay_failed': '重放会话历史失败：{msg}',
   'session.resume_warning': '警告：{warning}',

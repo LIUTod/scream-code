@@ -5,6 +5,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { t } from '@scream-code/config';
+
 import { EditorKeyboardController } from '#/tui/controllers/editor-keyboard';
 
 function createHarness(opts: {
@@ -40,7 +42,7 @@ function createHarness(opts: {
     showStatus: vi.fn(),
   };
   new EditorKeyboardController(host as never, {} as never).install();
-  return { press: () => editor.onCtrlR?.() ?? false, resumeSession };
+  return { press: () => editor.onCtrlR?.() ?? false, resumeSession, showStatus: host.showStatus };
 }
 
 describe('EditorKeyboardController — Ctrl+R resumes the last conversation', () => {
@@ -48,6 +50,17 @@ describe('EditorKeyboardController — Ctrl+R resumes the last conversation', ()
     const h = createHarness({});
     expect(h.press()).toBe(true);
     expect(h.resumeSession).toHaveBeenCalledWith('last');
+  });
+
+  it('shows a "resuming" status immediately, before the async resume settles', () => {
+    // A large session replays for a few seconds; the keypress must feel seen
+    // right away, not after the replay. The status line goes up synchronously
+    // in the key handler, ahead of the async resumeSession promise.
+    const h = createHarness({});
+    h.press();
+    expect(h.showStatus).toHaveBeenCalledWith(t('session.resuming'));
+    // …and the immediate status precedes the async resume work.
+    expect(h.showStatus.mock.invocationCallOrder[0]).toBeLessThan(h.resumeSession.mock.invocationCallOrder[0] ?? 0);
   });
 
   it('leaves the key alone after the start, mid-chat, or with nothing to resume', () => {

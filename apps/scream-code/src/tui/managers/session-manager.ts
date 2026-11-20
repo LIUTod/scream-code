@@ -494,7 +494,13 @@ export class SessionManager {
       this.host.showError(t('session.resume_failed', { sessionId: targetSessionId, msg }));
       return { switched: false };
     }
-    if (session === undefined) return { switched: false, blocked: true };
+    if (session === undefined) {
+      // The person declined to take the session over from the background host.
+      // Clear the "resuming" status a Ctrl+R press just showed — otherwise it
+      // would stay stuck on the status bar with nothing left to replace it.
+      this.host.showStatus(t('session.resume_cancelled'));
+      return { switched: false, blocked: true };
+    }
 
     await this.switchToSession(session, t('session.resumed', { sessionId: session.id }));
     this.noteOpenedSession(session.id, 'switch');
@@ -595,6 +601,10 @@ export class SessionManager {
         /* keep the switched session usable even if dynamic skills fail */
       }
       this.host.clearTranscriptAndRedraw();
+      // clearTranscript wiped the Ctrl+R "resuming" status along with the old
+      // transcript. Re-show it now so the slowest step — the history replay
+      // right below — has visible feedback instead of a blank screen.
+      this.host.showStatus(t('session.resuming'));
       try {
         await this.host.sessionReplay.hydrateFromReplay(session);
       } catch (error) {

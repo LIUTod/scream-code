@@ -922,6 +922,8 @@ export const en: Record<string, string> = {
   'session.switch_streaming': 'Cannot switch session during streaming — press Esc or Ctrl-C first.',
   'session.switch_replaying': 'Cannot switch session during history replay.',
   'session.resume_failed': 'Failed to resume session {sessionId}: {msg}',
+  'session.resuming': 'Resuming session…',
+  'session.resume_cancelled': 'Resume cancelled.',
   'session.resumed': 'Session resumed ({sessionId}).',
   'session.replay_failed': 'Failed to replay session history: {msg}',
   'session.resume_warning': 'Warning: {warning}',
