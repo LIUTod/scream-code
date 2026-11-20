@@ -502,7 +502,7 @@ export class SessionManager {
       return { switched: false, blocked: true };
     }
 
-    await this.switchToSession(session, t('session.resumed', { sessionId: session.id }));
+    await this.switchToSession(session, t('session.resumed', { sessionId: session.id }), t('session.resuming'));
     this.noteOpenedSession(session.id, 'switch');
     return { switched: true };
   }
@@ -585,7 +585,7 @@ export class SessionManager {
     }
   }
 
-  async switchToSession(session: Session, statusMessage: string): Promise<void> {
+  async switchToSession(session: Session, statusMessage: string, progressMessage?: string): Promise<void> {
     if (this.host.state.appState.isSwitchingSession) {
       return;
     }
@@ -601,10 +601,11 @@ export class SessionManager {
         /* keep the switched session usable even if dynamic skills fail */
       }
       this.host.clearTranscriptAndRedraw();
-      // clearTranscript wiped the Ctrl+R "resuming" status along with the old
+      // clearTranscript wiped the progress status along with the old
       // transcript. Re-show it now so the slowest step — the history replay
-      // right below — has visible feedback instead of a blank screen.
-      this.host.showStatus(t('session.resuming'));
+      // right below — has visible feedback instead of a blank screen. Only the
+      // resume path passes a progress message; /fork has nothing to report.
+      if (progressMessage !== undefined) this.host.showStatus(progressMessage);
       try {
         await this.host.sessionReplay.hydrateFromReplay(session);
       } catch (error) {
