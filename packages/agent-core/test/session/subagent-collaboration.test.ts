@@ -854,9 +854,11 @@ describe('subagent collaboration integration', () => {
     expect(output.output).toContain('status: backgrounded');
     expect(output.output).toContain('task_id: task-42');
     expect(output.output).not.toContain('status: completed');
-    // The request path names the reply route for the still-running child.
+    // The request path names the reply route for the still-running child, and
+    // must not steer the model into polling — the contract forbids it.
     expect(output.output).toContain('SendSubagentMessage');
-    expect(output.output).toContain('TaskOutput(task_id="task-42", block=true)');
+    expect(output.output).toContain('no polling needed');
+    expect(output.output).not.toContain('block=true');
     expect(backgroundManager.registerAgentTask).toHaveBeenCalledWith(
       expect.anything(),
       'needs input',

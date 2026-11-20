@@ -710,7 +710,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     const nextStep =
       reason.kind === 'timeout'
         ? `next_step: The subagent exceeded the foreground timeout (${reason.timeoutMs}ms) and was moved to the background instead of being aborted. Its completion arrives automatically in a later turn — no polling needed. To peek at progress without blocking, call TaskOutput(task_id="${taskId}", block=false).`
-        : `next_step: The subagent raised a request and was moved to the background so you can answer it in real time. The request text arrives with the subagent message at your next step boundary. Reply with SendSubagentMessage — the subagent keeps running and a steer lands inside its live turn (operation "interject" if it must be read immediately, e.g. it is stuck in a long tool call). Its completion arrives automatically in a later turn; to wait for it without polling, call TaskOutput(task_id="${taskId}", block=true).`;
+        : `next_step: The subagent raised a request and was moved to the background so you can answer it in real time. The request text arrives with the subagent message at your next step boundary. Reply with SendSubagentMessage — the subagent keeps running and a steer lands inside its live turn (operation "interject" if it must be read immediately, e.g. it is stuck in a long tool call). Its completion arrives automatically in a later turn — no polling needed; if you have nothing else to do, use the Wait tool to wait for it.`;
     return {
       kind: 'backgrounded',
       output: [

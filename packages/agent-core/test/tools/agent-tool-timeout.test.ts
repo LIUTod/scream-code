@@ -291,10 +291,12 @@ describe('AgentTool foreground request arrival → background handoff', () => {
     expect(output.output).toContain('status: backgrounded');
     expect(output.output).toContain('task_id: task-7');
     expect(output.output).not.toContain('status: completed');
-    // The request path tells the parent how to answer the still-running child.
+    // The request path tells the parent how to answer the still-running child,
+    // and must not steer it into polling — the contract forbids that.
     expect(output.output).toContain('SendSubagentMessage');
     expect(output.output).toContain('interject');
-    expect(output.output).toContain('TaskOutput(task_id="task-7", block=true)');
+    expect(output.output).toContain('no polling needed');
+    expect(output.output).not.toContain('block=true');
     expect(registerAgentTask).toHaveBeenCalledWith(
       completion.promise,
       'needs input',
