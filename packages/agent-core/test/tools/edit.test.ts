@@ -1951,7 +1951,16 @@ describe('EditTool file_diff display', () => {
     const after = await readFile(path, 'utf8');
     expect(after).toBe('const a = 1;\nconst b = 20;\nconst c = 3;\n');
     expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 1 });
-    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 1 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 1, removed: 1 });
+    // The changed lines at their real line numbers; the old text came with the
+    // call (old_string), so the deletion carries it.
+    expect(result.display).toMatchObject({
+      preview: [
+        { kind: 'delete', line: 2, text: 'const b = 2;' },
+        { kind: 'add', line: 2, text: 'const b = 20;' },
+      ],
+      previewTotal: 2,
+    });
   });
 
   it('counts every occurrence for replace_all instead of a single replacement', async () => {
@@ -1971,7 +1980,7 @@ describe('EditTool file_diff display', () => {
     const after = await readFile(path, 'utf8');
     expect(after).toBe('const a = NEW;\nconst b = NEW;\nconst c = NEW;\n');
     expect(fileDiffSummary(before, after)).toEqual({ added: 3, removed: 3 });
-    expect(result.display).toEqual({ kind: 'file_diff', added: 3, removed: 3 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 3, removed: 3 });
   });
 
   it('diffs the text actually written for a CRLF file', async () => {
@@ -1990,7 +1999,7 @@ describe('EditTool file_diff display', () => {
     const after = await readFile(path, 'utf8');
     expect(after).toBe('alpha\r\nbravo\r\nbravo2\r\ncharlie\r\n');
     expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 0 });
-    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 0 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 1, removed: 0 });
   });
 
   it('reports the whole-file delta when the edit rewrites many lines', async () => {
@@ -2009,7 +2018,7 @@ describe('EditTool file_diff display', () => {
     const after = await readFile(path, 'utf8');
     expect(after).toBe('one\nTWO\nfive\n');
     expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 3 });
-    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 3 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 1, removed: 3 });
   });
 
   it('omits the display when the edit fails', async () => {
@@ -2067,7 +2076,16 @@ describe('EditTool file_diff display', () => {
     const after = await readFile(path, 'utf8');
     expect(after).toBe('one\nX\nfive\n');
     expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 3 });
-    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 3 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 1, removed: 3 });
+    // A line-range edit never had the old text in its arguments: the deleted
+    // lines keep their numbers only, so the session log gains no file content.
+    const preview = (result.display as { preview?: { kind: string; line: number; text?: string }[] }).preview ?? [];
+    expect(preview.filter((row) => row.kind === 'delete').map((row) => [row.line, row.text])).toEqual([
+      [2, undefined],
+      [3, undefined],
+      [4, undefined],
+    ]);
+    expect(preview.filter((row) => row.kind === 'add')).toEqual([{ kind: 'add', line: 2, text: 'X' }]);
   });
 });
 

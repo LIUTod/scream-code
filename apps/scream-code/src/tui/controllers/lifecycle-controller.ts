@@ -98,8 +98,8 @@ export interface LifecycleControllerHost {
   onHangup?(): void;
   showStatus(message: string, color?: string): void;
   showNotice(title: string, detail?: string): void;
-  applyResolvedAutoTheme(resolved: ResolvedTheme): void;
-  applyTheme(theme: Theme, resolved?: ResolvedTheme): void;
+  applyResolvedAutoTheme(resolved: ResolvedTheme, background?: string): void;
+  applyTheme(theme: Theme, resolved?: ResolvedTheme, background?: string): void;
   updateActivityPane(): void;
   setAppState(patch: Partial<AppState>): void;
   updateEditorBorderHighlight(text?: string): void;
@@ -734,9 +734,12 @@ export class LifecycleController {
     this.stopTerminalThemeTracking();
     if (this.host.state.appState.theme !== 'auto') return;
 
-    this.terminalThemeTrackingDispose = installTerminalThemeTracking(this.host.state, (resolved) => {
-      this.host.applyResolvedAutoTheme(resolved);
-    });
+    this.terminalThemeTrackingDispose = installTerminalThemeTracking(
+      this.host.state,
+      (resolved, background) => {
+        this.host.applyResolvedAutoTheme(resolved, background);
+      },
+    );
   }
 
   private stopTerminalThemeTracking(): void {
@@ -750,11 +753,12 @@ export class LifecycleController {
     this.terminalFocusTrackingDispose = undefined;
   }
 
-  applyTheme(theme: Theme, resolved?: ResolvedTheme): void {
-    const nextTheme = createScreamTUIThemeBundle(theme, resolved);
+  applyTheme(theme: Theme, resolved?: ResolvedTheme, background?: string): void {
+    const nextTheme = createScreamTUIThemeBundle(theme, resolved, background);
     const { state } = this.host;
     Object.assign(state.theme.colors, nextTheme.colors);
     state.theme.resolvedTheme = nextTheme.resolvedTheme;
+    state.theme.backgroundHex = nextTheme.backgroundHex;
     state.theme.styles = nextTheme.styles;
     state.theme.markdownTheme = nextTheme.markdownTheme;
     // The palette is mutated in place, so the wave's cached frame still holds

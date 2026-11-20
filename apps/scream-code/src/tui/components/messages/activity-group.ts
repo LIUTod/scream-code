@@ -22,6 +22,7 @@
  *   row used to show, sourced from the shared speed tracker.
  */
 
+import { editPreviewOf, previewRowCount, renderEditPreview, type EditPreview } from './edit-preview';
 import type { Component, TUI } from '@liutod-scream/pi-tui';
 import { Container, Spacer, Text, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
@@ -59,6 +60,7 @@ const STATUS_WIDTH = 2;
 const BRANCH_FIRST = '  ├─ ';
 const BRANCH_LAST = '  └─ ';
 const BRANCH_PIPE = '  │  ';
+const BRANCH_CORNER = '  └  ';
 const TREE_PIPE_ROW = '  │';
 const THINKING_BODY_PREFIX = '     ';
 /**
@@ -608,24 +610,63 @@ export class ActivityGroupComponent extends Container {
 
   /**
    * Collapsed state: the newest steps of the timeline, kept in chronological
-   * order so the block still reads top-down. Reasoning runs and tool calls share
-   * the same row budget — by default the newest step plus the reasoning run that
-   * led to it.
+   * order so the block still reads top-down. Reasoning runs, tool calls and the
+   * inline edit previews (the changed lines under an Edit / Write row) share
+   * one row budget, filled from the newest step back: every edit shows its
+   * preview, cut to what is left (the newest even with a single row left).
+   * Previews stay inside the tree: under the last row the tree goes on as a
+   * pipe and closes with a corner on the preview's last line.
    */
   private buildCollapsedRows(width: number): void {
-    const budget = Math.max(1, getActivityLines().collapsed - 1);
-    const shown = this.segments.slice(Math.max(0, this.segments.length - budget));
-    shown.forEach((segment, index) => {
-      const isLast = index === shown.length - 1;
+    const { collapsed, editPreview } = getActivityLines();
+    let rowsLeft = Math.max(1, collapsed - 1);
+    const picked: { segment: BlockSegment; preview: EditPreview | undefined; previewRows: number }[] = [];
+    let previewGiven = false;
+    for (let index = this.segments.length - 1; index >= 0 && rowsLeft > 0; index -= 1) {
+      const segment = this.segments[index] as BlockSegment;
+      rowsLeft -= 1;
+      let preview: EditPreview | undefined;
+      let previewRows = 0;
+      if (segment.kind === 'tool' && editPreview > 0 && rowsLeft > 0) {
+        preview = editPreviewOf(segment.tc.toolCallView, segment.tc.resultView);
+        if (preview !== undefined) {
+          const wanted = previewRowCount(preview, editPreview);
+          if (wanted <= rowsLeft) {
+            previewRows = editPreview;
+          } else if (!previewGiven || rowsLeft >= 2) {
+            // Cut to what is left, one row kept for the "… N more" count; the
+            // newest edit keeps a preview even when only one row is left.
+            previewRows = Math.max(1, rowsLeft - 1);
+          }
+          if (previewRows > 0) {
+            rowsLeft -= Math.min(rowsLeft, previewRowCount(preview, previewRows));
+            previewGiven = true;
+          } else {
+            preview = undefined;
+          }
+        }
+      }
+      picked.push({ segment, preview, previewRows });
+    }
+    picked.reverse();
+    picked.forEach(({ segment, preview, previewRows }, index) => {
+      const isLast = index === picked.length - 1;
       if (segment.kind === 'tool') {
         const row = this.toolRow(segment.tc, width, ACTIVITY_GROUP_TOOL_PREVIEW_LINES, !this.running);
+        const lines = preview === undefined ? [] : renderEditPreview(preview, previewRows, width, this.colors, BRANCH_PIPE);
+        // A last row with a preview keeps the tree open (├─ / │) and closes it
+        // on the preview's last line, so the changed lines sit inside the frame.
         this.bodyContainer.addChild(
           new Text(
-            `${isLast ? BRANCH_LAST : BRANCH_FIRST}${this.statusGlyph(row)} ${row.header}`,
+            `${isLast && lines.length === 0 ? BRANCH_LAST : BRANCH_FIRST}${this.statusGlyph(row)} ${row.header}`,
             0,
             0,
           ),
         );
+        lines.forEach((line, lineIndex) => {
+          const closing = isLast && lineIndex === lines.length - 1;
+          this.bodyContainer.addChild(new Text(closing ? BRANCH_CORNER + line.slice(BRANCH_PIPE.length) : line, 0, 0));
+        });
         return;
       }
       if (segment.kind === 'notice') {

@@ -61,12 +61,13 @@ describe("terminal theme tracking", () => {
     expect(handleTerminalThemeInput(DARK_OSC11_REPORT, terminal, onTheme)).toEqual({
       consume: true,
     });
-    expect(onTheme).toHaveBeenLastCalledWith("dark");
+    // The ground rides along with the mode: surfaces are derived from it.
+    expect(onTheme).toHaveBeenLastCalledWith("dark", "#282c34");
 
     expect(handleTerminalThemeInput(LIGHT_OSC11_REPORT, terminal, onTheme)).toEqual({
       consume: true,
     });
-    expect(onTheme).toHaveBeenLastCalledWith("light");
+    expect(onTheme).toHaveBeenLastCalledWith("light", "#fafbfc");
 
     expect(handleTerminalThemeInput("x", terminal, onTheme)).toBeUndefined();
     expect(handleTerminalThemeInput("]", terminal, onTheme)).toBeUndefined();
@@ -82,7 +83,7 @@ describe("terminal theme tracking", () => {
       data: "ab",
     });
 
-    expect(onTheme).toHaveBeenCalledWith("dark");
+    expect(onTheme).toHaveBeenCalledWith("dark", "#282c34");
     expect(terminal.write).not.toHaveBeenCalled();
   });
 
@@ -99,7 +100,7 @@ describe("terminal theme tracking", () => {
     expect(handleTerminalThemeInput("434\u0007", terminal, onTheme, inputState)).toEqual({
       consume: true,
     });
-    expect(onTheme).toHaveBeenCalledWith("dark");
+    expect(onTheme).toHaveBeenCalledWith("dark", "#282c34");
     expect(inputState.osc11Buffer).toBe("");
   });
 
@@ -115,7 +116,7 @@ describe("terminal theme tracking", () => {
     expect(handleTerminalThemeInput("434\u0007x", terminal, onTheme, inputState)).toEqual({
       data: "x",
     });
-    expect(onTheme).toHaveBeenCalledWith("dark");
+    expect(onTheme).toHaveBeenCalledWith("dark", "#282c34");
     expect(inputState.osc11Buffer).toBe("");
   });
 
@@ -150,7 +151,7 @@ describe("terminal theme tracking", () => {
     expect(onTheme).not.toHaveBeenCalled();
 
     expect(listeners[0]?.("434\u0007")).toEqual({ consume: true });
-    expect(onTheme).toHaveBeenCalledWith("dark");
+    expect(onTheme).toHaveBeenCalledWith("dark", "#282c34");
 
     dispose();
 

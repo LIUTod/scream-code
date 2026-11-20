@@ -565,7 +565,7 @@ describe('WriteTool file_diff display', () => {
     expect(result.isError).toBeFalsy();
     if (result.isError === true) throw new Error('expected success result');
     expect(await readFile(path, 'utf8')).toBe(content);
-    expect(result.display).toEqual({ kind: 'file_diff', added: 3, removed: 0 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 3, removed: 0 });
   });
 
   it('reports an append as pure additions of the appended text', async () => {
@@ -581,7 +581,7 @@ describe('WriteTool file_diff display', () => {
     expect(result.isError).toBeFalsy();
     if (result.isError === true) throw new Error('expected success result');
     expect(await readFile(path, 'utf8')).toBe('first\nsecond\nthird\n');
-    expect(result.display).toEqual({ kind: 'file_diff', added: 2, removed: 0 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 2, removed: 0 });
   });
 
   it('reports an append that rewrites an unterminated last line', async () => {
@@ -600,7 +600,15 @@ describe('WriteTool file_diff display', () => {
     expect(result.isError).toBeFalsy();
     if (result.isError === true) throw new Error('expected success result');
     expect(await readFile(path, 'utf8')).toBe('firstsecond\nthird\n');
-    expect(result.display).toEqual({ kind: 'file_diff', added: 2, removed: 1 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 2, removed: 1 });
+    // The replaced text is never carried; the written lines are, numbered.
+    expect(result.display).toMatchObject({
+      preview: [
+        { kind: 'delete', line: 1, text: undefined },
+        { kind: 'add', line: 1, text: 'firstsecond' },
+        { kind: 'add', line: 2, text: 'third' },
+      ],
+    });
   });
 
   it('reports an append to a nonexistent file as pure additions', async () => {
@@ -615,7 +623,7 @@ describe('WriteTool file_diff display', () => {
     expect(result.isError).toBeFalsy();
     if (result.isError === true) throw new Error('expected success result');
     expect(await readFile(path, 'utf8')).toBe('only line\n');
-    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 0 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 1, removed: 0 });
   });
 
   it('diffs an overwrite against the real previous contents', async () => {
@@ -632,7 +640,7 @@ describe('WriteTool file_diff display', () => {
     const after = await readFile(path, 'utf8');
     expect(after).toBe(content);
     expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 2 });
-    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 2 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 1, removed: 2 });
   });
 
   it('reports an empty overwrite of a non-empty file as pure removals', async () => {
@@ -648,7 +656,7 @@ describe('WriteTool file_diff display', () => {
     const after = await readFile(path, 'utf8');
     expect(after).toBe('');
     expect(fileDiffSummary(before, after)).toEqual({ added: 0, removed: 2 });
-    expect(result.display).toEqual({ kind: 'file_diff', added: 0, removed: 2 });
+    expect(result.display).toMatchObject({ kind: 'file_diff', added: 0, removed: 2 });
   });
 
   it('omits the display when the line diff exceeds its budget', async () => {

@@ -83,3 +83,79 @@ export function fileDiffSummary(
   }
   return { added, removed };
 }
+
+/** One changed line for the UI's inline preview (a 1-based file line number). */
+export interface FileDiffPreviewRow {
+  readonly kind: 'add' | 'delete';
+  readonly line: number;
+  /** The line's text; absent for a deletion whose text the call did not carry. */
+  readonly text?: string | undefined;
+}
+
+/** Changed lines kept for the preview; the UI shows fewer and counts the rest. */
+export const FILE_DIFF_PREVIEW_ROWS = 12;
+const FILE_DIFF_PREVIEW_CHARS = 200;
+
+function splitPartLines(value: string): string[] {
+  if (value.length === 0) return [];
+  const lines = value.split('\n');
+  if (value.endsWith('\n')) lines.pop();
+  return lines;
+}
+
+/**
+ * `fileDiffSummary` plus the first changed lines with their real line numbers
+ * (old numbering for deletions, new numbering for additions), in one diff.
+ *
+ * Text privacy: added lines come from the call's own arguments (new_string /
+ * content), so carrying them puts nothing new in the session log. Deleted
+ * text is carried only when `deletedText` says the call's arguments held it
+ * (Edit's old_string); otherwise a deletion keeps its line number alone, so an
+ * overwrite never copies the replaced file into the log.
+ */
+export function fileDiffDetails(
+  before: string,
+  after: string,
+  options: { readonly deletedText: boolean },
+):
+  | {
+      added: number;
+      removed: number;
+      preview: FileDiffPreviewRow[];
+      previewTotal: number;
+    }
+  | undefined {
+  if (before.length > MAX_DIFF_CHARS || after.length > MAX_DIFF_CHARS) return undefined;
+  const parts = diffLinesWithBudget(before, after, { timeout: DIFF_BUDGET_MS });
+  if (parts === undefined) return undefined;
+
+  let added = 0;
+  let removed = 0;
+  let oldLine = 1;
+  let newLine = 1;
+  const preview: FileDiffPreviewRow[] = [];
+  const clip = (text: string): string =>
+    text.length > FILE_DIFF_PREVIEW_CHARS ? `${text.slice(0, FILE_DIFF_PREVIEW_CHARS)}…` : text;
+  for (const part of parts) {
+    const lines = splitPartLines(part.value);
+    if (part.added) {
+      for (const text of lines) {
+        if (preview.length < FILE_DIFF_PREVIEW_ROWS) preview.push({ kind: 'add', line: newLine, text: clip(text) });
+        newLine += 1;
+      }
+      added += lines.length;
+    } else if (part.removed) {
+      for (const text of lines) {
+        if (preview.length < FILE_DIFF_PREVIEW_ROWS) {
+          preview.push({ kind: 'delete', line: oldLine, text: options.deletedText ? clip(text) : undefined });
+        }
+        oldLine += 1;
+      }
+      removed += lines.length;
+    } else {
+      oldLine += lines.length;
+      newLine += lines.length;
+    }
+  }
+  return { added, removed, preview, previewTotal: added + removed };
+}

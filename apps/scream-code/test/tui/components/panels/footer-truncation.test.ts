@@ -84,10 +84,10 @@ describe('FooterComponent - item fitting', () => {
     const row2 = strip(line2!);
     expect(visibleWidth(line2!)).toBe(190);
     expect(row2).not.toContain('…');
-    expect(row2.startsWith('↓ 缓存命中: --')).toBe(true);
+    expect(row2.startsWith('↓ Cache hit: --')).toBe(true);
     // cache hit → plan → rlm → wolfpack → goal → counters → channel
     let previous = -1;
-    for (const token of ['缓存命中:', '计划', 'RLM', '群狼', '目标 3m · 7轮', '后台任务 x2 · 后台Agent x3', 'Line: 未连接']) {
+    for (const token of ['Cache hit:', '计划', 'RLM', '群狼', '目标 3m · 7轮', '后台任务 x2 · 后台Agent x3', 'Line: Disconnected']) {
       const at = row2.indexOf(token);
       expect(at, `missing or out of order: ${token}`).toBeGreaterThan(previous);
       previous = at;
@@ -243,12 +243,12 @@ describe('FooterComponent - line 2 fitting', () => {
     for (let width = 24; width <= 120; width++) {
       const row = row2(footer, width);
       const hasAllSwitches = row.includes('计划') && row.includes('RLM') && row.includes('群狼');
-      if (row.includes('缓存命中:')) {
+      if (row.includes('Cache hit:')) {
         sawFull = true;
         // The long label only survives while every switch is still shown.
         expect(hasAllSwitches, `width ${String(width)}`).toBe(true);
       }
-      if (row.includes('↓ 缓存 ') && hasAllSwitches) sawShortWithAllSwitches = true;
+      if (row.includes('↓ Cache ') && hasAllSwitches) sawShortWithAllSwitches = true;
     }
     expect(sawFull).toBe(true);
     // There is a width where the label already gave way but no switch has gone.
@@ -327,7 +327,7 @@ describe('FooterComponent - line 2 fitting', () => {
     let sawShort = false;
     for (let width = 20; width <= 200; width++) {
       const row = row2(footer, width);
-      if (row.includes('Line: 微信')) sawFull = true;
+      if (row.includes('Line: WeChat')) sawFull = true;
       if (row.includes('Line') && !row.includes('Line:')) sawShort = true;
     }
     expect(sawFull).toBe(true);

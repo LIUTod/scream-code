@@ -12,6 +12,8 @@
  * WCAG AA.
  */
 
+import { CODE_SURFACE_FALLBACK, codeSurfaceFor } from './code-surface';
+
 const dark = {
   yellowGreen: '#79eb00',
   gold: '#FFD700',
@@ -101,6 +103,10 @@ export interface ColorPalette {
 
   // Diff
   diffAdded: string;
+  /** Background of an added line in the inline edit preview. */
+  diffAddedBg: string;
+  /** Background of a removed line in the inline edit preview. */
+  diffRemovedBg: string;
   diffRemoved: string;
   diffAddedStrong: string;
   diffRemovedStrong: string;
@@ -165,6 +171,8 @@ export const darkColors: ColorPalette = {
   wavePeak: '#D32F2F',
 
   diffAdded: dark.yellowGreen,
+  diffAddedBg: '#24422a',
+  diffRemovedBg: '#4d242b',
   diffRemoved: dark.red,
   diffAddedStrong: dark.yellowGreenLight,
   diffRemovedStrong: dark.redLight,
@@ -226,6 +234,8 @@ export const lightColors: ColorPalette = {
   waveMid: '#A88400',
   wavePeak: '#8B0000',
   diffAdded: light.yellowGreen700,
+  diffAddedBg: '#d9f2d3',
+  diffRemovedBg: '#f9dada',
   diffRemoved: light.red,
   diffAddedStrong: light.yellowGreen700,
   diffRemovedStrong: light.red,
@@ -245,8 +255,35 @@ export const lightColors: ColorPalette = {
 
 export type ResolvedTheme = 'dark' | 'light';
 
-export function getColorPalette(theme: ResolvedTheme): ColorPalette {
-  return theme === 'dark' ? darkColors : lightColors;
+const adaptivePalettes = new Map<string, ColorPalette>();
+
+export function getColorPalette(
+  theme: ResolvedTheme = 'dark',
+  /**
+   * The terminal's own background (`#rrggbb`). When known, the code-block
+   * surface is derived from it instead of a fixed constant: the same constant
+   * reads as "lighter" on a black terminal and "darker" on a #1e1e1e one, so it
+   * cannot be right for both. When unknown, the tuned fallback is used — the
+   * shipped constants are invisible on an off-white ground. See
+   * `code-surface.ts`.
+   */
+  backgroundHex?: string,
+): ColorPalette {
+  const base = theme === 'light' ? lightColors : darkColors;
+
+  // Memoised: callers copy the palette for each bundle, and a fresh object per
+  // render would break reference equality (and re-create chalk styles).
+  const key = `${theme}:${backgroundHex ?? 'fallback'}`;
+  const cached = adaptivePalettes.get(key);
+  if (cached !== undefined) return cached;
+
+  const mdCodeBlockBg =
+    backgroundHex === undefined
+      ? CODE_SURFACE_FALLBACK[theme]
+      : codeSurfaceFor(backgroundHex, theme, { body: base.text, muted: base.textMuted });
+  const adapted: ColorPalette = { ...base, mdCodeBlockBg };
+  adaptivePalettes.set(key, adapted);
+  return adapted;
 }
 
 /**

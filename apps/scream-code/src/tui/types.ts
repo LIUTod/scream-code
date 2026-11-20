@@ -361,6 +361,8 @@ export interface ScreamTUIOptions {
   initialAppState: AppState;
   startup: TUIStartupOptions;
   resolvedTheme?: ResolvedTheme;
+  /** Terminal background (`#rrggbb`) from OSC 11; absent when detection did not run. */
+  resolvedBackground?: string;
 }
 
 export interface PendingExit {

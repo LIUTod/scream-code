@@ -166,7 +166,7 @@ describe('FooterComponent — context NaN resilience', () => {
 
     const [line1, line2] = footer.render(120);
     expect(strip(line1 ?? '')).toContain('📨 Context  ');
-    expect(strip(line2 ?? '')).toContain('↓ 缓存命中: --');
+    expect(strip(line2 ?? '')).toContain('↓ Cache hit: --');
     expect(strip(line2 ?? '')).toContain('Line:');
     // The gauge no longer shares a row with the hit rate.
     expect(strip(line2 ?? '')).not.toContain('Context');
@@ -527,9 +527,9 @@ describe('FooterComponent — badge order', () => {
     // Line 2 opens with the cache hit, then plan → rlm → wolfpack → goal.
     expect(first).not.toContain('群狼');
     expect(first).not.toContain('目标');
-    expect(second).toMatch(/^↓ 缓存命中:/);
+    expect(second).toMatch(/^↓ Cache hit:/);
     previous = -1;
-    for (const token of ['缓存命中:', '计划', 'RLM', '群狼', '目标']) {
+    for (const token of ['Cache hit:', '计划', 'RLM', '群狼', '目标']) {
       const at = second!.indexOf(token);
       expect(at, `missing or out of order on line 2: ${token}`).toBeGreaterThan(previous);
       previous = at;

@@ -31,10 +31,14 @@ export const MAX_SHELL_OUTPUT_BYTES = 128 * 1024;
 // this many reasoning lines.
 export const ACTIVITY_GROUP_TOOL_PREVIEW_LINES = 3;
 // Rows of a collapsed block, header included: the header plus this many minus
-// one steps of the timeline (reasoning runs and tool calls share the budget,
-// newest kept). Eight keeps a running turn from looking frozen — at three rows
-// the block only ever showed its header plus a single step.
-export const ACTIVITY_GROUP_COLLAPSED_LINES = 8;
+// one steps of the timeline (reasoning runs, tool calls and the inline edit
+// previews share the budget, newest kept). Fourteen leaves room for a couple of
+// edits with their changed lines; at three rows the block only ever showed its
+// header plus a single step.
+export const ACTIVITY_GROUP_COLLAPSED_LINES = 14;
+// Changed lines shown under each Edit/Write row while a block is folded
+// (`/blockrows`; 0 turns the inline preview off). The rest is counted.
+export const ACTIVITY_GROUP_EDIT_PREVIEW_LINES = 4;
 // Result lines previewed per tool once the group is expanded. Kept at the
 // standalone card's collapsed budget so grouping never hides more output than
 // the card showed on its own.

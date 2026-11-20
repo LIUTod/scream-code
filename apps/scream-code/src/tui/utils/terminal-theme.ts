@@ -12,7 +12,7 @@ import {
 } from "#/tui/constant/terminal";
 import type { TUIState } from "#/tui/tui-state";
 import type { ResolvedTheme } from "#/tui/theme/colors";
-import { parseOsc11BackgroundTheme } from "#/tui/theme/terminal-background";
+import { parseOsc11Background } from "#/tui/theme/terminal-background";
 
 export {
   DISABLE_TERMINAL_THEME_REPORTING,
@@ -45,7 +45,7 @@ export function createTerminalThemeInputState(): TerminalThemeInputState {
 export function handleTerminalThemeInput(
   data: string,
   terminal: Pick<TUIState["terminal"], "write">,
-  onTheme: (theme: ResolvedTheme) => void,
+  onTheme: (theme: ResolvedTheme, backgroundHex?: string) => void,
   inputState: TerminalThemeInputState = createTerminalThemeInputState(),
 ): TerminalThemeInputResult {
   let remaining = data;
@@ -77,15 +77,20 @@ export function handleTerminalThemeInput(
   return undefined;
 }
 
-function stripOsc11Reports(data: string, onTheme: (theme: ResolvedTheme) => void): string {
+function stripOsc11Reports(
+  data: string,
+  onTheme: (theme: ResolvedTheme, backgroundHex?: string) => void,
+): string {
   let remaining = data;
 
   for (;;) {
     const match = OSC11_RESPONSE.exec(remaining);
     if (match === null) return remaining;
 
-    const theme = parseOsc11BackgroundTheme(match[0]);
-    if (theme !== null) onTheme(theme);
+    const background = parseOsc11Background(match[0]);
+    // The background colour rides along: a bare mode change would leave the
+    // code panel derived from the previous ground.
+    if (background !== null) onTheme(background.theme, background.hex);
 
     remaining = `${remaining.slice(0, match.index)}${remaining.slice(match.index + match[0].length)}`;
   }
@@ -136,7 +141,7 @@ function resultFromRemaining(data: string): TerminalThemeInputResult {
 
 export function installTerminalThemeTracking(
   state: Pick<TUIState, "terminal" | "ui">,
-  onTheme: (theme: ResolvedTheme) => void,
+  onTheme: (theme: ResolvedTheme, backgroundHex?: string) => void,
 ): () => void {
   const inputState = createTerminalThemeInputState();
   const disposeInputListener = state.ui.addInputListener((data) =>

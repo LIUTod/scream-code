@@ -13,6 +13,7 @@
 
 import {
   ACTIVITY_GROUP_COLLAPSED_LINES,
+  ACTIVITY_GROUP_EDIT_PREVIEW_LINES,
   ACTIVITY_GROUP_THINKING_EXCERPT_LINES,
   ACTIVITY_GROUP_TOOL_EXPANDED_LINES,
 } from '#/tui/constant/rendering';
@@ -29,6 +30,8 @@ export interface ActivityLines {
   readonly expandedTool: number;
   /** Rows one reasoning run may show while the block is expanded. */
   readonly expandedThinking: number;
+  /** Changed lines previewed under each Edit/Write row while folded (0 = off). */
+  readonly editPreview: number;
 }
 
 export interface ActivityLineSetting {
@@ -45,8 +48,14 @@ export const ACTIVITY_LINE_SETTINGS: readonly ActivityLineSetting[] = [
   {
     key: 'activityCollapsedLines',
     label: 'blockrows.item_collapsed',
-    values: [5, 8, 10],
+    values: [5, 8, 10, 14, 20],
     fallback: ACTIVITY_GROUP_COLLAPSED_LINES,
+  },
+  {
+    key: 'activityEditPreviewLines',
+    label: 'blockrows.item_edit_preview',
+    values: [0, 2, 4, 6, 8],
+    fallback: ACTIVITY_GROUP_EDIT_PREVIEW_LINES,
   },
   {
     key: 'activityExpandedToolLines',
@@ -83,15 +92,11 @@ function resolve(stored: number | undefined, setting: ActivityLineSetting): numb
 
 function load(): ActivityLines {
   const stored = readActivityLinePrefs();
-  const settings = ACTIVITY_LINE_SETTINGS as readonly [
-    ActivityLineSetting,
-    ActivityLineSetting,
-    ActivityLineSetting,
-  ];
   return {
-    collapsed: resolve(stored.activityCollapsedLines, settings[0]),
-    expandedTool: resolve(stored.activityExpandedToolLines, settings[1]),
-    expandedThinking: resolve(stored.activityExpandedThinkingLines, settings[2]),
+    collapsed: resolve(stored.activityCollapsedLines, findActivityLineSetting('activityCollapsedLines')),
+    expandedTool: resolve(stored.activityExpandedToolLines, findActivityLineSetting('activityExpandedToolLines')),
+    expandedThinking: resolve(stored.activityExpandedThinkingLines, findActivityLineSetting('activityExpandedThinkingLines')),
+    editPreview: resolve(stored.activityEditPreviewLines, findActivityLineSetting('activityEditPreviewLines')),
   };
 }
 
@@ -106,6 +111,7 @@ export function getActivityLineValue(key: ActivityLineKey): number {
   const lines = getActivityLines();
   if (key === 'activityCollapsedLines') return lines.collapsed;
   if (key === 'activityExpandedToolLines') return lines.expandedTool;
+  if (key === 'activityEditPreviewLines') return lines.editPreview;
   return lines.expandedThinking;
 }
 

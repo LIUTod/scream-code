@@ -6,7 +6,7 @@
  */
 
 import type { MarkdownTheme, EditorTheme } from '@liutod-scream/pi-tui';
-import { visibleWidth, wrapTextWithAnsi } from '@liutod-scream/pi-tui';
+import { sliceByColumn, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { highlight, supportsLanguage, type Theme } from 'cli-highlight';
 
@@ -89,6 +89,55 @@ function createMarkdownCodeHighlightTheme(colors: ColorPalette): Theme {
   };
 }
 
+/**
+ * The language name from a fence info string.
+ *
+ * `marked` hands over the raw info string (`ts title="x"`), not the language,
+ * so both the caption and the highlighter take the first word — otherwise they
+ * disagree with each other and with what the author meant.
+ */
+function firstInfoWord(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  const info = text.startsWith('```') ? text.slice(3) : text;
+  const [word] = info.trim().split(/[ \t]/, 1);
+  return word === undefined || word.length === 0 ? undefined : word;
+}
+
+/**
+ * Split one code line into width-sized fragments.
+ *
+ * `wrapTextWithAnsi` is a *word* wrapper: it trims the space at every break, so
+ * a wrapped command copies back as `-gscream-code`. Code must keep every cell,
+ * so this slices by visible columns instead — concatenating the rows reproduces
+ * the source exactly. `sliceWithWidth` re-opens the SGR codes at the slice
+ * start, so a highlighted line keeps its colour on continuation rows. `strict`
+ * keeps a wide character from overflowing the row (it moves to the next one).
+ */
+function sliceCodeRows(line: string, width: number): string[] {
+  const rows: string[] = [];
+  const total = visibleWidth(line);
+  let offset = 0;
+  for (;;) {
+    const text = sliceByColumn(line, offset, width, true);
+    const taken = visibleWidth(text);
+    if (taken > 0) {
+      rows.push(text);
+      if (offset + taken >= total) break;
+      offset += taken;
+      continue;
+    }
+    // A grapheme wider than the whole window: take it anyway (non-strict) so
+    // the rest of the line is not silently dropped.
+    const forced = sliceByColumn(line, offset, width + 2, false);
+    const forcedWidth = visibleWidth(forced);
+    rows.push(forced);
+    if (forcedWidth <= 0) break;
+    if (offset + forcedWidth >= total) break;
+    offset += forcedWidth;
+  }
+  return rows;
+}
+
 export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
   const stripHash = (text: string): string => text.replace(HEADING_HASH_PREFIX, '$1');
   // pi-tui renders a heading as `heading(bold(text))`. Since `bold` now carries
@@ -109,11 +158,24 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
     // Inline code is the brand accent itself; the palette keeps it the only green.
     code: (text) => chalk.hex(colors.primary)(text),
     codeBlock: (text) => chalk.hex(colors.mdCodeBlock)(text),
-    // Fenced code renders as a background panel: the decorative top and bottom
-    // fence rows are dropped and every line is styled by `codeBlockLine`.
-    codeBlockBorder: () => null,
+    // Fenced code renders as a background panel. The opening fence carries the
+    // language, and it becomes a caption row instead of a right-aligned tag
+    // inside the first code row: a tag in the row is copied along with the code
+    // and steals columns from the line, so a wrapped command reads as if the
+    // tag interrupted it. The closing fence row is dropped.
+    codeBlockBorder: (text) => {
+      // The info string is not the language: a fence may carry attributes
+      // (`ts title="x"`), and printing them just moves the junk from the code
+      // row into the caption. Only the first word is a language name.
+      const lang = firstInfoWord(text);
+      if (lang === undefined) return null;
+      // The library wraps whatever the hook returns, so an over-wide caption
+      // would become a second, unstyled row instead of a caption. Clip by
+      // columns (not code units — 16 CJK characters are 32 cells).
+      return ` ${chalk.hex(colors.mdCodeBlockBorder).italic(truncateToWidth(lang, 16))}`;
+    },
     codeBlockIndent: ' ',
-    codeBlockLine: (line, { index, lang, width }) => {
+    codeBlockLine: (line, { width }) => {
       // The library wraps whatever this hook returns, and a continuation row
       // would lose the gutter/background — so the panel must stay one visual
       // row per returned line. Overlong source lines are wrapped HERE into
@@ -121,31 +183,19 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
       // newline and each row already fits, so nothing is truncated and every
       // folded row keeps the panel chrome.
       const gutter = 1;
-      const rawLabel = index === 0 && lang !== undefined && lang.length > 0 ? ` ${lang}` : '';
-      const labelCells = visibleWidth(rawLabel);
-      // Label only stays when it leaves the gutter, one content cell, and a
-      // trailing cell — otherwise drop it and give the whole row to code.
-      const labelFits = labelCells > 0 && 1 + 1 + labelCells + 1 <= width;
-      const activeLabelCells = labelFits ? labelCells : 0;
-      // First source line with a visible label reserves its columns on every
-      // folded row of that line so row 0 always has room for the label.
-      const contentMax = Math.max(1, width - gutter - (activeLabelCells > 0 ? activeLabelCells + 1 : 0));
-      const rows = wrapTextWithAnsi(line, contentMax);
-      // `/codebg` off drops the fill but keeps the row layout, so the gutter and
-      // the right-aligned label stay where they are.
+      // Full width minus the gutter. No label reserves columns any more, so the
+      // wrap point depends only on the terminal width and every row lines up.
+      // The floor of 4 keeps a 3-cell tab (or a wide emoji) from being wider
+      // than an entire row, which `strict` slicing cannot represent.
+      const contentMax = Math.max(4, width - gutter);
+      const rows = sliceCodeRows(line, contentMax);
+      // `/codebg` off drops the fill but keeps the row layout.
       const panelled = isCodeBlockPanelEnabled();
       const paint = panelled ? chalk.bgHex(colors.mdCodeBlockBg) : (text: string): string => text;
-      const labelPaint = panelled
-        ? chalk.bgHex(colors.mdCodeBlockBg).hex(colors.mdCodeBlock)
-        : chalk.hex(colors.mdCodeBlock);
       return rows
-        .map((row, rowIndex) => {
-          const contentCells = visibleWidth(row);
-          const showLabel = rowIndex === 0 && labelFits;
-          const filler = showLabel ? Math.max(0, width - contentCells - activeLabelCells - 2) : 0;
-          const padCells = showLabel ? 1 : Math.max(0, width - contentCells - 1);
-          const label = showLabel ? chalk.italic(labelPaint(rawLabel)) : '';
-          return `${paint(' ')}${paint(row)}${paint(' '.repeat(filler))}${label}${paint(' '.repeat(padCells))}`;
+        .map((row) => {
+          const padCells = Math.max(0, width - visibleWidth(row) - gutter);
+          return `${paint(' ')}${paint(row)}${paint(' '.repeat(padCells))}`;
         })
         .join('\n');
     },
@@ -168,7 +218,9 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
     strikethrough: (text) => chalk.strikethrough(text),
     underline: (text) => chalk.underline(text),
     highlightCode: (code: string, lang?: string) => {
-      const normalizedLang = lang?.trim().toLowerCase();
+      // Same first-word rule as the caption, so an attribute fence highlights
+      // instead of falling back to plain text.
+      const normalizedLang = firstInfoWord(lang)?.toLowerCase();
       const language =
         normalizedLang !== undefined && supportsLanguage(normalizedLang) ? normalizedLang : 'text';
       try {

@@ -26,7 +26,7 @@ import {
   type EditRecoveryQueue,
   type EditRecoverySignature,
 } from '../../support/edit-recovery-queue';
-import { fileDiffSummary } from '../../support/file-diff';
+import { fileDiffDetails } from '../../support/file-diff';
 import { renameArgAliases } from '../../support/arg-aliases';
 import { toInputJsonSchema } from '../../support/input-schema';
 import {
@@ -187,14 +187,17 @@ function withFileDiffDisplay(
   result: ExecutableToolResult,
   before: string,
   after: string,
+  deletedText: boolean,
 ): ExecutableToolResult {
   if (result.isError === true) return result;
-  const summary = fileDiffSummary(before, after);
-  if (summary === undefined) return result;
+  const details = fileDiffDetails(before, after, { deletedText });
+  if (details === undefined) return result;
   const display: ToolResultDisplay = {
     kind: 'file_diff',
-    added: summary.added,
-    removed: summary.removed,
+    added: details.added,
+    removed: details.removed,
+    preview: details.preview,
+    previewTotal: details.previewTotal,
   };
   return { ...result, display };
 }
@@ -620,7 +623,7 @@ export class EditTool implements BuiltinTool<EditInput> {
         const result: ExecutableToolResult = hasErrors
           ? { isError: true, output, message }
           : { output, message };
-        return withFileDiffDisplay(result, raw, writtenText);
+        return withFileDiffDisplay(result, raw, writtenText, true);
       }
 
       const parts = content.split(oldString);
@@ -658,7 +661,7 @@ export class EditTool implements BuiltinTool<EditInput> {
       const result: ExecutableToolResult = hasErrors
         ? { isError: true, output, message }
         : { output, message };
-      return withFileDiffDisplay(result, raw, writtenText);
+      return withFileDiffDisplay(result, raw, writtenText, true);
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'EISDIR') {
@@ -946,7 +949,7 @@ export class EditTool implements BuiltinTool<EditInput> {
     const result: ExecutableToolResult = hasErrors
       ? { isError: true, output, message }
       : { output, message };
-    return withFileDiffDisplay(result, raw, writtenText);
+    return withFileDiffDisplay(result, raw, writtenText, false);
   }
 
   /**

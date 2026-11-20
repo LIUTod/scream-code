@@ -119,7 +119,11 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   // before any animated component is built.
   applyMotionEnv(process.env);
   const initialAppState = options.initialAppState;
-  const theme = createScreamTUIThemeBundle(initialAppState.theme, options.resolvedTheme);
+  const theme = createScreamTUIThemeBundle(
+    initialAppState.theme,
+    options.resolvedTheme,
+    options.resolvedBackground,
+  );
 
   const terminal = new ProcessTerminal();
   const ui = new TuiAltScreen(terminal, undefined, undefined, {

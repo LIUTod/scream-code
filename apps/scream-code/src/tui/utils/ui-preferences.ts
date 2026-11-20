@@ -43,6 +43,8 @@ export interface UiPreferences {
   activityExpandedToolLines?: number;
   /** Rows one reasoning run may show while the block is expanded. */
   activityExpandedThinkingLines?: number;
+  /** Changed lines previewed per edit while a block is folded; 0 = off. */
+  activityEditPreviewLines?: number;
 }
 
 /** The activity row budgets, as stored (callers clamp and default them). */
@@ -50,6 +52,7 @@ export interface StoredActivityLines {
   activityCollapsedLines?: number;
   activityExpandedToolLines?: number;
   activityExpandedThinkingLines?: number;
+  activityEditPreviewLines?: number;
 }
 
 export type ActivityLineKey = keyof StoredActivityLines;
@@ -121,6 +124,7 @@ export function readActivityLinePrefs(): StoredActivityLines {
     activityCollapsedLines: prefs.activityCollapsedLines,
     activityExpandedToolLines: prefs.activityExpandedToolLines,
     activityExpandedThinkingLines: prefs.activityExpandedThinkingLines,
+    activityEditPreviewLines: prefs.activityEditPreviewLines,
   };
 }
 

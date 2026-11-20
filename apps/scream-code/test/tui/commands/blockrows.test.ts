@@ -88,11 +88,13 @@ describe('handleBlockRowsCommand', () => {
     const picker = lastPicker();
     expect(picker.options.map((option) => option.value)).toEqual([
       'activityCollapsedLines',
+      'activityEditPreviewLines',
       'activityExpandedToolLines',
       'activityExpandedThinkingLines',
     ]);
     expect(picker.options[0]?.label).toBe(t('blockrows.item_collapsed'));
-    expect(picker.options[0]?.description).toBe(t('blockrows.current', { value: '8' }));
+    expect(picker.options[0]?.description).toBe(t('blockrows.current', { value: '14' }));
+    expect(picker.options[1]?.description).toBe(t('blockrows.current', { value: '4' }));
   });
 
   it('opens the value list for the chosen budget and applies the choice', async () => {
@@ -133,7 +135,7 @@ describe('handleBlockRowsCommand', () => {
 
     // Back at step one, and nothing was written.
     expect(dialogs.pickers).toHaveLength(3);
-    expect(lastPicker().options).toHaveLength(3);
+    expect(lastPicker().options).toHaveLength(4);
     expect(Object.keys(prefs.stored)).toHaveLength(0);
     expect(host.restoreEditor).not.toHaveBeenCalled();
   });

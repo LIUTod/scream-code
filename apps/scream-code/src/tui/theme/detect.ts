@@ -16,25 +16,44 @@
 import { OSC11_QUERY, TERMINAL_THEME_DETECT_TIMEOUT_MS } from "#/tui/constant/terminal";
 
 import type { ResolvedTheme } from "./colors";
-import { parseOsc11BackgroundTheme } from "./terminal-background";
+import { parseOsc11Background, type Osc11Background } from "./terminal-background";
+
+export interface TerminalThemeDetection {
+  readonly theme: ResolvedTheme;
+  /** The terminal's background (`#rrggbb`); absent unless OSC 11 answered. */
+  readonly hex?: string;
+}
 
 export interface DetectOptions {
   readonly timeoutMs?: number;
 }
 
-export async function detectTerminalTheme(opts: DetectOptions = {}): Promise<ResolvedTheme> {
-  if (!isInteractiveTerminal()) return "dark";
-  if (isColorOptOut()) return "dark";
+/**
+ * What the terminal told us about itself: the mode always, the ground when the
+ * terminal answers OSC 11.
+ *
+ * One function for both, because the startup path needs the pair and two calls
+ * would query the terminal twice. The exact colour is what lets a surface move
+ * away from the ground the terminal actually paints (see `code-surface.ts`);
+ * `hex` is absent when only `COLORFGBG` or the `dark` default was available,
+ * and callers then use the tuned fallback surface.
+ */
+export async function detectTerminalTheme(
+  opts: DetectOptions = {},
+): Promise<TerminalThemeDetection> {
+  if (!isInteractiveTerminal()) return { theme: "dark" };
+  if (isColorOptOut()) return { theme: "dark" };
 
   const fromOsc = await queryOsc11({
     timeoutMs: opts.timeoutMs ?? TERMINAL_THEME_DETECT_TIMEOUT_MS,
   });
-  if (fromOsc !== null) return fromOsc;
+  if (fromOsc !== null) return { theme: fromOsc.theme, hex: fromOsc.hex };
 
+  // Terminals that ignore OSC 11 still report a 16-colour index here; keeping
+  // this step is what stops a light-background terminal (rxvt, a blocked reply)
+  // from silently resolving to the dark palette.
   const fromColorFgBg = parseColorFgBg(process.env["COLORFGBG"]);
-  if (fromColorFgBg !== null) return fromColorFgBg;
-
-  return "dark";
+  return fromColorFgBg === null ? { theme: "dark" } : { theme: fromColorFgBg };
 }
 
 function isInteractiveTerminal(): boolean {
@@ -56,7 +75,7 @@ interface RawModeStdin {
   off(event: "data", listener: (data: Buffer) => void): NodeJS.ReadStream;
 }
 
-async function queryOsc11(opts: { timeoutMs: number }): Promise<ResolvedTheme | null> {
+async function queryOsc11(opts: { timeoutMs: number }): Promise<Osc11Background | null> {
   const stdin = process.stdin as unknown as RawModeStdin;
   if (typeof stdin.setRawMode !== "function") return null;
   // If something else is already listening on stdin (e.g. another raw-mode
@@ -71,11 +90,11 @@ async function queryOsc11(opts: { timeoutMs: number }): Promise<ResolvedTheme | 
   try {
     if (!wasRaw) stdin.setRawMode(true);
 
-    const result = await new Promise<ResolvedTheme | null>((resolve) => {
+    const result = await new Promise<Osc11Background | null>((resolve) => {
       listener = (chunk: Buffer): void => {
         buffer += chunk.toString("utf8");
-        const theme = parseOsc11BackgroundTheme(buffer);
-        if (theme !== null) resolve(theme);
+        const background = parseOsc11Background(buffer);
+        if (background !== null) resolve(background);
       };
       stdin.on("data", listener);
       timer = setTimeout(() => {

@@ -84,3 +84,107 @@ describe('markdown theme colours', () => {
     });
   }
 });
+
+/**
+ * Code block chrome.
+ *
+ * Two contracts the renderer must hold, both of which were broken when the
+ * language tag lived inside the first code row:
+ *  1. the tag is chrome, not code — copying the block must not pick it up;
+ *  2. no columns are reserved for it — the wrap point depends only on width.
+ */
+describe('code block language caption', () => {
+  const strip = (value: string): string => value.replaceAll(/\u001B\[[0-9;]*m/g, '');
+
+  for (const [name, colors] of [
+    ['dark', darkColors],
+    ['light', lightColors],
+  ] as const) {
+    describe(name, () => {
+      const theme = () => createMarkdownTheme(colors);
+      const border = (fence: string): string | null =>
+        theme().codeBlockBorder?.(fence) ?? null;
+      const rowsOf = (source: string, width: number): string[] =>
+        (theme().codeBlockLine?.(source, { index: 0, lang: 'bash', width, total: 1 }) ?? '').split(
+          '\n',
+        );
+
+      it('puts the language on a caption row of its own', () => {
+        const caption = border('```bash');
+        expect(caption).not.toBeNull();
+        expect(strip(caption ?? '')).toContain('bash');
+        // The closing fence stays out of the layout.
+        expect(border('```')).toBeNull();
+        // A fence without a language gets no caption either.
+        expect(border('```')).toBeNull();
+      });
+
+      it('takes only the language word out of a fence that carries attributes', () => {
+        // `marked` hands over the raw info string; a caption that printed
+        // `ts title="x"` would just move the junk out of the code row.
+        expect(strip(border('```ts title="x"') ?? '')).toBe('\u0020ts');
+      });
+
+      it('keeps the language out of every code row', () => {
+        const rows = rowsOf('npm cache clean --force && npm i -g', 80);
+
+        for (const row of rows) expect(strip(row)).not.toContain('bash');
+      });
+
+      it('gives the full width to the code, so the wrap point is the terminal alone', () => {
+        const rows = rowsOf('x'.repeat(100), 40);
+        const first = rows[0] ?? '';
+
+        // 1 gutter cell + 39 columns of code: no label columns withheld.
+        expect(strip(first)).toHaveLength(40);
+        expect(strip(first).endsWith('x')).toBe(true);
+      });
+
+      it('round-trips to the source when the rows are copied', () => {
+        const source = 'npm cache clean --force && npm i -g scream-code@0.20.6 --prefer-online';
+        const rows = rowsOf(source, 40);
+
+        const copied = rows.map((row) => strip(row).trimEnd().slice(1)).join('');
+        expect(copied).toBe(source);
+
+        // Hard wrapping keeps every cell at any width (a word wrapper would drop
+        // the space at each break: "-gscream-code").
+        for (const width of [24, 33, 80]) {
+          const joined = rowsOf(source, width)
+            .map((row) => strip(row).trimEnd().slice(1))
+            .join('');
+          expect(joined, `width ${width}`).toBe(source);
+        }
+      });
+    });
+  }
+});
+
+describe('code rows survive absurd widths', () => {
+  const strip = (value: string): string => value.replaceAll(/\u001B\[[0-9;]*m/g, '');
+  const rowsOf = (source: string, width: number): string[] =>
+    (
+      createMarkdownTheme(darkColors).codeBlockLine?.(source, {
+        index: 0,
+        lang: 'bash',
+        width,
+        total: 1,
+      }) ?? ''
+    ).split('\n');
+
+  it('never drops the remainder of a line at a width a tab cannot fit', () => {
+    // 3-cell tab, 1-cell rows: strict slicing alone would return "" forever and
+    // the loop would either spin or drop the rest of the line.
+    const rows = rowsOf('\tabc', 2);
+    const joined = rows.map((row) => strip(row).trimEnd().slice(1)).join('');
+
+    expect(joined).toBe('\tabc');
+  });
+
+  it('keeps a wide character whole instead of losing it', () => {
+    const rows = rowsOf('中文中文中文', 5);
+    const joined = rows.map((row) => strip(row).trimEnd().slice(1)).join('');
+
+    expect(joined).toBe('中文中文中文');
+  });
+});

@@ -335,11 +335,15 @@ describe("ScreamTUI startup", () => {
     expect(listeners[0]?.(DARK_OSC11_REPORT)).toEqual({ consume: true });
     expect(driver.state.appState.theme).toBe("auto");
     expect(driver.state.theme.resolvedTheme).toBe("dark");
-    expect(driver.state.ui.requestRender).not.toHaveBeenCalled();
+    // The report also reveals the terminal's ground, so the palette is rebuilt
+    // even though the mode did not change (the code surface is derived from it).
+    expect(driver.state.theme.backgroundHex).toBe("#282c34");
+    expect(driver.state.ui.requestRender).toHaveBeenCalled();
 
     expect(listeners[0]?.(LIGHT_OSC11_REPORT)).toEqual({ consume: true });
     expect(driver.state.appState.theme).toBe("auto");
     expect(driver.state.theme.resolvedTheme).toBe("light");
+    expect(driver.state.theme.backgroundHex).toBe("#fafbfc");
     expect(driver.state.ui.requestRender).toHaveBeenCalled();
   });
 

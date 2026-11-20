@@ -44,8 +44,13 @@ export async function runShell(
   }
 
   // Resolve `theme = "auto"` against the live terminal once, before pi-tui
-  // grabs stdin. Explicit `dark` / `light` skip detection.
-  const resolvedTheme = tuiConfig.theme === 'auto' ? await detectTerminalTheme() : tuiConfig.theme;
+  // grabs stdin. Explicit `dark` / `light` skip detection — they then use the
+  // tuned surface fallback instead of a ground-derived one.
+  // One query for both answers: the mode picks the palette, the ground lets the
+  // code-block surface move away from what the terminal actually paints.
+  const explicitTheme = tuiConfig.theme === 'auto' ? undefined : tuiConfig.theme;
+  const detected = explicitTheme === undefined ? await detectTerminalTheme() : undefined;
+  const resolvedTheme = detected?.theme ?? explicitTheme ?? 'dark';
 
   const workDir = process.cwd();
   const homeDir = resolveScreamHome();
@@ -96,6 +101,7 @@ export async function runShell(
     workDir,
     startupNotice,
     resolvedTheme,
+    resolvedBackground: detected?.hex,
     updatePrefetched: true,
     sessionsPrefetch,
   });

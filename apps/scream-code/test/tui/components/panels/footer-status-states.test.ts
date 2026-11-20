@@ -161,16 +161,16 @@ describe('footer status block — non-phase states', () => {
 });
 
 describe('footer status block — line channel segment', () => {
-  it('shows Line: 未连接 when the daemon is down or no channel is configured', () => {
-    expect(statusSegment(baseState({ streamingPhase: 'idle' }))).toContain('◆ Line: 未连接');
-    expect(statusSegment(baseState({ linePlatform: 'wechat' }))).toContain('◆ Line: 未连接');
-    expect(statusSegment(baseState({ linePlatform: 'lark' }))).toContain('◆ Line: 未连接');
+  it('shows Line: Disconnected when the daemon is down or no channel is configured', () => {
+    expect(statusSegment(baseState({ streamingPhase: 'idle' }))).toContain('◆ Line: Disconnected');
+    expect(statusSegment(baseState({ linePlatform: 'wechat' }))).toContain('◆ Line: Disconnected');
+    expect(statusSegment(baseState({ linePlatform: 'lark' }))).toContain('◆ Line: Disconnected');
   });
 
   it('shows the channel brand once connected', () => {
-    expect(statusSegment(baseState({ linePlatform: 'lark', lineActive: true }))).toContain('◆ Line: 飞书');
-    expect(statusSegment(baseState({ linePlatform: 'wechat', lineActive: true }))).toContain('◆ Line: 微信');
-    expect(statusSegment(baseState({ linePlatform: 'wechat', lineActive: true }))).not.toContain('未连接');
+    expect(statusSegment(baseState({ linePlatform: 'lark', lineActive: true }))).toContain('◆ Line: Lark');
+    expect(statusSegment(baseState({ linePlatform: 'wechat', lineActive: true }))).toContain('◆ Line: WeChat');
+    expect(statusSegment(baseState({ linePlatform: 'wechat', lineActive: true }))).not.toContain('Disconnected');
   });
 
   it('lights only the dot: blue for Lark, green for WeChat, muted when disconnected', () => {
@@ -216,9 +216,9 @@ describe('footer status block — line channel segment', () => {
     const [line1, line2] = footer.render(120).map(strip);
     footer.dispose();
     // Line 1 now carries the context gauge; the hit rate opens line 2.
-    expect(line1).not.toContain('缓存命中');
-    expect(line2!.startsWith('↓ 缓存命中: --')).toBe(true);
-    expect(line2).not.toContain('↓ 缓存命中:  --');
+    expect(line1).not.toContain('Cache hit');
+    expect(line2!.startsWith('↓ Cache hit: --')).toBe(true);
+    expect(line2).not.toContain('↓ Cache hit:  --');
   });
 
   it('keeps the channel segment ahead of the status label on line 2', () => {

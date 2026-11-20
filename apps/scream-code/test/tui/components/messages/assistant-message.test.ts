@@ -253,16 +253,20 @@ describe('fenced code panel', () => {
     expect(lines.some((line) => line.includes('const a = 1;'))).toBe(true);
   });
 
-  it('labels the language on the first code row and pads the panel', () => {
-    const codeRow = renderCodePanel().map(strip).find((line) => line.includes('const a = 1;')) ?? '';
+  it('puts the language on a caption row above the panel, never inside the code', () => {
+    const lines = renderCodePanel().map(strip);
+    const codeRow = lines.find((line) => line.includes('const a = 1;')) ?? '';
+    const captionRow = lines.find((line) => line.trim() === 'ts') ?? '';
 
-    expect(codeRow).toContain('ts');
+    // The tag is chrome: copying the code rows must not pick it up.
+    expect(captionRow).not.toBe('');
+    expect(codeRow).not.toContain('ts');
     // Padded out to the content width so the block reads as one surface.
     expect(visibleWidth(codeRow)).toBeLessThanOrEqual(60);
     expect(visibleWidth(codeRow)).toBeGreaterThanOrEqual(50);
   });
 
-  it('keeps every panel row inside the viewport when the label cannot fit', () => {
+  it('keeps every panel row inside the viewport at a narrow width', () => {
     const theme = createMarkdownTheme(darkColors);
     const line =
       theme.codeBlockLine?.('const a = 1;', { index: 0, total: 1, lang: 'typescript', width: 8 }) ?? '';
@@ -301,8 +305,8 @@ describe('fenced code panel', () => {
       expect(visibleWidth(line)).toBeLessThanOrEqual(60);
     }
     // Folded rows join back to the full source. Drop the bullet and the
-    // right-aligned "ts" chip glued on by the whitespace-only normalize —
-    // the chip is chrome, not source text.
+    // language caption row (and its "ts"), plus the row padding — chrome, not
+    // source text.
     const normalized = lines
       .join('')
       .replaceAll(/\s/g, '')
@@ -335,7 +339,7 @@ describe('fenced code panel', () => {
     }
   });
 
-  it('paints the palette surface and omits the fence hook', () => {
+  it('paints the palette surface and puts the language in the fence hook', () => {
     const theme = createMarkdownTheme(darkColors);
     const line =
       theme.codeBlockLine?.('const a = 1;', { index: 0, total: 1, lang: 'ts', width: 40 }) ?? '';
@@ -343,7 +347,9 @@ describe('fenced code panel', () => {
     // Compared against chalk's own output so the assertion holds at any color level.
     expect(line).toContain(chalk.bgHex(darkColors.mdCodeBlockBg)(' '));
     expect(strip(line)).toContain('const a = 1;');
-    expect(strip(line)).toContain('ts');
-    expect(theme.codeBlockBorder('```')).toBeNull();
+    // The opening fence becomes the caption; the closing one stays out.
+    expect(strip(theme.codeBlockBorder?.('```ts') ?? '')).toContain('ts');
+    expect(strip(line)).not.toContain('ts');
+    expect(theme.codeBlockBorder?.('```')).toBeNull();
   });
 });

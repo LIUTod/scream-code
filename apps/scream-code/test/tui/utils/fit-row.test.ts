@@ -137,7 +137,7 @@ describe('fitRow', () => {
         return state / 4_294_967_296;
       };
     }
-    const WORDS = ['a', 'bb', 'ccc', '计划', '群狼', 'RLM', '缓存命中: 98.90%', '📟️ model', 'Line: 未连接'];
+    const WORDS = ['a', 'bb', 'ccc', '计划', '群狼', 'RLM', 'Cache hit: 98.90%', '📟️ model', 'Line: Disconnected'];
 
     function randomItems(next: () => number, tag: string): FitItem[] {
       const count = 1 + Math.floor(next() * 5);

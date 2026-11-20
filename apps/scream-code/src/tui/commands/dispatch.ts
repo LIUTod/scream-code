@@ -158,7 +158,7 @@ export interface SlashCommandHost {
   showProgressSpinner(label: string): LoginProgressSpinnerHandle;
 
   // Theme
-  applyTheme(theme: Theme, resolved?: ResolvedTheme): void;
+  applyTheme(theme: Theme, resolved?: ResolvedTheme, background?: string): void;
   refreshTerminalThemeTracking(): void;
 
   // Dispatch

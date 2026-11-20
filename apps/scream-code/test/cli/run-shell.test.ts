@@ -221,7 +221,7 @@ describe('runShell', () => {
         notifications: { enabled: true, condition: 'always' },
       }),
     );
-    mocks.detectTerminalTheme.mockResolvedValue('light');
+    mocks.detectTerminalTheme.mockResolvedValue({ theme: 'light', hex: '#fafbfc' });
     mocks.tuiStart.mockResolvedValue(undefined);
 
     await runShell(
@@ -245,6 +245,7 @@ describe('runShell', () => {
     expect(startupInput).toMatchObject({
       startupNotice: 'Invalid TUI config in ~/.scream-code/tui.toml; using defaults.',
       resolvedTheme: 'light',
+      resolvedBackground: '#fafbfc',
       tuiConfig: {
         theme: 'auto',
         editorCommand: 'vim',

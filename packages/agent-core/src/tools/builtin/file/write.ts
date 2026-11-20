@@ -15,7 +15,7 @@ import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import type { LspRegistry } from '../../../lsp/registry';
 import type { ToolResultDisplay } from '../../display';
 import { resolvePathAccessPath } from '../../policies/path-access';
-import { countLines, fileDiffSummary } from '../../support/file-diff';
+import { countLines, fileDiffDetails } from '../../support/file-diff';
 import type { EditRecoveryQueue } from '../../support/edit-recovery-queue';
 import { renameArgAliases } from '../../support/arg-aliases';
 import { toInputJsonSchema } from '../../support/input-schema';
@@ -231,9 +231,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
   ): ToolResultDisplay | undefined {
     if (existing.kind === 'unavailable') return undefined;
     const before = existing.kind === 'missing' ? '' : existing.text;
-    const summary = fileDiffSummary(before, before + content);
-    if (summary === undefined) return undefined;
-    return { kind: 'file_diff', added: summary.added, removed: summary.removed };
+    return fileDiffDisplay(before, before + content);
   }
 
   /**
@@ -249,13 +247,8 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     content: string,
     existing: ExistingText,
   ): ToolResultDisplay | undefined {
-    if (existing.kind === 'missing') {
-      return { kind: 'file_diff', added: countLines(content), removed: 0 };
-    }
     if (existing.kind === 'unavailable') return undefined;
-    const summary = fileDiffSummary(existing.text, content);
-    if (summary === undefined) return undefined;
-    return { kind: 'file_diff', added: summary.added, removed: summary.removed };
+    return fileDiffDisplay(existing.kind === 'missing' ? '' : existing.text, content);
   }
 
   /**
@@ -336,4 +329,22 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       result,
     };
   }
+}
+
+/**
+ * The `file_diff` display of a write: exact counts plus the first changed
+ * lines. Replaced text is never carried (only `content` is the call's own),
+ * so an overwrite's deletions keep their line numbers alone.
+ */
+function fileDiffDisplay(before: string, after: string): ToolResultDisplay | undefined {
+  const details = fileDiffDetails(before, after, { deletedText: false });
+  // A new file too large to diff can only have gained lines: keep the count.
+  if (details === undefined) return before === '' ? { kind: 'file_diff', added: countLines(after), removed: 0 } : undefined;
+  return {
+    kind: 'file_diff',
+    added: details.added,
+    removed: details.removed,
+    preview: details.preview,
+    previewTotal: details.previewTotal,
+  };
 }

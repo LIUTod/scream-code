@@ -7,6 +7,8 @@ import { resolveThemeSync, type Theme } from './index';
 
 export interface ScreamTUIThemeBundle {
   resolvedTheme: ResolvedTheme;
+  /** Terminal background the palette was derived from, when it was known. */
+  backgroundHex?: string;
   colors: ColorPalette;
   styles: ThemeStyles;
   markdownTheme: MarkdownTheme;
@@ -15,11 +17,14 @@ export interface ScreamTUIThemeBundle {
 export function createScreamTUIThemeBundle(
   theme: Theme,
   resolvedTheme?: ResolvedTheme,
+  /** Terminal background (`#rrggbb`) when the terminal reported one. */
+  backgroundHex?: string,
 ): ScreamTUIThemeBundle {
   const actualTheme = resolvedTheme ?? resolveThemeSync(theme);
-  const colors = { ...getColorPalette(actualTheme) };
+  const colors = { ...getColorPalette(actualTheme, backgroundHex) };
   return {
     resolvedTheme: actualTheme,
+    ...(backgroundHex === undefined ? {} : { backgroundHex }),
     colors,
     styles: createThemeStyles(colors),
     markdownTheme: createMarkdownTheme(colors),

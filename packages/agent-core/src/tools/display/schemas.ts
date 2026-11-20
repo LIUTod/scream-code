@@ -123,6 +123,20 @@ export const ToolResultDisplaySchema = z.discriminatedUnion('kind', [
     kind: z.literal('file_diff'),
     added: z.number().int().nonnegative(),
     removed: z.number().int().nonnegative(),
+    // The first changed lines with their file line numbers, for the inline
+    // preview under a folded block (see `fileDiffDetails`). Text only where
+    // the call's own arguments carried it; absent on older records.
+    preview: z
+      .array(
+        z.object({
+          kind: z.enum(['add', 'delete']),
+          line: z.number().int().positive(),
+          text: z.string().optional(),
+        }),
+      )
+      .optional(),
+    /** Changed lines in all (the preview may hold fewer). */
+    previewTotal: z.number().int().nonnegative().optional(),
   }),
   z.object({
     kind: z.literal('search_results'),

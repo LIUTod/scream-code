@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { countLines, fileDiffSummary } from '../../src/tools/support/file-diff';
+import { countLines, fileDiffSummary, fileDiffDetails, FILE_DIFF_PREVIEW_ROWS } from '../../src/tools/support/file-diff';
 
 describe('countLines', () => {
   it('counts the empty string as zero lines', () => {
@@ -98,5 +98,27 @@ describe('fileDiffSummary', () => {
     const started = Date.now();
     expect(fileDiffSummary(before, after)).toBeUndefined();
     expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe('fileDiffDetails', () => {
+  it('numbers changed lines in the file and keeps only the first rows of a large change', () => {
+    const before = Array.from({ length: 30 }, (_, i) => `line ${String(i + 1)}`).join('\n') + '\n';
+    const after = before.replace('line 5\n', 'line five\n') + Array.from({ length: 20 }, (_, i) => `extra ${String(i)}`).join('\n') + '\n';
+    const details = fileDiffDetails(before, after, { deletedText: true });
+    expect(details?.preview[0]).toEqual({ kind: 'delete', line: 5, text: 'line 5' });
+    expect(details?.preview[1]).toEqual({ kind: 'add', line: 5, text: 'line five' });
+    expect(details?.preview[2]).toEqual({ kind: 'add', line: 31, text: 'extra 0' });
+    expect(details?.preview).toHaveLength(FILE_DIFF_PREVIEW_ROWS);
+    expect(details?.previewTotal).toBe(22);
+    expect(details?.added).toBe(21);
+    expect(details?.removed).toBe(1);
+  });
+
+  it('drops deleted text unless the call carried it', () => {
+    expect(fileDiffDetails('a\nb\n', 'a\nc\n', { deletedText: false })?.preview).toEqual([
+      { kind: 'delete', line: 2, text: undefined },
+      { kind: 'add', line: 2, text: 'c' },
+    ]);
   });
 });

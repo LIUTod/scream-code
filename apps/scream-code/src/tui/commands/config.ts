@@ -878,7 +878,9 @@ async function applyThemeChoice(host: SlashCommandHost, theme: Theme): Promise<v
   }
 
   const resolved = theme === 'auto' ? host.state.theme.resolvedTheme : theme;
-  host.applyTheme(theme, resolved);
+  // Keep the known ground when staying on `auto`; an explicit dark/light switch
+  // means "ignore the terminal", so the surface goes back to the fallback.
+  host.applyTheme(theme, resolved, theme === 'auto' ? host.state.theme.backgroundHex : undefined);
   host.refreshTerminalThemeTracking();
   const detail = theme === 'auto' ? ` (tracking terminal; current: ${resolved})` : '';
   host.showStatus(`Theme set to "${theme}"${detail}.`);

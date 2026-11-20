@@ -101,9 +101,12 @@ export const zh: Record<string, string> = {
 
   // ─── 底部提示 ─────────────────
   'footer.context_label': '📨 Context',
-  'footer.hit': '缓存命中',
+  // Footer metric labels (cache hit, channel state/platform) stay English in
+  // every locale — product decision, so a reader sees the same abbreviation
+  // regardless of the UI language. The counters on the same row stay localized.
+  'footer.hit': 'Cache hit',
   // Shorter label used before the cache-hit readout is dropped on narrow terminals.
-  'footer.hit_short': '缓存',
+  'footer.hit_short': 'Cache',
   'footer.git_label': '📁 Git',
   'footer.line_status': 'Line: {status}',
   'footer.line_short': 'Line',
@@ -112,9 +115,9 @@ export const zh: Record<string, string> = {
   'away.title': '你不在时',
   'away.continued': '接着干完：{title}',
   'away.waiting': '{count} 件等你处理 → /jobs',
-  'footer.line_disconnected': '未连接',
-  'footer.line_wechat': '微信',
-  'footer.line_lark': '飞书',
+  'footer.line_disconnected': 'Disconnected',
+  'footer.line_wechat': 'WeChat',
+  'footer.line_lark': 'Lark',
   'footer.tasks_running': '后台任务 x{count}',
   'footer.agents_running': '后台Agent x{count}',
   'footer.subagents_working': '前台Agent x{count}',
@@ -1656,6 +1659,9 @@ export const zh: Record<string, string> = {
   'blockrows.item_collapsed': '折叠时的高度（含标题行）',
   'blockrows.item_tool': '展开时每个工具结果的行数',
   'blockrows.item_thinking': '展开时每段思考的行数',
+  'blockrows.item_edit_preview': '折叠时每个编辑预览的行数（0 = 关闭）',
+  'activitygroup.edit_more': '…还有 {count} 行',
+  'activitygroup.edit_removed': '删除 {count} 行',
   'blockrows.current': '当前: {value}',
   'blockrows.saved': '{label} → {value} 行',
   'registry.codebg_desc': '开关代码块的背景色面板（关闭后代码靠自身颜色与缩进区分），选择后立即生效并持久保存',

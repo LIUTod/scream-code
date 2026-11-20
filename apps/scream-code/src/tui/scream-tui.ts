@@ -118,6 +118,8 @@ export interface ScreamTUIStartupInput {
   readonly workDir: string;
   readonly startupNotice?: string;
   readonly resolvedTheme?: ResolvedTheme;
+  /** Terminal background (`#rrggbb`) from OSC 11 — see `resolvedTheme`. */
+  readonly resolvedBackground?: string;
   /** When true, the shell already fired a detached update-cache refresh before
    * the TUI starts, so checkForUpdates() reads the cache instead of awaiting a
    * network round-trip. A cold cache simply skips the hint for this launch —
@@ -248,6 +250,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
         startupNotice: startupInput.startupNotice,
       },
       resolvedTheme: startupInput.resolvedTheme,
+      resolvedBackground: startupInput.resolvedBackground,
     };
     this.options = tuiOptions;
     this.startupNotice = startupInput.startupNotice;
@@ -749,10 +752,15 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.lifecycleController.refreshTerminalThemeTracking();
   }
 
-  applyResolvedAutoTheme(resolved: ResolvedTheme): void {
+  applyResolvedAutoTheme(resolved: ResolvedTheme, background?: string): void {
     if (this.state.appState.theme !== 'auto') return;
-    if (this.state.theme.resolvedTheme === resolved) return;
-    this.applyTheme('auto', resolved);
+    // Rebuild when either the mode or the ground changed: the palette's code
+    // surface is derived from the ground, so a ground-only change still has to
+    // reach the markdown theme (it captures colours at construction).
+    if (this.state.theme.resolvedTheme === resolved && this.state.theme.backgroundHex === background) {
+      return;
+    }
+    this.applyTheme('auto', resolved, background);
   }
 
   /**
@@ -1397,8 +1405,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.inputController.updateEditorBorderHighlight(text);
   }
 
-  applyTheme(theme: Theme, resolved?: ResolvedTheme): void {
-    this.lifecycleController.applyTheme(theme, resolved);
+  applyTheme(theme: Theme, resolved?: ResolvedTheme, background?: string): void {
+    this.lifecycleController.applyTheme(theme, resolved, background);
   }
 
   // =========================================================================
