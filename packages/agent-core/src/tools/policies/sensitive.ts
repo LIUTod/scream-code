@@ -80,3 +80,41 @@ export function isSensitiveFile(path: string): boolean {
 
   return false;
 }
+
+/** Home-relative files that hold tokens or passwords in plain text. */
+const SECRET_HOME_FILES = new Set([
+  '.npmrc',
+  '.netrc',
+  '.pypirc',
+  '.git-credentials',
+  '.pgpass',
+  '.docker/config.json',
+  '.kube/config',
+  '.config/gh/hosts.yml',
+  '.scream-code/config.toml',
+]);
+/** Home-relative folders whose files are secrets (public keys and host lists aside). */
+const SECRET_HOME_DIRS = new Set(['.ssh', '.aws', '.gnupg']);
+const SECRET_DIR_EXEMPT = new Set(['known_hosts', 'known_hosts.old', 'config']);
+/** A config-ish file whose name says it holds a credential. */
+const SECRET_NAME = /(?:token|credential|secret|auth)[\w.-]*\.(?:json|toml|ya?ml|ini|txt)$/i;
+
+/**
+ * Files whose content is a credential: what the yolo hard floor guards before
+ * data may leave the machine. Broader than `isSensitiveFile` (which blocks
+ * access outright), narrower than "any file outside the workspace" — reading
+ * someone's open-source repo or the docs next door is not a secret.
+ */
+export function isSecretBearingPath(path: string, home: string): boolean {
+  if (isSensitiveFile(path)) return true;
+  const normalized = path.replaceAll('\\', '/');
+  const name = basename(normalized).toLowerCase();
+  if (SECRET_NAME.test(name)) return true;
+  const homePrefix = `${home.replaceAll('\\', '/').replace(/\/+$/, '')}/`;
+  if (home === '' || !normalized.startsWith(homePrefix)) return false;
+  const rel = normalized.slice(homePrefix.length);
+  if (SECRET_HOME_FILES.has(rel)) return true;
+  const top = rel.split('/')[0] ?? '';
+  if (!SECRET_HOME_DIRS.has(top) || rel === top) return false;
+  return !name.endsWith('.pub') && !SECRET_DIR_EXEMPT.has(name);
+}

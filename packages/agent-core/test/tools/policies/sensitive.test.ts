@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isSensitiveFile } from '../../../src/tools/policies/sensitive';
+import { isSecretBearingPath, isSensitiveFile } from '../../../src/tools/policies/sensitive';
 
 describe('isSensitiveFile', () => {
   it('flags base .env files in any directory', () => {
@@ -66,6 +66,35 @@ describe('isSensitiveFile', () => {
       '/app/.ENV.EXAMPLE',
     ]) {
       expect(isSensitiveFile(path), path).toBe(false);
+    }
+  });
+});
+
+describe('isSecretBearingPath', () => {
+  const home = '/home/me';
+  it('flags credential files, not ordinary files outside the workspace', () => {
+    for (const path of [
+      '/work/app/.env',
+      '/home/me/.npmrc',
+      '/home/me/.netrc',
+      '/home/me/.docker/config.json',
+      '/home/me/.kube/config',
+      '/home/me/.scream-code/config.toml',
+      '/home/me/.ssh/id_ed25519',
+      '/home/me/.aws/credentials',
+      '/opt/svc/api-token.json',
+    ]) {
+      expect(isSecretBearingPath(path, home), path).toBe(true);
+    }
+    for (const path of [
+      '/home/me/Downloads/oss/README.md',
+      '/home/me/.ssh/id_ed25519.pub',
+      '/home/me/.ssh/known_hosts',
+      '/home/me/.zshrc',
+      '/tmp/notes.txt',
+      '/other/.npmrc-guide/readme.md',
+    ]) {
+      expect(isSecretBearingPath(path, home), path).toBe(false);
     }
   });
 });

@@ -229,7 +229,9 @@ export class YoloHardFloorAskPermissionPolicy implements PermissionPolicy {
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     if (this.agent.permission.mode !== 'yolo') return;
 
-    const egress = assessPrivateReadEgress(this.agent, context);
+    // yolo keeps the egress check for credential files only: reading another
+    // project or the docs next door then fetching a page is not a leak.
+    const egress = assessPrivateReadEgress(this.agent, context, { secretsOnly: true });
     if (egress !== undefined) {
       return {
         kind: 'ask',

@@ -51,11 +51,14 @@ export interface PrivateReadEgressAssessment {
 export function assessPrivateReadEgress(
   agent: Agent,
   context: PermissionPolicyContext,
+  options: { readonly secretsOnly?: boolean } = {},
 ): PrivateReadEgressAssessment | undefined {
   const permission = agent.permission;
-  if (permission.taintedPrivateReads.length === 0 && !permission.hasPendingPrivateReads()) {
-    return undefined;
-  }
+  const tainted =
+    options.secretsOnly === true
+      ? permission.taintedSecretReads.length > 0 || permission.hasPendingSecretReads()
+      : permission.taintedPrivateReads.length > 0 || permission.hasPendingPrivateReads();
+  if (!tainted) return undefined;
   const hosts = egressHosts(context);
   if (hosts === undefined) return undefined;
   if (hasMatchingSessionGrant(agent, context)) return undefined;

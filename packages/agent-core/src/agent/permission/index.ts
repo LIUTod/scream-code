@@ -2,6 +2,7 @@ import type { Agent } from '..';
 import type { PrepareToolExecutionResult } from '../../loop';
 import type { ToolFileAccess, ToolFileAccessOperation, ToolResourceAccess } from '../../loop/tool-access';
 import { isWithinDirectory, type PathClass } from '../../tools/policies/path-access';
+import { isSecretBearingPath } from '../../tools/policies/sensitive';
 import { createPermissionDecisionPolicies } from './policies';
 import { EGRESS_COMMAND_PATTERN } from './policies/private-read-egress-ask';
 import type {
@@ -86,6 +87,13 @@ export class PermissionManager {
    */
   private readonly localPendingPrivateReads = new Map<string, string>();
   private readonly localTaintedPrivateReads = new Set<string>();
+  /**
+   * The subset of those reads that touched a credential file
+   * (`isSecretBearingPath`): pending ids, then settled descriptions. The yolo
+   * hard floor guards egress on these only.
+   */
+  private readonly localPendingSecretReads = new Set<string>();
+  private readonly localTaintedSecretReads = new Set<string>();
   private nextApprovalId = 0;
   /**
    * Tools whose approval already timed out in the current turn. The user was
@@ -280,6 +288,16 @@ export class PermissionManager {
    * `[Read /tmp/secret, Bash(curl …)]` never sees the taint — the egress
    * guard reads this flag too and fails closed during that window.
    */
+  /** Settled credential-file reads of this agent and its parent chain. */
+  get taintedSecretReads(): readonly string[] {
+    return [...this.localTaintedSecretReads, ...(this.parent?.taintedSecretReads ?? [])];
+  }
+
+  /** True while a credential-file read has not settled, here or up the chain. */
+  hasPendingSecretReads(): boolean {
+    return this.localPendingSecretReads.size > 0 || (this.parent?.hasPendingSecretReads() ?? false);
+  }
+
   hasPendingPrivateReads(): boolean {
     return (
       this.localPendingPrivateReads.size > 0 || (this.parent?.hasPendingPrivateReads() ?? false)
@@ -296,8 +314,10 @@ export class PermissionManager {
     const description = this.localPendingPrivateReads.get(toolCallId);
     if (description === undefined) return;
     this.localPendingPrivateReads.delete(toolCallId);
+    const secret = this.localPendingSecretReads.delete(toolCallId);
     if (failed) return;
     this.localTaintedPrivateReads.add(description);
+    if (secret) this.localTaintedSecretReads.add(description);
   }
 
   /**
@@ -320,16 +340,20 @@ export class PermissionManager {
       const path = outsidePathInShellCommand(context, cwd, pathClass, this.agent.jian.gethome());
       if (path !== undefined) {
         this.localPendingPrivateReads.set(context.toolCall.id, formatPrivateReadDescription(path));
+        if (isSecretBearingPath(path, this.agent.jian.gethome())) this.localPendingSecretReads.add(context.toolCall.id);
       }
       return;
     }
     const privateReads = accesses.filter(isPrivateReadAccess);
     if (privateReads.length === 0) return;
-    const access = privateReads.find(
-      (fileAccess) => !isWithinDirectory(fileAccess.path, cwd, pathClass),
-    );
+    const home = this.agent.jian.gethome();
+    // A credential file counts wherever it is — a `.env` in the workspace too.
+    const secret = privateReads.find((fileAccess) => isSecretBearingPath(fileAccess.path, home));
+    const access =
+      privateReads.find((fileAccess) => !isWithinDirectory(fileAccess.path, cwd, pathClass)) ?? secret;
     if (access === undefined) return;
     this.localPendingPrivateReads.set(context.toolCall.id, formatPrivateReadDescription(access.path));
+    if (secret !== undefined) this.localPendingSecretReads.add(context.toolCall.id);
   }
 
   async beforeToolCall(

