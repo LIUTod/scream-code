@@ -8,7 +8,7 @@ import { visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { describe, expect, it, vi } from 'vitest';
 
-import { CustomEditor } from '#/tui/components/editor/custom-editor';
+import { CustomEditor, idleModeMark, modeMark } from '#/tui/components/editor/custom-editor';
 import { permissionModeLabel } from '#/tui/permission-mode-label';
 import type { ColorPalette, ResolvedTheme } from '#/tui/theme/colors';
 import { getColorPalette } from '#/tui/theme/index';
@@ -349,9 +349,9 @@ describe('CustomEditor permission mode badge', () => {
 
           const out = topBorder(editor);
 
-          expect(out).toContain(chalk.hex(modeHex).bold(` ${permissionModeLabel(mode)} ✎﹏ `));
+          expect(out).toContain(chalk.hex(modeHex).bold(` ${permissionModeLabel(mode)} ${idleModeMark(mode)} `));
           expect(out).toContain(chalk.hex(borderHex)('──'));
-          expect(out).not.toContain(chalk.hex(borderHex).bold(` ${permissionModeLabel(mode)} ✎﹏ `));
+          expect(out).not.toContain(chalk.hex(borderHex).bold(` ${permissionModeLabel(mode)} ${idleModeMark(mode)} `));
         });
       });
     }
@@ -376,11 +376,11 @@ describe('CustomEditor permission mode badge', () => {
       setBorderColor(editor, fusionPlanBorder);
       const lightOutput = topBorder(editor);
 
-      expect(normalOutput).toContain(chalk.hex('#FF7043').bold(` ${permissionModeLabel('auto')} ✎﹏ `));
+      expect(normalOutput).toContain(chalk.hex('#FF7043').bold(` ${permissionModeLabel('auto')} ${idleModeMark('auto')} `));
       expect(normalOutput).toContain(chalk.hex(normalBorder)('──'));
-      expect(planOutput).toContain(chalk.hex('#FF7043').bold(` ${permissionModeLabel('auto')} ✎﹏ `));
+      expect(planOutput).toContain(chalk.hex('#FF7043').bold(` ${permissionModeLabel('auto')} ${idleModeMark('auto')} `));
       expect(planOutput).toContain(chalk.hex(planBorder)('──'));
-      expect(lightOutput).toContain(chalk.hex('#C2410C').bold(` ${permissionModeLabel('auto')} ✎﹏ `));
+      expect(lightOutput).toContain(chalk.hex('#C2410C').bold(` ${permissionModeLabel('auto')} ${idleModeMark('auto')} `));
       expect(lightOutput).toContain(chalk.hex(fusionPlanBorder)('──'));
     });
   });
@@ -397,7 +397,7 @@ describe('CustomEditor permission mode badge', () => {
       const out = topBorder(editor, 60);
       const borderBadge = chalk.bgHex(borderHex).hex('#FFFFFF');
 
-      expect(out).toContain(chalk.hex('#9CDCFE').bold(` ${permissionModeLabel('ask')} ✎﹏ `));
+      expect(out).toContain(chalk.hex('#9CDCFE').bold(` ${permissionModeLabel('ask')} ${idleModeMark('ask')} `));
       expect(out).toContain(borderBadge(' Think '));
       expect(out).toContain(borderBadge(' First skill '));
     });
@@ -424,12 +424,12 @@ describe('CustomEditor permission mode badge', () => {
     expect(topBorder(editor)).toContain('YES');
   });
 
-  it('closes the mode badge with the ✎﹏ mark without overflowing the border', () => {
+  it('closes the mode badge with its transport mark without overflowing the border', () => {
     const editor = makeEditor();
     editor.permissionMode = 'yolo';
 
-    expect(topBorder(editor, 40)).toContain(`${permissionModeLabel('yolo')} ✎﹏`);
-    // ✎ is one cell and ﹏ is two, so the prefix must not shift the border.
+    expect(topBorder(editor, 40)).toContain(`${permissionModeLabel('yolo')} ▸`);
+    // Every mark is one cell per glyph, so the prefix must not shift the border.
     for (const width of [10, 12, 20, 40, 80]) {
       const line = topBorder(editor, width);
       expect(visibleWidth(line), `width ${width}`).toBeLessThanOrEqual(width);
@@ -496,5 +496,25 @@ describe('CustomEditor permission mode badge', () => {
       editor.handleInput(seq);
       expect(editor.getText(), JSON.stringify(seq)).toBe('half a sentence');
     }
+  });
+
+  it('marks how far each mode lets the agent run, flowing while it works and holding while it waits', () => {
+    expect(['auto', 'yolo', 'ask', 'bot'].map((mode) => idleModeMark(mode as never))).toEqual(['▸▸', '▸', '‖', '↻']);
+    // Working: the arrows flow frame by frame; BOT turns; ASK holds.
+    expect([0, 240, 480].map((now) => modeMark('auto', 'running', now, true))).toEqual(['▹▸▸', '▸▹▸', '▸▸▹']);
+    expect([0, 240].map((now) => modeMark('yolo', 'running', now, true))).toEqual(['▹▸', '▸▹']);
+    expect([0, 240].map((now) => modeMark('bot', 'running', now, true))).toEqual(['↻', '↺']);
+    expect(modeMark('ask', 'running', 240, true)).toBe('‖');
+    // Motion off: the first frame, always.
+    expect(modeMark('auto', 'running', 480, false)).toBe('▹▸▸');
+    // Waiting on the person: the pause mark in every mode.
+    expect(modeMark('auto', 'waiting', 0, true)).toBe('‖');
+
+    const editor = makeEditor();
+    editor.permissionMode = 'yolo';
+    editor.activity = 'waiting';
+    expect(topBorder(editor, 40)).toContain(`${permissionModeLabel('yolo')} ‖`);
+    editor.activity = 'running';
+    expect(topBorder(editor, 40)).toMatch(/YES [▹▸]{2}/);
   });
 });

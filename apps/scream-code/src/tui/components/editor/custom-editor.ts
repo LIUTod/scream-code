@@ -6,6 +6,7 @@ import { Editor, isKeyRelease, matchesKey, Key, visibleWidth, type TUI } from '@
 import type { PermissionMode, ThinkingEffort } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 
+import { motionEnabled } from '#/tui/utils/motion';
 import { permissionModeLabel } from '#/tui/permission-mode-label';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { createEditorTheme } from '#/tui/theme/pi-tui-theme';
@@ -250,6 +251,8 @@ export class CustomEditor extends Editor {
   toolPriority: 'default' | 'skill' | 'mcp' | undefined;
   /** Current permission mode — always shown as a badge at the top-left of the input box border. */
   permissionMode: PermissionMode = 'yolo';
+  /** Drives the mode mark (see `modeMark`); synced from the app state. */
+  activity: EditorActivity = 'idle';
   /** Current border colour hex — kept in sync with borderColor by the host. */
   borderHex = '#79eb00';
 
@@ -344,6 +347,9 @@ export class CustomEditor extends Editor {
       paint: this.borderColor ?? ((s: string) => s),
       modeHex: getPermissionModeColor(this.permissionMode, this.colors),
       borderHex: this.borderHex,
+      activity: this.activity,
+      warningHex: this.colors.warning,
+      dimHex: this.colors.textDim,
     });
     return lines;
   }
@@ -610,11 +616,41 @@ export function wrapWithSideBorders(
 }
 
 const THINK_LABEL_MIN_WIDTH = 14;
+
+/** What the agent is doing, for the mode mark: idle, working, or waiting on the person. */
+export type EditorActivity = 'idle' | 'running' | 'waiting';
+
 /**
- * Decorative mark closing the permission-mode label (pen + wavy rule).
- * Width-safe: ✎ is 1 cell and ﹏ is 2, so the mark costs 3 columns.
+ * The mark after the permission-mode label, a transport control that says how
+ * far the mode lets the agent run: AUTO `▸▸` (all the way), YES `▸` (stops only
+ * for the high-risk few), ASK `‖` (reads, never changes), BOT `↻` (works on its
+ * own). While the agent works the arrows flow (`▹` travels along them) and BOT
+ * turns; while it waits on the person (an approval or a question) the badge
+ * shows `‖` in the warning colour, breathing. All marks are one-cell glyphs
+ * with no emoji presentation. With motion off every mark holds still.
  */
-const MODE_BADGE_MARK = '✎﹏';
+const MODE_MARKS: Readonly<Record<PermissionMode, { idle: string; running: readonly string[] }>> = {
+  auto: { idle: '▸▸', running: ['▹▸▸', '▸▹▸', '▸▸▹'] },
+  yolo: { idle: '▸', running: ['▹▸', '▸▹'] },
+  ask: { idle: '‖', running: ['‖'] },
+  bot: { idle: '↻', running: ['↻', '↺'] },
+};
+const MODE_MARK_FRAME_MS = 240;
+const WAITING_MARK = '‖';
+const WAITING_BREATH_MS = 700;
+
+/** The resting mark of a mode (exported for tests and the docs' examples). */
+export function idleModeMark(mode: PermissionMode): string {
+  return MODE_MARKS[mode].idle;
+}
+
+/** The mark for a mode in an activity state at `now`. */
+export function modeMark(mode: PermissionMode, activity: EditorActivity, now: number, motion: boolean): string {
+  if (activity === 'waiting') return WAITING_MARK;
+  if (activity === 'idle') return MODE_MARKS[mode].idle;
+  const frames = MODE_MARKS[mode].running;
+  return motion ? frames[Math.floor(now / MODE_MARK_FRAME_MS) % frames.length]! : frames[0]!;
+}
 
 function getPermissionModeColor(mode: PermissionMode, colors: ColorPalette): string {
   const modeColors: Record<PermissionMode, string> = {
@@ -648,6 +684,9 @@ interface BorderBadgeOptions {
   paint: (s: string) => string;
   modeHex: string;
   borderHex: string;
+  activity: EditorActivity;
+  warningHex: string;
+  dimHex: string;
 }
 
 /**
@@ -678,7 +717,18 @@ function injectBorderBadges(lines: string[], width: number, opts: BorderBadgeOpt
   // derived from the badge's real width (label + mark + padding + the two
   // leading border cells), so it stays honest as the text grows: below that
   // the badge would leave no fill at all.
-  const badgeLeft = paint('──') + chalk.hex(opts.modeHex).bold(` ${permissionModeLabel(opts.mode)} ${MODE_BADGE_MARK} `);
+  const now = Date.now();
+  const motion = motionEnabled();
+  const mark = modeMark(opts.mode, opts.activity, now, motion);
+  // Waiting on the person: the whole badge turns to the warning colour and
+  // breathes (dims every other beat) so the stop is seen at the input box.
+  const badgeHex =
+    opts.activity !== 'waiting'
+      ? opts.modeHex
+      : motion && Math.floor(now / WAITING_BREATH_MS) % 2 === 1
+        ? opts.dimHex
+        : opts.warningHex;
+  const badgeLeft = paint('──') + chalk.hex(badgeHex).bold(` ${permissionModeLabel(opts.mode)} ${mark} `);
   if (width >= visibleWidth(badgeLeft) + 1) {
     left = badgeLeft;
   }

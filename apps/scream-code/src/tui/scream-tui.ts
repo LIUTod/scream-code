@@ -1108,6 +1108,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     if ('permissionMode' in patch) {
       this.state.editor.permissionMode = patch.permissionMode ?? 'yolo';
     }
+    if ('streamingPhase' in patch || 'pendingUserAction' in patch) {
+      const app = this.state.appState;
+      this.state.editor.activity =
+        app.pendingUserAction !== null ? 'waiting' : app.streamingPhase === 'idle' ? 'idle' : 'running';
+    }
     // Stop the welcome breathing animation once the first message is sent —
     // the panel scrolls off-screen but the 40 ms timer keeps firing
     // requestRender, causing flicker and broken scroll.

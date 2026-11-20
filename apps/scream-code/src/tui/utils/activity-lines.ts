@@ -54,7 +54,7 @@ export const ACTIVITY_LINE_SETTINGS: readonly ActivityLineSetting[] = [
   {
     key: 'activityEditPreviewLines',
     label: 'blockrows.item_edit_preview',
-    values: [0, 2, 4, 6, 8],
+    values: [0, 4, 8, 12],
     fallback: ACTIVITY_GROUP_EDIT_PREVIEW_LINES,
   },
   {

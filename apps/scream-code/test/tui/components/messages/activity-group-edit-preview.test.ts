@@ -46,8 +46,8 @@ describe('ActivityGroupComponent — inline edit previews while folded', () => {
     const raw = group.render(WIDTH);
     const rows = raw.map(strip).filter((row) => row.trim().length > 0);
 
-    // Header + 13 rows (default budget 14).
-    expect(rows.length).toBeLessThanOrEqual(14);
+    // Header + 9 rows (default budget 10).
+    expect(rows.length).toBeLessThanOrEqual(10);
     // The newest edit: header then its three changed lines, numbered.
     const newest = rows.findIndex((row) => row.includes('f6.ts') && !row.includes(' old') && !row.includes(' new'));
     expect(rows[newest + 1]).toMatch(/60 - f6\.ts old/);
@@ -60,8 +60,9 @@ describe('ActivityGroupComponent — inline edit previews while folded', () => {
     expect(rows[newest + 3]).toMatch(/^ {2}└/);
     expect(rows.at(-1)).toBe(rows[newest + 3]);
     // An older edit that no longer fits keeps its header row alone.
-    expect(rows.some((row) => row.includes('f3.ts') && !row.includes(' old'))).toBe(true);
-    expect(rows.some((row) => row.includes('f3.ts old'))).toBe(false);
+    expect(rows.some((row) => row.includes('f5.ts old'))).toBe(true);
+    expect(rows.some((row) => row.includes('f4.ts') && !row.includes(' old'))).toBe(true);
+    expect(rows.some((row) => row.includes('f4.ts old'))).toBe(false);
     for (const line of raw) if (line.length > 0) expect(visibleWidth(line)).toBeLessThanOrEqual(WIDTH);
   });
 });

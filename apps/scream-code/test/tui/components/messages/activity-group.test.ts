@@ -1,4 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// The window tests below count steps against a 15-row tool budget; pin it so
+// they test the windowing, not whatever `/blockrows` defaults to.
+vi.mock('#/tui/utils/ui-preferences', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('#/tui/utils/ui-preferences')>();
+  return { ...actual, readActivityLinePrefs: () => ({ activityExpandedToolLines: 15 }) };
+});
+const PINNED_TOOL_LINES = 15;
 import chalk from 'chalk';
 
 import { t } from '@scream-code/config';
@@ -9,7 +17,6 @@ import {
   ACTIVITY_GROUP_COLLAPSED_LINES,
   ACTIVITY_GROUP_EXPANDED_LINES,
   ACTIVITY_GROUP_THINKING_EXCERPT_LINES,
-  ACTIVITY_GROUP_TOOL_EXPANDED_LINES,
   ACTIVITY_GROUP_TOOL_PREVIEW_LINES,
 } from '#/tui/constant/rendering';
 import { darkColors } from '#/tui/theme/colors';
@@ -301,7 +308,7 @@ describe('ActivityGroupComponent', () => {
     expect(branches).toHaveLength(2);
     expect(branches[0]).toContain('Bash');
     expect(branches[1]).toContain('Edit');
-    expect(previews.length).toBeLessThanOrEqual(ACTIVITY_GROUP_TOOL_EXPANDED_LINES * 2);
+    expect(previews.length).toBeLessThanOrEqual(PINNED_TOOL_LINES * 2);
     expect(previews.length).toBeGreaterThan(0);
     // Preview rows continue a branch with the card's own preview (the command
     // line for a shell tool) rather than repeating the branch header.
@@ -527,7 +534,7 @@ describe('ActivityGroupComponent', () => {
     group.setExpanded(true);
     const expandedRows = render(group).filter((line) => line.includes('output line'));
     expect(expandedRows.length).toBeGreaterThan(ACTIVITY_GROUP_TOOL_PREVIEW_LINES);
-    expect(expandedRows.length).toBeLessThanOrEqual(ACTIVITY_GROUP_TOOL_EXPANDED_LINES);
+    expect(expandedRows.length).toBeLessThanOrEqual(PINNED_TOOL_LINES);
 
     group.setExpanded(false);
     // Collapsed returns to the card's own summary: no result lines, and the
