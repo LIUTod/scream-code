@@ -1615,7 +1615,7 @@ export const en: Record<string, string> = {
   'service.token_limit_set': 'Daily token limit for background work: {limit}. Once reached, background tasks wait until the next day.',
   'service.keep_awake_on': 'Keep awake while work runs: on (on mains power only)',
   'service.keep_awake_off': 'Keep awake while work runs: off',
-  'service.keep_awake_note': 'A MacBook still sleeps when its lid is closed (unless an external display is attached).',
+  'service.keep_awake_note': 'A laptop still sleeps when the lid is closed (unless an external display is attached).',
   'service.toggle_keep_awake_on': 'Turn "keep awake while work runs" on',
   'service.toggle_keep_awake_off': 'Turn "keep awake while work runs" off',
   'service.restart': 'Restart the service',

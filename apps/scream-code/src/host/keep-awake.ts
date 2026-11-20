@@ -12,9 +12,10 @@
  * loop on Windows. So a dead host never leaves a machine that cannot sleep.
  *
  * On battery nothing is held: draining a laptop to keep a task going is not
- * what anybody asked for. What this cannot do: a MacBook still sleeps when its
+ * what anybody asked for. What this cannot do: a laptop still sleeps when its
  * lid is closed (unless an external display is attached), and a system the
- * person told to sleep still sleeps. The `/service` panel says so.
+ * person told to sleep still sleeps. The `/service` panel says so — on
+ * machines that have a lid, which is what `machineHasBattery` answers.
  */
 
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
@@ -85,13 +86,20 @@ export async function onMainsPower(platform: NodeJS.Platform = process.platform)
   return true;
 }
 
-/** Linux: on mains unless a battery exists and no mains supply reports online. */
-export function linuxOnMains(root: string): boolean {
+export interface LinuxPowerState {
+  /** A battery is present, i.e. this is a machine with a lid. */
+  readonly hasBattery: boolean;
+  /** Some mains/USB supply reports itself online. */
+  readonly mainsOnline: boolean;
+}
+
+/** Reads the Linux power-supply tree once (battery presence and mains state). */
+export function linuxPowerState(root: string): LinuxPowerState {
   let names: string[];
   try {
     names = readdirSync(root);
   } catch {
-    return true;
+    return { hasBattery: false, mainsOnline: false };
   }
   let hasBattery = false;
   let mainsOnline = false;
@@ -107,7 +115,36 @@ export function linuxOnMains(root: string): boolean {
     if (type === 'Battery') hasBattery = true;
     if ((type === 'Mains' || type === 'USB') && read('online') === '1') mainsOnline = true;
   }
+  return { hasBattery, mainsOnline };
+}
+
+/** Linux: on mains unless a battery exists and no mains supply reports online. */
+export function linuxOnMains(root: string): boolean {
+  const { hasBattery, mainsOnline } = linuxPowerState(root);
   return !hasBattery || mainsOnline;
+}
+
+/**
+ * Whether this machine has a battery — that is, whether it has a lid that can
+ * be closed while work is running.
+ *
+ * Only that case needs the caveat in `/service`: a desktop has no lid, so
+ * spelling the limitation out there is noise about hardware the person does not
+ * have. `undefined` means "could not tell" (no probe on this platform, or the
+ * probe failed) and callers stay quiet rather than claim something they cannot
+ * see.
+ */
+export async function machineHasBattery(platform: NodeJS.Platform = process.platform): Promise<boolean | undefined> {
+  try {
+    if (platform === 'darwin') {
+      const { stdout } = await execFileAsync('pmset', ['-g', 'batt'], { timeout: 5_000 });
+      return stdout.includes('InternalBattery');
+    }
+    if (platform === 'linux') return linuxPowerState('/sys/class/power_supply').hasBattery;
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 export interface KeepAwakeOptions {

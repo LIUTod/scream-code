@@ -1607,7 +1607,7 @@ export const zh: Record<string, string> = {
   'service.token_limit_set': '后台每日 token 上限：{limit}。到了上限，后台任务暂停到第二天。',
   'service.keep_awake_on': '任务运行时保持唤醒：开（仅接电源时）',
   'service.keep_awake_off': '任务运行时保持唤醒：关',
-  'service.keep_awake_note': 'MacBook 合上盖子仍会睡眠（接外接显示器时除外）。',
+  'service.keep_awake_note': '笔记本合上屏幕后仍会休眠（接外接显示器时除外）。',
   'service.toggle_keep_awake_on': '打开“任务运行时保持唤醒”',
   'service.toggle_keep_awake_off': '关闭“任务运行时保持唤醒”',
   'service.restart': '重启服务',

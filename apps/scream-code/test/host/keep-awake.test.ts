@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { inhibitorCommand, KeepAwake, linuxOnMains } from '#/host/keep-awake';
+import { inhibitorCommand, KeepAwake, linuxOnMains, linuxPowerState, machineHasBattery } from '#/host/keep-awake';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -46,6 +46,21 @@ describe('linuxOnMains', () => {
 
   it('is on battery when a battery exists and no mains supply is online', () => {
     expect(linuxOnMains(supplies({ AC: { type: 'Mains', online: '0' }, BAT0: { type: 'Battery' } }))).toBe(false);
+  });
+});
+
+describe('machineHasBattery', () => {
+  it('finds a battery in the Linux power-supply tree', () => {
+    expect(linuxPowerState(supplies({ AC: { type: 'Mains', online: '1' } })).hasBattery).toBe(false);
+    expect(
+      linuxPowerState(supplies({ AC: { type: 'Mains', online: '1' }, BAT0: { type: 'Battery' } })).hasBattery,
+    ).toBe(true);
+  });
+
+  it('answers "cannot tell" on a platform it has no probe for', async () => {
+    // Unknown must stay unknown: the /service lid caveat is hidden on it rather
+    // than describing hardware the person may not have.
+    await expect(machineHasBattery('aix')).resolves.toBeUndefined();
   });
 });
 

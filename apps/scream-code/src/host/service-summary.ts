@@ -12,6 +12,7 @@ import { listInbox } from '@scream-code/scream-code-sdk';
 import { loadLineConfig } from '#/line/config';
 
 import { readHostStatus } from './control';
+import { machineHasBattery } from './keep-awake';
 import { readServiceStatus, type ServiceStatus } from './service';
 import { formatTokenLimit } from '#/utils/usage/token-limit';
 import { getDataDir } from '#/utils/paths';
@@ -25,6 +26,12 @@ export interface ServiceSummary {
   readonly startedAt?: number | undefined;
   readonly channel: 'feishu' | 'weixin' | undefined;
   readonly keepAwake: boolean;
+  /**
+   * Whether the machine has a battery, i.e. a lid that can be closed while work
+   * runs. `undefined` when it could not be read, so the lid caveat stays hidden
+   * rather than describing hardware the person may not have.
+   */
+  readonly hasBattery?: boolean | undefined;
   readonly tokensToday: number;
   readonly dailyTokenLimit: number;
   /** Items in "waiting for you" (approvals, questions). */
@@ -40,14 +47,18 @@ export async function readServiceSummary(): Promise<ServiceSummary> {
   } catch {
     channel = undefined;
   }
+  const settings = readHostSettings();
+  // Only worth a probe when the lid caveat can actually appear.
+  const hasBattery = settings.keepAwake ? await machineHasBattery() : undefined;
   return {
     status,
     running: host.running,
     startedAt: host.startedAt,
     channel,
-    keepAwake: readHostSettings().keepAwake,
+    keepAwake: settings.keepAwake,
+    ...(hasBattery === undefined ? {} : { hasBattery }),
     tokensToday: hostTokensToday(),
-    dailyTokenLimit: readHostSettings().dailyTokenLimit,
+    dailyTokenLimit: settings.dailyTokenLimit,
     waiting: listInbox(getDataDir()).filter((item) => item.status === 'pending' && item.expiresAt > Date.now()).length,
   };
 }
@@ -102,6 +113,8 @@ export function serviceSummaryLines(summary: ServiceSummary, now: number = Date.
       : t('service.tokens_unlimited', { used: formatTokenLimit(summary.tokensToday) }),
   );
   lines.push(summary.keepAwake ? t('service.keep_awake_on') : t('service.keep_awake_off'));
-  if (summary.keepAwake && process.platform === 'darwin') lines.push(t('service.keep_awake_note'));
+  // Only where a lid exists: on a desktop the caveat describes hardware the
+  // person does not have, and an unreadable machine stays quiet.
+  if (summary.keepAwake && summary.hasBattery === true) lines.push(t('service.keep_awake_note'));
   return lines;
 }
