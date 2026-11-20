@@ -529,7 +529,7 @@ async function refreshModelsForPicker(host: SlashCommandHost): Promise<void> {
 // Pickers & config apply
 // ---------------------------------------------------------------------------
 
-function showEditorPicker(host: SlashCommandHost): void {
+function showEditorPicker(host: SlashCommandHost, back?: () => void): void {
   const currentValue = host.state.appState.editorCommand ?? '';
   host.mountEditorReplacement(
     new EditorSelectorComponent({
@@ -541,7 +541,9 @@ function showEditorPicker(host: SlashCommandHost): void {
       },
       onCancel: () => {
         host.restoreEditor();
+        back?.();
       },
+      breadcrumb: back === undefined ? undefined : t('settings.title'),
     }),
   );
 }
@@ -581,6 +583,7 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
 export async function showModelPicker(
   host: SlashCommandHost,
   selectedValue: string = host.state.appState.model,
+  back?: () => void,
 ): Promise<void> {
   const entries = Object.entries(host.state.appState.availableModels);
   if (entries.length === 0) {
@@ -612,7 +615,9 @@ export async function showModelPicker(
       },
       onCancel: () => {
         host.restoreEditor();
+        back?.();
       },
+      breadcrumb: back === undefined ? undefined : t('settings.title'),
     }),
   );
 }
@@ -828,7 +833,7 @@ async function persistModelSelection(host: SlashCommandHost, alias: string, thin
   return true;
 }
 
-function showThemePicker(host: SlashCommandHost): void {
+function showThemePicker(host: SlashCommandHost, back?: () => void): void {
   host.mountEditorReplacement(
     new ThemeSelectorComponent({
       currentValue: host.state.appState.theme,
@@ -839,7 +844,9 @@ function showThemePicker(host: SlashCommandHost): void {
       },
       onCancel: () => {
         host.restoreEditor();
+        back?.();
       },
+      breadcrumb: back === undefined ? undefined : t('settings.title'),
     }),
   );
 }
@@ -877,7 +884,7 @@ async function applyThemeChoice(host: SlashCommandHost, theme: Theme): Promise<v
   host.showStatus(`Theme set to "${theme}"${detail}.`);
 }
 
-export function showPermissionPicker(host: SlashCommandHost): void {
+export function showPermissionPicker(host: SlashCommandHost, back?: () => void): void {
   host.mountEditorReplacement(
     new PermissionSelectorComponent({
       currentValue: host.state.appState.permissionMode,
@@ -888,7 +895,9 @@ export function showPermissionPicker(host: SlashCommandHost): void {
       },
       onCancel: () => {
         host.restoreEditor();
+        back?.();
       },
+      breadcrumb: back === undefined ? undefined : t('settings.title'),
     }),
   );
 }
@@ -911,10 +920,11 @@ async function applyPermissionChoice(host: SlashCommandHost, mode: PermissionMod
   host.showNotice(`Permission mode: ${mode}`);
 }
 
-export function showSettingsSelector(host: SlashCommandHost): void {
+export function showSettingsSelector(host: SlashCommandHost, initialValue?: SettingsSelection): void {
   host.mountEditorReplacement(
     new SettingsSelectorComponent({
       colors: host.state.theme.colors,
+      initialValue,
       onSelect: (value) => {
         handleSettingsSelection(host, value);
       },
@@ -927,12 +937,16 @@ export function showSettingsSelector(host: SlashCommandHost): void {
 
 function handleSettingsSelection(host: SlashCommandHost, value: SettingsSelection): void {
   host.restoreEditor();
+  // Opened from /settings: the sub-menu names it (`设置 › 主题`) and Esc comes back.
+  const back = (): void => {
+    showSettingsSelector(host, value);
+  };
   switch (value) {
-    case 'model': void showModelPicker(host); return;
-    case 'language': handleLanguageCommand(host); return;
-    case 'permission': showPermissionPicker(host); return;
-    case 'theme': showThemePicker(host); return;
-    case 'editor': showEditorPicker(host); return;
+    case 'model': void showModelPicker(host, host.state.appState.model, back); return;
+    case 'language': handleLanguageCommand(host, back); return;
+    case 'permission': showPermissionPicker(host, back); return;
+    case 'theme': showThemePicker(host, back); return;
+    case 'editor': showEditorPicker(host, back); return;
     case 'usage': void showUsage(host); return;
   }
 }

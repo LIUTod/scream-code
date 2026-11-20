@@ -5,7 +5,6 @@ import type {
   TUI,
 } from '@liutod-scream/pi-tui';
 import { visibleWidth } from '@liutod-scream/pi-tui';
-import { t } from '@scream-code/config';
 import chalk from 'chalk';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -414,11 +413,12 @@ describe('CustomEditor permission mode badge', () => {
     expect(out).toContain('BOT');
   });
 
-  it('shows auto and yolo modes with their own labels', () => {
+  it('shows auto and yolo modes with their own labels, in English in every language', () => {
     const editor = makeEditor();
 
     editor.permissionMode = 'auto';
-    expect(topBorder(editor)).toContain(t('permission.auto'));
+    expect(topBorder(editor)).toContain('AUTO');
+    expect(topBorder(editor)).not.toContain('自动');
 
     editor.permissionMode = 'yolo';
     expect(topBorder(editor)).toContain('YES');
@@ -486,5 +486,15 @@ describe('CustomEditor permission mode badge', () => {
     expect(lines[0]).toContain('─');
     expect(lines[1]).toContain('hello');
     expect(lines[2]).toMatch(/^─+$/);
+  });
+
+  it('ignores Ctrl+R when the resume handler declines (mid-chat): the text is untouched', () => {
+    for (const seq of ['\u0012', '\u001B[114;5u', '\u001B[114;5:3u']) {
+      const editor = makeEditor();
+      editor.onCtrlR = () => false;
+      editor.setText('half a sentence');
+      editor.handleInput(seq);
+      expect(editor.getText(), JSON.stringify(seq)).toBe('half a sentence');
+    }
   });
 });

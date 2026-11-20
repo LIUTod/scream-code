@@ -172,6 +172,8 @@ export interface AppState {
    */
   reconnectErrorCode?: string;
   recentSessions: RecentSession[];
+  /** Memories in the store, read once at start for the welcome panel. */
+  memoryCount?: number;
   subagentUsage: SubagentUsageMap;
 }
 

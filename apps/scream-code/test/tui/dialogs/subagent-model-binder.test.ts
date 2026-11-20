@@ -280,7 +280,7 @@ describe('/model diy housekeeping binding', () => {
     showSubagentModelBinder(host);
     pick(currentPicker(host), 1);
 
-    expect(renderPicker(currentPicker(host))).toContain('← current');
+    expect(renderPicker(currentPicker(host))).toContain(t('dialog.current'));
   });
 });
 

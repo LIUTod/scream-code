@@ -3,7 +3,7 @@
  * when a terminal opens; the footer counts jobs; jobs start the background
  * without /service; system notifications; "同意" in the chat.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -72,6 +72,22 @@ describe('jobs without /service', () => {
     control.running = true;
     expect(await ensureBackgroundForJobs(await readJobsFooterStatus(), 1_000_000 + 20 * 60_000)).toBe(false);
   });
+
+  it('counts memories as waiting but not as needing a heads-up, like the background', async () => {
+    const { readJobsFooterStatus } = await import('#/tui/utils/jobs-status');
+    const dir = join(home, 'host', 'inbox');
+    mkdirSync(dir, { recursive: true });
+    const item = (id: string, kind: string): void => {
+      writeFileSync(
+        join(dir, `${id}.json`),
+        JSON.stringify({ id, kind, sessionId: 's', workDir: home, createdAt: 1, expiresAt: Number.MAX_SAFE_INTEGER, status: 'pending' }),
+      );
+    };
+    item('inbox-a', 'memory');
+    item('inbox-b', 'approval');
+    item('inbox-c', 'question');
+    expect(await readJobsFooterStatus()).toMatchObject({ waiting: 3, needsYou: 2 });
+  });
 });
 
 describe('footer jobs item', () => {
@@ -103,13 +119,49 @@ describe('footer jobs item', () => {
 describe('system notifications', () => {
   it('builds a safe command per platform and nothing elsewhere', async () => {
     const { desktopNotifyCommand } = await import('#/host/desktop-notify');
-    const mac = desktopNotifyCommand('darwin', 'Scream: "x"', 'line1\nline2');
-    expect(mac?.command).toBe('osascript');
-    expect(mac?.args[1]).toBe('display notification "line1 line2" with title "Scream: \\"x\\""');
-    expect(desktopNotifyCommand('linux', 't', 'b')).toEqual({ command: 'notify-send', args: ['--app-name=Scream', 't', 'b'] });
+    // Never osascript: its banners belong to Script Editor and a click opens it.
+    expect(desktopNotifyCommand('darwin', 't', 'b', null)).toBeUndefined();
+    const mac = desktopNotifyCommand('darwin', 'Scream: "x"', '-line1\nline2', '/opt/homebrew/bin/terminal-notifier');
+    expect(mac).toEqual({
+      command: '/opt/homebrew/bin/terminal-notifier',
+      args: ['-title', 'Scream: "x"', '-message', ' -line1 line2', '-group', 'scream'],
+    });
+    expect(desktopNotifyCommand('linux', 't', 'b')).toEqual({ command: 'notify-send', args: ['--app-name=Scream', '--', 't', 'b'] });
     const win = desktopNotifyCommand('win32', 'title; rm -rf', 'body');
     expect(win?.args.at(-1)).not.toContain('rm -rf');
     expect(desktopNotifyCommand('aix', 't', 'b')).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === 'win32')('finds terminal-notifier installed after a miss (a miss is not remembered)', async () => {
+    const { chmodSync } = await import('node:fs');
+    const { desktopNotifyCommand } = await import('#/host/desktop-notify');
+    const bin = mkdtempSync(join(tmpdir(), 'notifier-bin-'));
+    const previousPath = process.env['PATH'];
+    process.env['PATH'] = bin;
+    try {
+      expect(desktopNotifyCommand('darwin', 't', 'b')).toBeUndefined();
+      writeFileSync(join(bin, 'terminal-notifier'), '#!/bin/sh\n');
+      chmodSync(join(bin, 'terminal-notifier'), 0o755);
+      expect(desktopNotifyCommand('darwin', 't', 'b')?.command).toBe(join(bin, 'terminal-notifier'));
+    } finally {
+      process.env['PATH'] = previousPath;
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the heads-up to the terminal where the background cannot reach the person', async () => {
+    const { hostShowsDesktopNotifications } = await import('#/host/desktop-notify');
+    const all = (): boolean => true;
+    const none = (): boolean => false;
+    expect(hostShowsDesktopNotifications('darwin', {}, all)).toBe(true);
+    expect(hostShowsDesktopNotifications('darwin', {}, none)).toBe(false);
+    expect(hostShowsDesktopNotifications('linux', { WAYLAND_DISPLAY: 'wayland-0' }, all)).toBe(true);
+    expect(hostShowsDesktopNotifications('linux', { DISPLAY: ':0' }, none)).toBe(false);
+    expect(hostShowsDesktopNotifications('linux', {}, all)).toBe(false);
+    expect(hostShowsDesktopNotifications('win32', {}, all)).toBe(true);
+    expect(hostShowsDesktopNotifications('linux', { DISPLAY: ':0', SSH_CONNECTION: '1 2 3 4' }, all)).toBe(false);
+    expect(hostShowsDesktopNotifications('win32', { SSH_TTY: '/dev/pts/1' }, all)).toBe(false);
+    expect(hostShowsDesktopNotifications('aix', {}, all)).toBe(false);
   });
 });
 

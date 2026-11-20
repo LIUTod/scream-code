@@ -100,8 +100,7 @@ export const zh: Record<string, string> = {
     '请在 config.toml 对应服务商下设置 session_header = "{name}"，以提供网关要求的会话标识。',
 
   // ─── 底部提示 ─────────────────
-  'footer.context': '📨 Context：{bar} {percent}',
-  'footer.context_plain': '📨 Context：{percent}',
+  'footer.context_label': '📨 Context',
   'footer.hit': '缓存命中',
   // Shorter label used before the cache-hit readout is dropped on narrow terminals.
   'footer.hit_short': '缓存',
@@ -186,9 +185,13 @@ export const zh: Record<string, string> = {
   'input.large_cancelled': '输入已取消。',
 
   // ─── 欢迎 ─────────────────────
-  'welcome.like_active': 'like已激活',
-  'welcome.like_inactive': 'like未加载',
+  'welcome.like_active': 'like 已激活',
+  'welcome.like_inactive': 'like 未加载',
   'welcome.help_hint': '/help 查看帮助',
+  'welcome.hint_last': '上次会话：{title}（{time}）',
+  'welcome.hint_resume_key': '继续',
+  'welcome.hint_memory': '记忆 {count} 条',
+  'welcome.hint_waiting': '待处理 {count} 件',
 
   // ─── 语言 ─────────────────────
   'language.picker_title': '语言 / Language',
@@ -370,7 +373,7 @@ export const zh: Record<string, string> = {
   'mcp.update_plugin_blocked': '「{name}」由插件提供 —— 请在 /plugin 中更新。',
   'mcp.disabled_done': '{name} 已停用。',
   'mcp.options_title': 'Chrome DevTools 运行选项',
-  'mcp.options_hint': 'Enter 切换  Esc 放弃（只有「保存并重启」才写入）',
+  'mcp.options_hint': '↑↓ 选择 · Enter 切换 · Esc 放弃（只有「保存并重启」才写入）',
   'mcp.auth_action': '认证',
   'mcp.auth_needed_hint': '需要 OAuth：按 a 开始登录（会在浏览器打开授权页）。',
   'mcp.auth_discovering': '正在发现 {name} 的 OAuth 元数据…',
@@ -408,7 +411,7 @@ export const zh: Record<string, string> = {
   'mcp.skills_install_failed': '技能安装失败：{msg}',
   'mcp.skills_removed': '已移除 {count} 个上游技能。',
   'mcp.skills_remove_failed': '技能移除失败：{msg}',
-  'mcp.confirm_hint': 'Enter 确认  Esc 取消',
+  'mcp.confirm_hint': '↑↓ 选择 · Enter 确认 · Esc 取消',
   'mcp.uninstalled': '{name} 已卸载。',
   'mcp.no_session': '请先创建或恢复一个会话。',
   'mcp.manage_title': 'MCP 管理（{count} 已连接）',
@@ -425,7 +428,7 @@ export const zh: Record<string, string> = {
   'mcp.detected_starting': '已检测到安装，正在启动...',
   'mcp.start_failed': '启动失败: {msg}',
   'mcp.uninstall_failed': '卸载失败: {msg}',
-  'mcp.footer_hint': 'Enter 选择  a 认证  o 运行选项  d 卸载  Esc 返回',
+  'mcp.footer_hint': '↑↓ 选择 · Enter 确认 · a 认证 · o 运行选项 · d 卸载 · Esc 返回',
   'mcp.macos_only': '仅支持 macOS',
 
   // ─── line 通道 ─────────────────
@@ -635,10 +638,12 @@ export const zh: Record<string, string> = {
   'makeskill.wait': '请等待当前回复完成后再使用 /make-skill',
 
   // ─── 对话框通用 ───────────────
-  'dialog.nav': '↑↓ 导航',
+  'dialog.nav': '↑↓ 选择',
   'dialog.page': '←→ 翻页',
-  'dialog.select': 'Enter 选择',
+  'dialog.select': 'Enter 确认',
   'dialog.cancel': 'Esc 取消',
+  'dialog.back': 'Esc 返回',
+  'dialog.current': '← 当前',
   'dialog.search_placeholder': '(输入搜索)',
 
   // ─── 会话选择器 ───────────────
@@ -654,7 +659,7 @@ export const zh: Record<string, string> = {
   'session_picker.batch_hint': '[空格] 选择 · [a] 全选 · [d] 删除选中（{count}）',
   'session.picker_title': '会话 ',
   'session.delete_confirm': '⚠️ 按 Enter 确认删除，Esc 取消',
-  'session.picker_hint': '(↑↓ 导航，Enter 打开，空格 标记，a 全选，d 删除，Esc 取消)',
+  'session.picker_hint': '↑↓ 选择 · Enter 打开 · 空格 标记 · a 全选 · d 删除 · Esc 取消',
 
   // ─── 模型选择器 ───────────────
   'model.nav_model': '↑↓ 模型',
@@ -735,7 +740,7 @@ export const zh: Record<string, string> = {
   'memory.search_label': '搜索: ',
   'memory.notebook_title': '记忆备忘录 ',
   'memory.esc_clear_search': '(Esc 清除搜索)',
-  'memory.nav_hint': '(↑↓ 导航，Enter 查看，空格 标记，a 全选，i 注入，d 删除，/ 搜索，Esc 关闭)',
+  'memory.nav_hint': '↑↓ 选择 · Enter 查看 · 空格 标记 · a 全选 · i 注入 · d 删除 · / 搜索 · Esc 关闭',
   'memory.loading': '正在加载...',
   'memory.no_match': '未找到匹配 "{query}" 的记忆。',
   'memory.empty': '暂无记忆备忘录。',
@@ -1170,7 +1175,6 @@ export const zh: Record<string, string> = {
   'mcpstatus.more_summary': 'MCP 服务器: {count} 个更多 ({detail})',
 
   // ─── permission-selector ───────
-  'permission.auto': '自动',
   'permission.auto_desc': '完全无交互运行。工具操作自动批准，跳过代理问题以便其自行决策。',
   'permission.yolo_desc': '自动批准工具操作（含危险命令）。需要您决策时（提问、计划评审）代理仍会来找您。',
   'permission.bot_desc': '无人值守模式：可逆操作自动执行；其余一律拒绝，并在汇报中列出。',
@@ -1783,9 +1787,6 @@ export const zh: Record<string, string> = {
   'badge.wolfpack': '群狼',
   'badge.rlm': 'RLM',
   'badge.goal': '目标',
-  'badge.yes': 'YES',
-  'badge.bot': 'BOT',
-  'badge.ask': 'ASK',
 
   // ─── Knowledge Web (in-browser) ────
   'kw.embedding_downloading': '向量模型下载中…',
@@ -1862,6 +1863,7 @@ export const zh: Record<string, string> = {
   'host.notify.job_failed_body': '{title}，打开终端用 /jobs 查看',
   'host.notify.continued_title': 'Scream：交给后台的活干完了',
   'host.notify.waiting_title': 'Scream：有事等你处理',
+  'host.notify.waiting_body': '{count} 件待处理（/jobs 查看）',
   'host.msg.continued_done': '交给后台的工作做完了：{title}\n{detail}',
   'host.msg.continued_stopped': '交给后台的工作没能做完：{title}\n{detail}',
   'host.log.started_channel': '后台服务已启动（聊天通道：{channel}）。按 Ctrl+C 退出。',

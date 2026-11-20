@@ -66,25 +66,23 @@ export class FileMentionProvider implements AutocompleteProvider {
   ) {
     this.slashCommandItems = slashCommands.map((cmd) => {
       const ac = cmd as AutocompleteItem;
-      if (ac.label !== undefined && ac.label.length > 0) {
-        return {
-          value: ac.value ?? (ac as { name?: string }).name ?? '',
-          label: ac.label,
-        };
-      }
       const name = ac.value ?? (ac as { name?: string }).name ?? '';
+      if (ac.label !== undefined && ac.label.length > 0) {
+        const labelledDesc = ac.description ? truncateToWidth(ac.description, 60, '…') : '';
+        return { value: name, label: ac.label, description: labelledDesc === '' ? undefined : labelledDesc };
+      }
       const desc = ac.description ?? '';
-      const resolvedDesc = desc ? t(desc) : '';
-      const aliases = (cmd as { aliases?: readonly string[] }).aliases;
-      const aliasStr = aliases && aliases.length > 0 ? ` (${aliases.join(', ')})` : '';
+      const aliases = (cmd as { aliases?: readonly string[] }).aliases ?? [];
+      // Name and description are separate columns (the list aligns them);
+      // aliases lead the dim description, and a trailing "(yolo)" that only
+      // repeats the name or an alias is dropped.
+      const resolvedDesc = stripRepeatedName(desc ? t(desc) : '', [name, ...aliases]);
+      const described = [aliases.join(', '), resolvedDesc].filter((part) => part.length > 0).join(' · ');
       // Truncate the description so a long skill description can never
       // wrap the autocomplete line — a wrapped item breaks the renderer's
       // one-item-per-row assumption and corrupts the scroll viewport.
-      const shortDesc = resolvedDesc ? truncateToWidth(resolvedDesc, 60, '…') : '';
-      return {
-        value: name,
-        label: `/${name}${aliasStr}${shortDesc ? ` — ${shortDesc}` : ''}`,
-      };
+      const shortDesc = described ? truncateToWidth(described, 60, '…') : '';
+      return { value: name, label: `/${name}`, description: shortDesc === '' ? undefined : shortDesc };
     });
     this.inner = new CombinedAutocompleteProvider(slashCommands, workDir, fdPath);
   }
@@ -327,4 +325,11 @@ function toItem(path: string): AutocompleteItem {
     label: basename(path),
     description: path,
   };
+}
+
+/** "切换至只读问答模式(ask)" → "切换至只读问答模式" when "ask" is the command or an alias. */
+function stripRepeatedName(description: string, names: readonly string[]): string {
+  const match = /\s*[(（]([^()（）]+)[)）]\s*$/.exec(description);
+  if (match === null) return description;
+  return names.includes(match[1]!.trim()) ? description.slice(0, match.index).trimEnd() : description;
 }

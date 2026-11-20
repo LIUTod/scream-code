@@ -11,6 +11,8 @@ import chalk from 'chalk';
 import { highlight, supportsLanguage, type Theme } from 'cli-highlight';
 
 import type { ColorPalette } from './colors';
+import { SELECT_POINTER } from '#/tui/constant/symbols';
+import { selectedRow } from '#/tui/utils/select-row';
 import { isCodeBlockPanelEnabled } from '#/tui/utils/ui-preferences';
 import type { DiagramTheme } from '#/tui/utils/mermaid-diagram';
 
@@ -231,12 +233,16 @@ export function createEditorTheme(colors: ColorPalette): EditorTheme {
   const muted = chalk.hex(colors.textMuted);
   return {
     borderColor: (s) => chalk.hex(colors.border)(s),
+    // pointer / selectedLine: the shared selected-row look (utils/select-row).
     selectList: {
+      pointer: SELECT_POINTER,
+      selectedLine: (line: string, width: number) => selectedRow(colors, line, width),
       selectedPrefix: (s) => chalk.hex(colors.primary)(s),
-      selectedText: (s) => chalk.hex(colors.primary)(s),
+      selectedText: (s) => chalk.hex(colors.primary).bold(s),
       description: (s) => muted(s),
       scrollInfo: (s) => muted(s),
       noMatch: (s) => muted(s),
     },
   };
 }
+

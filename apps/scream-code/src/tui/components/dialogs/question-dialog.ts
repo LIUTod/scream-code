@@ -5,6 +5,7 @@
  * reviews everything before the answers are emitted upstream.
  */
 
+import { selectedRow } from '../../utils/select-row';
 import {
   Container,
   Input,
@@ -535,9 +536,10 @@ export class QuestionDialogComponent extends Container implements Focusable {
       const isSelected = question.multi_select ? multiSet.has(i) : singleSelection === i;
 
       if (this.isEditingOther() && isCursor && isOther) {
-        lines.push(this.renderEditingOtherLine(renderWidth, questionIdx, option, num, isSelected));
+        lines.push(selectedRow(this.colors, this.renderEditingOtherLine(renderWidth, questionIdx, option, num, isSelected), renderWidth));
         continue;
       }
+      const firstRow = lines.length;
 
       const label = this.renderOptionLabel(questionIdx, option, isCursor);
 
@@ -572,6 +574,10 @@ export class QuestionDialogComponent extends Container implements Focusable {
         !(this.isEditingOther() && isCursor && isOther)
       ) {
         appendWrapped(lines, '        ', '        ', option.description, renderWidth, dim);
+      }
+      // The option under the cursor, with its description, sits on the shared selection bar.
+      if (isCursor) {
+        for (let row = firstRow; row < lines.length; row++) lines[row] = selectedRow(this.colors, lines[row]!, renderWidth);
       }
     }
 

@@ -1,3 +1,4 @@
+import { sessionToResume } from '../utils/resume-last';
 import type { Session, ScreamHarness } from '@scream-code/scream-code-sdk';
 
 import { t } from '@scream-code/config';
@@ -50,6 +51,7 @@ export interface EditorKeyboardHost {
   toggleToolOutputExpansion(): void;
   togglePlanExpansion(): boolean;
   hideSessionPicker(): void;
+  resumeSession(sessionId: string): Promise<{ switched: boolean; blocked?: boolean }>;
   hideMemoryPicker(): void;
   hideHelpPanel(): void;
   /** Force a status-bar refresh (hides the empty-session hint after Ctrl+B). */
@@ -137,6 +139,18 @@ export class EditorKeyboardController {
       const currentTip = SESSION_TIPS[host.lifecycleController.currentTipIdx];
       if ((currentTip?.isAd ?? false) !== true) return false;
       openUrl(currentTip?.url ?? EMPTY_SESSION_HINT_URL);
+      return true;
+    };
+
+    // Ctrl+R resumes the last conversation the welcome names — only at the
+    // very start of the run, before any input (see sessionToResume). Anywhere
+    // else it falls through to the editor, which ignores it.
+    editor.onCtrlR = () => {
+      const last = sessionToResume(host.state);
+      if (last === undefined) return false;
+      void host.resumeSession(last.id).catch((error: unknown) => {
+        host.showError(error instanceof Error ? error.message : String(error));
+      });
       return true;
     };
 

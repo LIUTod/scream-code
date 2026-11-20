@@ -4,6 +4,7 @@
  * Container-based component with keyboard navigation.
  */
 
+import { selectedRow } from '../../utils/select-row';
 import {
   Container,
   Input,
@@ -423,13 +424,13 @@ export class ApprovalPanelComponent extends Container implements Focusable {
 
       const labelWithNum = `${String(num)}. ${option.label}`;
       if (this.feedbackMode && option.requires_feedback === true && isSelected) {
-        lines.push(indent(this.renderInlineFeedbackLine(width - 2, labelWithNum)));
+        lines.push(selectedRow(this.colors, indent(this.renderInlineFeedbackLine(width - 2, labelWithNum)), width));
       } else if (isSelected) {
-        // Breathing pixel block + bold label in the same vivid primary —
-        // the selected row reads as one visual unit.
+        // The shared selection bar; the pointer is the breathing pixel block
+        // instead of ❯, since this panel is waiting on the person.
         const indicator = chalk.hex(this.colors.primary)(PIXEL_PULSE_FRAMES[this.animFrame]!);
         const selectedLabel = chalk.bold.hex(this.colors.primary)(labelWithNum);
-        lines.push(indent(`${indicator} ${selectedLabel}`));
+        lines.push(selectedRow(this.colors, indent(`${indicator} ${selectedLabel}`), width));
       } else {
         lines.push(indent(dim(`  ${labelWithNum}`)));
       }

@@ -1,3 +1,4 @@
+import { breadcrumbPrefix } from './choice-picker';
 import type { ModelAlias, ThinkingEffort } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import {
@@ -12,7 +13,7 @@ import chalk from 'chalk';
 import { DEFAULT_OAUTH_PROVIDER_NAME, PRODUCT_NAME } from '#/constant/app';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { SearchableList } from '#/tui/utils/searchable-list';
-import { SELECT_POINTER } from '../../constant/symbols';
+import { currentMark, pointerCell, rowLabel, selectableRow } from '../../utils/select-row';
 
 
 type ThinkingAvailability = 'toggle' | 'always-on' | 'unsupported';
@@ -66,6 +67,8 @@ export interface ModelSelectorOptions {
   readonly imageGeneration?: ImageGenerationSummary;
   readonly onSelect: (selection: ModelSelection) => void;
   readonly onCancel: () => void;
+  /** The menu this one was opened from (see ChoicePickerOptions.breadcrumb). */
+  readonly breadcrumb?: string | undefined;
   /**
    * Fired immediately when the user cycles the thinking level with ←/→ for
    * the selected model. Persistence is the host's responsibility; Enter is
@@ -197,18 +200,17 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
     const navParts = [t('model.nav_model'), t('model.nav_thinking')];
     if (view.page.pageCount > 1) navParts.push(t('model.nav_page'));
-    navParts.push(t('model.nav_select'), t('model.nav_cancel'));
+    navParts.push(t('model.nav_select'), this.opts.breadcrumb === undefined ? t('model.nav_cancel') : t('dialog.back'));
 
     const titleSuffix =
       searchable && view.query.length === 0 ? chalk.hex(colors.textMuted)(`  ${t('model.search_placeholder')}`) : '';
     const lines: string[] = [
       chalk.hex(colors.primary)('─'.repeat(width)),
-      chalk.hex(colors.primary).bold(t('model.select_title')) + titleSuffix,
+      ' ' + breadcrumbPrefix(this.opts.breadcrumb, colors) + chalk.hex(colors.primary).bold(t('model.select_title').trim()) + titleSuffix,
     ];
     if (searchable && view.query.length > 0) {
       lines.push(chalk.hex(colors.primary)(t('model.search_label')) + chalk.hex(colors.text)(view.query));
     }
-    lines.push(chalk.hex(colors.textMuted)(` ${navParts.join(' · ')}`));
     lines.push('');
 
     if (choices.length === 0) {
@@ -218,14 +220,9 @@ export class ModelSelectorComponent extends Container implements Focusable {
       const choice = choices[i]!;
       const isSelected = i === view.selectedIndex;
       const isCurrent = choice.alias === this.opts.currentValue;
-      const pointer = isSelected ? SELECT_POINTER : ' ';
-      const labelStyle = isSelected ? chalk.hex(colors.primary).bold : chalk.hex(colors.text);
-      let line = chalk.hex(isSelected ? colors.primary : colors.textDim)(`  ${pointer} `);
-      line += labelStyle(choice.label);
-      if (isCurrent) {
-        line += ' ' + chalk.hex(colors.success)('← current');
-      }
-      lines.push(line);
+      let line = `  ${pointerCell(colors, isSelected)}` + rowLabel(colors, isSelected)(choice.label);
+      if (isCurrent) line += currentMark(colors);
+      lines.push(selectableRow(colors, line, width, isSelected));
     }
 
     lines.push('');
@@ -260,6 +257,8 @@ export class ModelSelectorComponent extends Container implements Focusable {
         ),
       );
     }
+    // The key hint sits under the list in every dialog.
+    lines.push(chalk.hex(colors.textMuted)(` ${navParts.join(' · ')}`));
     lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
     return lines.map((line) => truncateToWidth(line, width));
   }

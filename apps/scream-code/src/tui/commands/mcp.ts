@@ -44,7 +44,7 @@ import {
   removeUpstreamSkills,
 } from './mcp-skills';
 import type { ColorPalette } from '#/tui/theme/colors';
-import { SELECT_POINTER } from '../constant/symbols';
+import { pointerCell, rowLabel, selectableRow } from '../utils/select-row';
 import type { SlashCommandHost } from './dispatch';
 import { printableChar } from '../utils/printable-key';
 
@@ -1503,12 +1503,10 @@ class McpPickerComponent extends Container implements Focusable {
 
     // Header
     lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
-    lines.push(chalk.hex(colors.primary).bold(truncateToWidth(this.title, width, ELLIPSIS)));
+    lines.push(chalk.hex(colors.primary).bold(truncateToWidth(` ${this.title}`, width, ELLIPSIS)));
+    lines.push('');
 
-    // Hint
     const hint = this.hint ?? t('mcp.footer_hint');
-    lines.push(chalk.hex(colors.textMuted)(truncateToWidth(hint, width, ELLIPSIS)));
-    lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
 
     // Visible window
     const visibleStart = Math.max(
@@ -1526,21 +1524,16 @@ class McpPickerComponent extends Container implements Focusable {
       const isSection = row.status === '__section';
 
       if (isSection) {
-        lines.push(chalk.hex(colors.textMuted)(truncateToWidth(row.label, width, ELLIPSIS)));
+        lines.push(chalk.hex(colors.textMuted)(truncateToWidth(` ${row.label}`, width, ELLIPSIS)));
         continue;
       }
 
       if (row.status === '__empty') {
-        lines.push(chalk.hex(colors.textMuted)(truncateToWidth('  ' + row.label, width, ELLIPSIS)));
+        lines.push(chalk.hex(colors.textMuted)(truncateToWidth('    ' + row.label, width, ELLIPSIS)));
         continue;
       }
 
-      const pointer = isSelected ? SELECT_POINTER : ' ';
-      const pointerColor = isSelected ? colors.primary : colors.textDim;
-      const labelColor = isSelected ? colors.primary : colors.text;
-      const labelStyle = isSelected ? chalk.hex(labelColor).bold : chalk.hex(labelColor);
-
-      let line = chalk.hex(pointerColor)(pointer + ' ') + labelStyle(row.label);
+      let line = `  ${pointerCell(colors, isSelected)}` + rowLabel(colors, isSelected)(row.label);
 
       if (row.description) {
         const descColor = isSelected ? colors.textDim : colors.textMuted;
@@ -1551,10 +1544,12 @@ class McpPickerComponent extends Container implements Focusable {
         }
       }
 
-      line = truncateToWidth(line, width, ELLIPSIS);
-      lines.push(line);
+      lines.push(selectableRow(colors, truncateToWidth(line, width, ELLIPSIS), width, isSelected));
     }
 
+    // The key hint sits under the list in every dialog.
+    lines.push('');
+    lines.push(chalk.hex(colors.textMuted)(truncateToWidth(` ${hint}`, width, ELLIPSIS)));
     lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
     return lines.map((line) => truncateToWidth(line, width, ELLIPSIS));
   }

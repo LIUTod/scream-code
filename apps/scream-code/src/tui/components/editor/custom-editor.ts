@@ -199,6 +199,8 @@ export class CustomEditor extends Editor {
   public onToggleSidebar?: () => void;
   public onOpenExternalEditor?: () => void;
   public onCtrlS?: () => void;
+  /** Ctrl+R: resume the last conversation; true when handled (only on a new, empty page). */
+  public onCtrlR?: () => boolean;
   public onCtrlW?: () => void;
   /**
    * Called when ↑ is pressed in an empty editor. Return `true` to consume
@@ -269,7 +271,7 @@ export class CustomEditor extends Editor {
     private readonly colors: ColorPalette,
   ) {
     // paddingX: 2 reserves two leading columns for the `> ` prompt symbol.
-    super(tui, createEditorTheme(colors), { paddingX: 2 });
+    super(tui, createEditorTheme(colors), { paddingX: 2, autocompleteMaxVisible: 8 });
   }
 
   private expandPasteMarkerAtCursor(): boolean {
@@ -475,6 +477,10 @@ export class CustomEditor extends Editor {
     if (matchesKey(normalized, Key.ctrl('s'))) {
       this.onCtrlS?.();
       return;
+    }
+
+    if (matchesKey(normalized, Key.ctrl('r'))) {
+      if (this.onCtrlR?.() === true) return;
     }
 
     if (matchesKey(normalized, Key.ctrl('w'))) {

@@ -7,6 +7,7 @@
  * chunk heading at once.
  */
 
+import { pointerCell, selectableRow } from '../../utils/select-row';
 import {
   Container,
   Key,
@@ -301,7 +302,7 @@ export class KnowledgeDocumentTree extends Container implements Focusable {
     }
     return (
       chalk.hex(stroke)('│ ') +
-      fitExactly(content, innerWidth) +
+      selectableRow(this.colors, fitExactly(pointerCell(this.colors, selected) + content, innerWidth), innerWidth, selected) +
       chalk.hex(stroke)(' │')
     );
   }

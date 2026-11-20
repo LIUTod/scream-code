@@ -2,6 +2,7 @@
  * SessionPicker — pi-tui version of the session selection dialog.
  */
 
+import { formatRelativeTime } from '../../utils/relative-time';
 import {
   Container,
   matchesKey,
@@ -19,7 +20,8 @@ import { t } from '@scream-code/config';
 import { formatSessionLabel } from '#/tui/utils/session-label';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';
-import { CHECKBOX_OFF, CHECKBOX_ON, SELECT_POINTER } from '../../constant/symbols';
+import { CHECKBOX_OFF, CHECKBOX_ON } from '../../constant/symbols';
+import { pointerCell, selectedRow } from '../../utils/select-row';
 
 export interface SessionRow {
   readonly id: string;
@@ -32,21 +34,6 @@ export interface SessionRow {
 }
 
 const ELLIPSIS = '…';
-const CURRENT_BADGE = '(current)';
-
-function formatRelativeTime(ts: number): string {
-  // SessionSummary timestamps come from filesystem stat `*timeMs`,
-  // so they use the same millisecond unit as `Date.now()`.
-  if (!Number.isFinite(ts) || ts <= 0) return '';
-  const diffSec = Math.floor(Math.max(0, Date.now() - ts) / 1000);
-  if (diffSec < 60) return 'just now';
-  const minutes = Math.floor(diffSec / 60);
-  if (minutes < 60) return `${String(minutes)}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${String(hours)}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${String(days)}d ago`;
-}
 
 function homeAlias(path: string): string {
   const home = process.env['HOME'] ?? '';
@@ -244,12 +231,9 @@ export class SessionPickerComponent extends Container implements Focusable {
       this.selectedIds.size > 0
         ? t('session_picker.batch_hint', { count: String(this.selectedIds.size) })
         : t('session.picker_hint');
-    const labelWidth = visibleWidth(headerLabel);
-    const hintBudget = Math.max(0, width - labelWidth);
-    const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);
-    lines.push(
-      chalk.hex(colors.primary).bold(headerLabel) + chalk.hex(colors.textMuted)(shownHint),
-    );
+    const shownHint = ` ${truncateToWidth(headerHint, Math.max(1, width - 1), ELLIPSIS)}`;
+    // Title alone on top; the key hint sits under the list in every dialog.
+    lines.push(chalk.hex(colors.primary).bold(headerLabel));
 
     // Full confirm prompt on its own line(s) — never squeezed into the header
     // row, so new users always see how to confirm (Enter) or cancel (Esc).
@@ -298,6 +282,8 @@ export class SessionPickerComponent extends Container implements Focusable {
       lines.push(chalk.hex(colors.textMuted)(truncateToWidth(footer, width, ELLIPSIS)));
     }
 
+    lines.push(chalk.hex(colors.textMuted)(shownHint));
+
     lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
     return lines;
   }
@@ -309,7 +295,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     isCurrent: boolean,
   ): string[] {
     const colors = this.colors;
-    const pointer = isSelected ? SELECT_POINTER : ' ';
+    const pointer = pointerCell(colors, isSelected);
     const check = this.selectedIds.has(session.id) ? CHECKBOX_ON : CHECKBOX_OFF;
     const indent = '  ';
     const indentWidth = visibleWidth(indent);
@@ -319,7 +305,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     const time = formatRelativeTime(session.updated_at);
     const platform = channelSessionPlatform(session.metadata);
     const badge = [
-      isCurrent ? CURRENT_BADGE : '',
+      isCurrent ? t('dialog.current') : '',
       platform ? `💬 ${platform}` : '',
     ]
       .filter((p) => p.length > 0)
@@ -331,12 +317,12 @@ export class SessionPickerComponent extends Container implements Focusable {
     const trailingParts = [time, badge].filter((p) => p.length > 0);
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
-    const headerPrefixWidth = visibleWidth(pointer) + 1 + visibleWidth(check) + 1; // pointer + space + check + space
+    const headerPrefixWidth = visibleWidth(pointer) + visibleWidth(check) + 1; // pointer cell + check + space
     const titleBudget = Math.max(8, width - headerPrefixWidth - trailingWidth);
     const shownTitle = truncateToWidth(singleLine(titleSource), titleBudget, ELLIPSIS);
 
     const checkColor = this.selectedIds.has(session.id) ? colors.primary : colors.textDim;
-    let header = chalk.hex(isSelected ? colors.primary : colors.textDim)(pointer + ' ');
+    let header = pointer;
     header += chalk.hex(checkColor)(check + ' ');
     header += titleStyle(shownTitle);
     if (time.length > 0) header += '  ' + chalk.hex(colors.textDim)(time);
@@ -387,6 +373,6 @@ export class SessionPickerComponent extends Container implements Focusable {
       card.push(promptLine);
     }
 
-    return card;
+    return isSelected ? card.map((line) => selectedRow(colors, line, width)) : card;
   }
 }

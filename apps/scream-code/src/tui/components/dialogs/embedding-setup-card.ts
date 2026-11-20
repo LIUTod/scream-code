@@ -6,6 +6,7 @@
  * (runs the same manual download flow as the /knowledge menu item) or skip.
  */
 
+import { pointerCell, rowLabel, selectableRow } from '../../utils/select-row';
 import type { Focusable } from '@liutod-scream/pi-tui';
 import { Container, matchesKey, Key, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
@@ -79,7 +80,6 @@ export class EmbeddingSetupCardComponent extends Container implements Focusable 
 
     const borderColor = chalk.hex(colors.primary);
     const descColor = chalk.hex(colors.textDim);
-    const accent = chalk.hex(colors.accent);
 
     const lines: string[] = [];
 
@@ -94,9 +94,7 @@ export class EmbeddingSetupCardComponent extends Container implements Focusable 
       const action = this.actions[i];
       const selected = i === this.selectedIndex;
       const label = action === undefined ? '' : action.label;
-      const row = selected
-        ? accent('▶ ' + label)
-        : descColor('  ' + label);
+      const row = selectableRow(colors, pointerCell(colors, selected) + rowLabel(colors, selected)(label), innerWidth, selected);
       lines.push(borderColor('│') + padInner(row, innerWidth) + borderColor('│'));
     }
 

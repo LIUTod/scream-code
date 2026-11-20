@@ -56,6 +56,8 @@ export interface SettingsSelectorOptions {
   readonly colors: ColorPalette;
   readonly onSelect: (value: SettingsSelection) => void;
   readonly onCancel: () => void;
+  /** The entry to start on, e.g. the sub-menu just closed with Esc. */
+  readonly initialValue?: SettingsSelection | undefined;
 }
 
 export class SettingsSelectorComponent extends ChoicePickerComponent {
@@ -68,6 +70,7 @@ export class SettingsSelectorComponent extends ChoicePickerComponent {
         if (isSettingsSelection(value)) opts.onSelect(value);
       },
       onCancel: opts.onCancel,
+      initialValue: opts.initialValue,
     });
   }
 }

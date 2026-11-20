@@ -53,7 +53,7 @@ It is installed only when you choose it: `/service`, `scream service install`, o
 
 Unattended (bot mode), an irreversible action (such as `git push` or deleting files) is refused and a question has nobody to answer it. Instead of only being refused, they wait for you:
 
-- In the terminal: a note when it opens, the top row of `/jobs`, a count in the footer and in `/service`, and a system notification (switch in `/service`).
+- In the terminal: a note when it opens, the top row of `/jobs`, a count in the footer and in `/service`, and a system notification (switch in `/service`). On macOS the notification comes from your terminal app while a Scream terminal is open (clicking it brings that window forward); with [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) installed (`brew install terminal-notifier`) it also shows when no terminal is open.
 - With Feishu or WeChat set up, also in the chat: items from a chat session go back to that chat, others to the chat you last wrote from. With one item waiting, just reply `同意` (approve), `拒绝` (reject) or `以后都同意` (always approve). Or reply `/approve <id>` (add `session` to allow the same action for the rest of that session, `always` to allow it from now on), `/reject <id>`, `/mine <id>` (you do it yourself — a password, a second factor), or `/answer <id> <text>`; `/inbox` lists what is still waiting.
 - The work does not wait meanwhile; it carries on with the rest. Once you approve, the host opens that session and lets **exactly that action** through once ("always" remembers it for unattended runs from then on), still through every permission check.
 - An item nobody answers expires after 24 hours; what still waits and what expired go into the daily brief.

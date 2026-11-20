@@ -2,12 +2,13 @@
  * Welcome panel shown at the top of the TUI.
  *
  * Responsive layout (borderless):
- * - Wide terminal (≥55 cols): mascot face with rays of light spreading out,
- *   then the SCREAM ASCII art (per-char colouring: █ white, stroke breathing,
- *   others dim) + centred info line.
- * - Narrow terminal: compact logo face with the same light rays + info line.
+ * - Wide terminal (≥55 cols): the mascot, the SCREAM wordmark, the info line
+ *   and — when there is something to say — a second line (last session,
+ *   memories, what waits for the person).
+ * - Narrow terminal: the mascot, the info line and the second line.
  *
- * Mascot, rays and logo strokes share the theme's breathing primary colour.
+ * It opens with a short intro (wake → scream → settle, see `introFrame`) and
+ * then glances around now and then until the person types.
  */
 
 import type { Component, TUI } from '@liutod-scream/pi-tui';
@@ -16,13 +17,14 @@ import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
-import type { AppState } from '#/tui/types';
-import { BREATHE_CYCLE_MS, BREATHE_INTERVAL_MS, getBreathingFrame, resetBreathingClock } from '#/tui/utils/breathing-clock';
+import type { AppState, RecentSession } from '#/tui/types';
+import { BREATHE_INTERVAL_MS } from '#/tui/utils/breathing-clock';
 import { motionEnabled } from '#/tui/utils/motion';
+import { formatRelativeTime } from '#/tui/utils/relative-time';
 
-// 24 hues × 5 interpolated steps = 120 palette entries. The breathing frame
-// walks the wheel in IMPACT_HUE_STEP jumps (see renderMascotRow) so every
-// colour change lands on a light impact instead of drifting continuously.
+// 24 hues × 5 interpolated steps = 120 palette entries. Each shout of the
+// intro jumps SHOUT_HUE_STEP entries, so every colour change lands on a burst
+// of light instead of drifting continuously.
 const HUE_STOPS = 24;
 const SUB_STEPS = 5;
 
@@ -30,6 +32,7 @@ const MIN_PANEL_WIDTH = 50;
 
 // SCREAM art is 51 columns wide (longest line); keep a small margin.
 const FULL_LOGO_MIN_WIDTH = 55;
+const LOGO_WIDTH = 51;
 
 // ── SCREAM ASCII art (wordmark only) ───────────────────────────────
 const LOGO = [
@@ -43,14 +46,39 @@ const LOGO = [
 
 const SHADOW_CHARS = new Set(['╚', '═', '╝', '║', '╔', '╗', '╠', '╣', '╦', '╩', '╬']);
 
-// ── Compact logo face (narrow terminal fallback) ────────────────────
-const LOGO_FRAMES: [string, string][] = [
-  ['██▄▄▄██', '▐█▄▀▄█▌'],
-  ['██▄▄▄██', '▐▄▄▀▄▄▌'],
-  ['██▄▄▄██', '▐▄▀▄▄▄▌'],
-  ['██▄▄▄██', '▐▄▄▄▀▄▌'],
-  ['██▄▄▄██', '▐█▄▀▄█▌'],
-];
+// ── The mascot ──────────────────────────────────────────────────────
+// Two rows: the head, then the face. Its only expressions are the original
+// ones — the `▀` looking straight on, centre, left and right.
+const FACE_TOP = '██▄▄▄██';
+const FACE = {
+  open: '▐█▄▀▄█▌',
+  centre: '▐▄▄▀▄▄▌',
+  left: '▐▄▀▄▄▄▌',
+  right: '▐▄▄▄▀▄▌',
+} as const;
+// Each shout looks somewhere new, in the original order.
+const SHOUT_FACES = [FACE.centre, FACE.left, FACE.right] as const;
+
+// ── The intro: wake → scream → settle (ms from the start) ───────────
+const WAKE_MS = 500;            // looking down the middle, brightening; then straight on
+const SHOUTS_MS = [500, 800, 1100] as const; // three shouts, each a ray burst
+const SHOUT_MS = 300;
+const SCREAM_END_MS = 1400;
+const SWEEP_START_MS = 600;     // the wordmark is swept in left to right
+const SWEEP_MS = 1000;
+const SETTLE_MS = 700;          // the colour comes home to primary
+const INFO_START_MS = 1600;     // the info line types itself out
+const INFO_MS = 800;
+const INTRO_MS = 2400;
+// After the intro the mascot glances left and right now and then, until the
+// person types: left, right, then straight on again.
+const BLINK_EVERY_MS = 6000;
+const BLINK_MS = 220;
+// A bounded idle: a welcome left on screen (after /clear the first-input hook
+// has already fired) stops by itself instead of rendering forever.
+const MAX_BLINKS = 10;
+// One hue step per shout (45° around the wheel).
+const SHOUT_HUE_STEP = 15;
 
 // ── HSL ↔ RGB helpers ──────────────────────────────────────────────
 
@@ -145,62 +173,113 @@ function mixHex(from: string, to: string, k: number): string {
   return rgbToHex(r1 + (r2 - r1) * t, g1 + (g2 - g1) * t, b1 + (b2 - b1) * t);
 }
 
-// Light rays: quick flashes that expand outward from the mascot, then vanish.
-const RAY_LEN_MAX = 12;
-const RAY_PULSE = 24;   // breathing frames per flash (≈0.4 s)
-const RAY_PULSES = 4;   // flashes before the effect ends for good
-// One colour step per impact (impacts alternate between the two rows,
-// so they land every RAY_PULSE / 2 frames): 8 steps × 15 = full hue wheel.
-const IMPACT_HUE_STEP = 15;
-
 const easeOut = (x: number): number => 1 - (1 - Math.max(0, Math.min(1, x))) ** 3;
 
+// Light rays: a burst that expands outward from the mascot, then vanishes.
+const RAY_LEN_MAX = 12;
+
 /**
- * One mascot row with symmetric light rays fanning outward.
- * While breathing (`breatheFrame` >= 0) the rays flash in a few quick pulses
- * that expand toward the edges and dissipate; when breathing has stopped
- * (`breatheFrame` < 0) or the pulses are over, the rays are gone entirely.
+ * One mascot row with symmetric light rays. `pulse` runs 0..1 over one burst
+ * (the rays grow for the first 72% and fade with it); null draws no rays.
  */
 function renderMascotRow(
   glyphs: string,
   contentWidth: number,
-  breatheColor: string,
+  color: string,
   dimColor: string,
-  breatheFrame: number,
-  pulseOffset = 0,
+  pulse: number | null,
 ): string {
   const mascotX = Math.floor((contentWidth - glyphs.length) / 2);
   const leftAvail = Math.max(0, mascotX - 2);
   const rightAvail = Math.max(0, contentWidth - (mascotX + glyphs.length) - 2);
   const rayLen = Math.min(RAY_LEN_MAX, leftAvail, rightAvail);
   const cells = Array.from({ length: contentWidth }, () => ' ');
-
   for (let i = 0; i < glyphs.length; i++) {
-    cells[mascotX + i] = chalk.hex(breatheColor)(glyphs[i]!);
+    cells[mascotX + i] = chalk.hex(color)(glyphs[i]!);
   }
-
-  // Each row gets a full run of pulses: the offset row finishes its last
-  // flash instead of being cut mid-expansion when the shared window ends.
-  if (rayLen > 0 && breatheFrame >= 0 && breatheFrame < RAY_PULSE * RAY_PULSES + pulseOffset) {
-    const pulse = ((breatheFrame + pulseOffset) % RAY_PULSE) / RAY_PULSE;
-    if (pulse <= 0.72) {
-      const len = Math.max(1, Math.round(rayLen * easeOut(pulse / 0.72)));
-      for (let i = 0; i < len; i++) {
-        const head = i === len - 1;
-        const distFromHead = len - 1 - i;
-        const fade = len === 1 ? 0 : distFromHead / (len - 1);
-        const glyph = head ? '█' : distFromHead <= 3 ? '▓' : distFromHead <= 7 ? '▒' : '░';
-        const color = head
-          ? breatheColor
-          : mixHex(mixHex(breatheColor, dimColor, 0.1 + 0.9 * fade), dimColor, 0.25 * (pulse / 0.72));
-        const painted = chalk.hex(color)(glyph);
-        cells[mascotX - 2 - i] = painted;
-        cells[mascotX + glyphs.length + 1 + i] = painted;
-      }
+  if (rayLen > 0 && pulse !== null && pulse >= 0 && pulse <= 0.72) {
+    const len = Math.max(1, Math.round(rayLen * easeOut(pulse / 0.72)));
+    for (let i = 0; i < len; i++) {
+      const head = i === len - 1;
+      const distFromHead = len - 1 - i;
+      const fade = len === 1 ? 0 : distFromHead / (len - 1);
+      const glyph = head ? '█' : distFromHead <= 3 ? '▓' : distFromHead <= 7 ? '▒' : '░';
+      const rayColor = head
+        ? color
+        : mixHex(mixHex(color, dimColor, 0.1 + 0.9 * fade), dimColor, 0.25 * (pulse / 0.72));
+      const painted = chalk.hex(rayColor)(glyph);
+      cells[mascotX - 2 - i] = painted;
+      cells[mascotX + glyphs.length + 1 + i] = painted;
     }
   }
-
   return cells.join('');
+}
+
+/** What the intro shows at `ms` (exported for tests). */
+export interface IntroFrame {
+  readonly face: string;
+  /** Index into the hue wheel; null for the resting primary colour. */
+  readonly hueStep: number | null;
+  /** 0 → dim outline, 1 → full colour (the wake). */
+  readonly brightness: number;
+  /** 0 → the shout's hue, 1 → back to primary (the settle). */
+  readonly settle: number;
+  readonly pulseTop: number | null;
+  readonly pulseFace: number | null;
+  /** Wordmark shake: -1, 0 or 1 column. */
+  readonly shift: number;
+  /** Share of the wordmark's columns drawn (0..1). */
+  readonly reveal: number;
+  /** Share of the info line typed out (0..1). */
+  readonly info: number;
+}
+
+export function introFrame(ms: number): IntroFrame {
+  const rest: IntroFrame = {
+    face: FACE.open, hueStep: null, brightness: 1, settle: 1,
+    pulseTop: null, pulseFace: null, shift: 0, reveal: 1, info: 1,
+  };
+  if (ms >= INTRO_MS) return rest;
+  const reveal = ms < SWEEP_START_MS ? 0 : easeOut((ms - SWEEP_START_MS) / SWEEP_MS);
+  const info = ms < INFO_START_MS ? 0 : Math.min(1, (ms - INFO_START_MS) / INFO_MS);
+  if (ms < WAKE_MS) {
+    // Waking up: looking down the middle, then straight on.
+    return { ...rest, face: ms < 300 ? FACE.centre : FACE.open, brightness: easeOut(ms / WAKE_MS), reveal, info };
+  }
+  const shoutsDone = SHOUTS_MS.filter((start) => ms >= start).length;
+  if (ms < SCREAM_END_MS) {
+    const shout = SHOUTS_MS.findIndex((start) => ms >= start && ms < start + SHOUT_MS);
+    if (shout === -1) return { ...rest, hueStep: shoutsDone, settle: 0, reveal, info };
+    const t = (ms - SHOUTS_MS[shout]!) / SHOUT_MS;
+    return {
+      ...rest,
+      face: SHOUT_FACES[shout]!,
+      hueStep: shout + 1,
+      settle: 0,
+      pulseTop: t,
+      pulseFace: Math.max(0, t - 0.12),
+      shift: t < 0.12 ? (shout % 2 === 0 ? 1 : -1) : 0,
+      reveal,
+      info,
+    };
+  }
+  return { ...rest, hueStep: shoutsDone, settle: easeOut((ms - SCREAM_END_MS) / SETTLE_MS), reveal, info };
+}
+
+/** Wordmark line with only its first `columns` drawn; a white scan head at the edge. */
+function revealLogoLine(
+  line: string,
+  columns: number,
+  boxColor: (s: string) => string,
+  dim: (s: string) => string,
+  white: (s: string) => string,
+): string {
+  const chars = Array.from(line);
+  if (columns >= chars.length) return renderLogoLine(line, boxColor, dim, white);
+  const shown = chars.slice(0, columns).join('');
+  const scanned = columns > 0 ? renderLogoLine(chars.slice(0, Math.max(0, columns - 1)).join(''), boxColor, dim, white) : '';
+  const head = columns > 0 && shown.at(-1) !== ' ' ? chalk.bold.hex('#FFFFFF')(shown.at(-1)!) : columns > 0 ? ' ' : '';
+  return scanned + head + ' '.repeat(chars.length - columns);
 }
 
 // ── Component ───────────────────────────────────────────────────────
@@ -209,126 +288,193 @@ export class WelcomeComponent implements Component {
   private state: AppState;
   private colors: ColorPalette;
   private ui: TUI;
-  private breatheTimer: ReturnType<typeof setInterval> | null = null;
-  private breatheTimeout: ReturnType<typeof setTimeout> | null = null;
+  private introTimer: ReturnType<typeof setInterval> | null = null;
+  private blinkTimer: ReturnType<typeof setTimeout> | null = null;
+  private introStart = 0;
+  /** The idle glance: null, or which way the mascot is looking. */
+  private glance: 'left' | 'right' | null = null;
+  private blinks = 0;
   private breathePalette: string[];
+  /**
+   * Whether Ctrl+R would resume the last session right now (a new page:
+   * nothing in the transcript, nothing typed). The hint shows exactly then,
+   * so it never offers a key that does nothing. Absent: never offered.
+   */
+  private readonly resumeAvailable: () => boolean;
 
-  constructor(state: AppState, colors: ColorPalette, ui: TUI) {
+  constructor(state: AppState, colors: ColorPalette, ui: TUI, options: { resumeAvailable?: () => boolean } = {}) {
     this.state = state;
     this.colors = colors;
     this.ui = ui;
+    this.resumeAvailable = options.resumeAvailable ?? (() => false);
     this.breathePalette = buildBreathingPalette(colors.primary, HUE_STOPS, SUB_STEPS);
-    this.startBreathing();
+    this.startIntro();
   }
 
+  /** Ends the intro and the idle glances for good (the person started typing). */
   stopBreathing(): void {
-    if (this.breatheTimer !== null) {
-      clearInterval(this.breatheTimer);
-      this.breatheTimer = null;
-      this.ui.requestRender();
+    const wasMoving = this.introTimer !== null || this.glance !== null;
+    if (this.introTimer !== null) {
+      clearInterval(this.introTimer);
+      this.introTimer = null;
     }
-    if (this.breatheTimeout !== null) {
-      clearTimeout(this.breatheTimeout);
-      this.breatheTimeout = null;
+    if (this.blinkTimer !== null) {
+      clearTimeout(this.blinkTimer);
+      this.blinkTimer = null;
     }
+    this.glance = null;
+    if (wasMoving) this.ui.requestRender();
   }
 
-  private startBreathing(): void {
-    if (!motionEnabled()) return; // resting colour, no timers
-    resetBreathingClock();
-    this.breatheTimer = setInterval(() => {
+  private startIntro(): void {
+    if (!motionEnabled()) return; // resting frame, no timers
+    this.introStart = Date.now();
+    this.introTimer = setInterval(() => {
+      if (Date.now() - this.introStart >= INTRO_MS) {
+        if (this.introTimer !== null) clearInterval(this.introTimer);
+        this.introTimer = null;
+        this.scheduleBlink();
+      }
       this.ui.requestRender();
     }, BREATHE_INTERVAL_MS);
-    if (this.breatheTimeout === null) {
-      this.breatheTimeout = setTimeout(() => {
-        this.stopBreathing();
-      }, BREATHE_CYCLE_MS);
+  }
+
+  /** One glance every BLINK_EVERY_MS: left, right, straight on (three renders). */
+  private scheduleBlink(): void {
+    if (this.blinks >= MAX_BLINKS) {
+      this.blinkTimer = null;
+      return;
     }
+    this.blinks += 1;
+    const step = (next: 'left' | 'right' | null, then: () => void, delay: number): void => {
+      this.blinkTimer = setTimeout(() => {
+        this.glance = next;
+        this.ui.requestRender();
+        then();
+      }, delay);
+      this.blinkTimer.unref?.();
+    };
+    step('left', () => {
+      step('right', () => {
+        step(null, () => {
+          this.scheduleBlink();
+        }, BLINK_MS);
+      }, BLINK_MS);
+    }, BLINK_EVERY_MS);
   }
 
   invalidate(): void {}
 
   render(width: number): string[] {
-    const breatheFrame = this.breatheTimer !== null ? getBreathingFrame() : 0;
-    // Colour steps once per impact: every light flash lands on a new hue
-    // (same cadence as the ray pulses, so colour and impact stay in sync).
-    const impactFrame = Math.min(breatheFrame, RAY_PULSE * RAY_PULSES - 1);
-    const paletteIndex =
-      (Math.floor(impactFrame / (RAY_PULSE / 2)) * IMPACT_HUE_STEP) % this.breathePalette.length;
-    const breatheColor = this.breatheTimer !== null
-      ? (this.breathePalette[paletteIndex] ?? this.colors.primary)
-      : this.colors.primary;
-    const boxColor = chalk.hex(breatheColor);
+    const frame = this.introTimer !== null ? introFrame(Date.now() - this.introStart) : introFrame(INTRO_MS);
+    const shoutColor =
+      frame.hueStep === null
+        ? this.colors.primary
+        : (this.breathePalette[(frame.hueStep * SHOUT_HUE_STEP) % this.breathePalette.length] ?? this.colors.primary);
+    let color = frame.settle >= 1 ? this.colors.primary : mixHex(shoutColor, this.colors.primary, frame.settle);
+    if (frame.brightness < 1) color = mixHex(this.colors.textDim, color, frame.brightness);
+    const face = this.glance === null ? frame.face : FACE[this.glance];
+    const boxColor = chalk.hex(color);
     const dim = chalk.hex(this.colors.textDim);
     const white = chalk.hex('#FFFFFF');
 
     const contentWidth = Math.max(MIN_PANEL_WIDTH, width);
     const useFullLogo = contentWidth >= FULL_LOGO_MIN_WIDTH;
 
-    // Build info values.
+    const lines: string[] = [
+      '',
+      renderMascotRow(FACE_TOP, contentWidth, color, this.colors.textDim, frame.pulseTop),
+      renderMascotRow(face, contentWidth, color, this.colors.textDim, frame.pulseFace),
+      '',
+    ];
+
+    if (useFullLogo) {
+      const columns = Math.round(LOGO_WIDTH * frame.reveal);
+      for (const line of LOGO) {
+        const rendered = revealLogoLine(line, columns, boxColor, dim, white);
+        lines.push(shiftLine(centerText(rendered, contentWidth), frame.shift, contentWidth));
+      }
+      lines.push('');
+    }
+
+    const info = this.infoLine();
+    // Typed out from its final left edge (padded to full width), so it never slides.
+    const infoWidth = visibleWidth(info);
+    const typed = frame.info >= 1 ? info : truncateToWidth(info, Math.floor(infoWidth * frame.info), '');
+    lines.push(centerText(typed + ' '.repeat(Math.max(0, infoWidth - visibleWidth(typed))), contentWidth));
+    lines.push('');
+
+    // The status line arrives last, once the info line has typed itself out;
+    // its row is kept blank until then so nothing below jumps.
+    const status = this.statusLine(contentWidth);
+    if (status !== undefined) {
+      lines.push(frame.info >= 1 ? centerText(status, contentWidth) : '');
+      lines.push('');
+    }
+    return lines;
+  }
+
+  private infoLine(): string {
+    const dim = chalk.hex(this.colors.textDim);
     const isLoggedOut = !this.state.model;
     const activeModel = this.state.availableModels[this.state.model];
     const modelValue = isLoggedOut
       ? chalk.hex(this.colors.warning)(t('common.not_set'))
       : (activeModel?.displayName ?? activeModel?.model ?? this.state.model);
-
     const like = this.state.like;
-    const likeActive = Boolean(
-      (like.nickname ?? '').trim() ||
-        (like.tone ?? '').trim() ||
-        (like.other ?? '').trim(),
-    );
+    const likeActive = Boolean((like.nickname ?? '').trim() || (like.tone ?? '').trim() || (like.other ?? '').trim());
     const likeValue = likeActive
       ? chalk.hex(this.colors.success)(t('welcome.like_active'))
-      : chalk.hex(this.colors.textDim)(t('welcome.like_inactive'));
-
-    let versionValue: string;
-    if (this.state.hasNewVersion && this.state.latestVersion !== null) {
-      versionValue =
-        chalk.hex(this.colors.warning)(this.state.version) +
-        ' ' +
-        dim('(' + this.state.latestVersion + ')');
-    } else {
-      versionValue = dim(this.state.version);
-    }
-
-    const lines: string[] = [''];
-
+      : dim(t('welcome.like_inactive'));
+    const versionValue =
+      this.state.hasNewVersion && this.state.latestVersion !== null
+        ? chalk.hex(this.colors.warning)(this.state.version) + ' ' + dim('(' + this.state.latestVersion + ')')
+        : dim(this.state.version);
     const separator = dim(' · ');
-    const helpValue = dim(t('welcome.help_hint'));
-
-    if (useFullLogo) {
-      // ── Mascot with spreading light rays, then the SCREAM art ─────
-      const frameIdx = this.breatheTimer !== null ? Math.floor(breatheFrame / 24) % LOGO_FRAMES.length : 0;
-      const frame = LOGO_FRAMES[frameIdx]!;
-      const animFrame = this.breatheTimer !== null ? breatheFrame : -1;
-      lines.push(renderMascotRow(frame[0], contentWidth, breatheColor, this.colors.textDim, animFrame));
-      lines.push(renderMascotRow(frame[1], contentWidth, breatheColor, this.colors.textDim, animFrame, RAY_PULSE / 2));
-      lines.push('');
-
-      for (const line of LOGO) {
-        const rendered = renderLogoLine(line, boxColor, dim, white);
-        lines.push(centerText(rendered, contentWidth));
-      }
-
-      lines.push('');
-      lines.push(centerText(versionValue + separator + modelValue + separator + likeValue + separator + helpValue, contentWidth));
-      lines.push('');
-    } else {
-      // ── Compact logo face layout (narrow terminal) ──────────────
-      const frameIdx = this.breatheTimer !== null ? Math.floor(breatheFrame / 24) % LOGO_FRAMES.length : 0;
-      const frame = LOGO_FRAMES[frameIdx]!;
-      const animFrame = this.breatheTimer !== null ? breatheFrame : -1;
-
-      lines.push(renderMascotRow(frame[0], contentWidth, breatheColor, this.colors.textDim, animFrame));
-      lines.push(renderMascotRow(frame[1], contentWidth, breatheColor, this.colors.textDim, animFrame, RAY_PULSE / 2));
-      lines.push('');
-
-      lines.push(centerText(versionValue + separator + modelValue + separator + likeValue + separator + helpValue, contentWidth));
-
-      lines.push('');
-    }
-
-    return lines;
+    return versionValue + separator + modelValue + separator + likeValue + separator + dim(t('welcome.help_hint'));
   }
+
+  /**
+   * The second line under the logo, in the info line's voice (centred, dim,
+   * `·`): the last conversation of this folder, how much Scream remembers,
+   * and what waits for the person (the only part in a warning colour). Left
+   * out only when there is nothing at all, as on a first start.
+   */
+  private statusLine(contentWidth: number): string | undefined {
+    const dim = chalk.hex(this.colors.textDim);
+    const parts: string[] = [];
+    const last = lastSessionToResume(this.state);
+    const waiting = this.state.jobsWaiting ?? 0;
+    if (last !== undefined) {
+      let part = dim(t('welcome.hint_last', { title: last.title!.trim(), time: formatRelativeTime(last.updatedAt) }));
+      // Ctrl+R resumes it while the page is new (see EditorKeyboardController).
+      if (this.resumeAvailable()) part += ' ' + chalk.hex(this.colors.primary)('Ctrl+R') + ' ' + dim(t('welcome.hint_resume_key'));
+      parts.push(part);
+    }
+    const memories = this.state.memoryCount ?? 0;
+    if (memories > 0) parts.push(dim(t('welcome.hint_memory', { count: String(memories) })));
+    if (waiting > 0) parts.push(chalk.hex(this.colors.warning)(t('welcome.hint_waiting', { count: String(waiting) })));
+    if (parts.length === 0) return undefined;
+    const line = parts.join(dim(' · '));
+    // A long title is cut, never the line pushed past the panel.
+    return visibleWidth(line) > contentWidth - 4 ? truncateToWidth(line, contentWidth - 4, '…') : line;
+  }
+}
+
+/**
+ * The conversation the welcome offers to resume: the newest one of this
+ * folder (already filtered at start), not the current one, with a real title.
+ */
+export function lastSessionToResume(state: Pick<AppState, 'recentSessions' | 'sessionId'>): RecentSession | undefined {
+  return (state.recentSessions ?? []).find(
+    (session) =>
+      session.id !== state.sessionId && (session.title ?? '').trim() !== '' && session.title !== 'New Session',
+  );
+}
+
+/** Move a centred line one column left or right (the wordmark's shake). */
+function shiftLine(line: string, shift: number, width: number): string {
+  if (shift > 0) return truncateToWidth(' ' + line, width, '');
+  if (shift < 0 && line.startsWith(' ')) return line.slice(1) + ' ';
+  return line;
 }

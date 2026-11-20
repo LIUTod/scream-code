@@ -25,6 +25,9 @@ import {
   writeRuntimeMarker,
   type RuntimeMarkerInfo,
 } from './utils/runtime-marker';
+import { sharedMemoStore } from '@scream-code/memory';
+import { isJobRunSession } from './utils/channel-sessions';
+import { isEmptySessionShell } from './utils/session-picker-rows';
 import { getDataDir } from '../utils/paths';
 import { listInbox, ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t, setLocale } from '@scream-code/config';
@@ -386,7 +389,13 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // Load recent sessions for the welcome screen.
     try {
       const sessions = await this.harness.listSessions({ workDir: this.state.appState.workDir });
-      this.state.appState.recentSessions = sessions.slice(0, 3).map((s) => ({
+      // Only conversations worth resuming: not empty shells, not a background
+      // job's runs, not a title that is raw markup (an injected prompt).
+      this.state.appState.recentSessions = sessions
+        .filter((s) => !s.archived && !isEmptySessionShell(s) && !isJobRunSession(s.metadata))
+        .filter((s) => !(s.title ?? '').trim().startsWith('<'))
+        .slice(0, 3)
+        .map((s) => ({
         id: s.id,
         title: s.title,
         updatedAt: s.updatedAt,
@@ -394,6 +403,20 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     } catch {
       this.state.appState.recentSessions = [];
     }
+
+    // How much Scream remembers, for the welcome panel. Read in the
+    // background: the store may be busy (the background host writing), and
+    // the welcome shows the count only after its intro anyway.
+    void (async () => {
+      try {
+        const store = sharedMemoStore(getDataDir());
+        await store.init();
+        this.state.appState.memoryCount = (await store.list({ limit: 1 })).total;
+        this.state.ui.requestRender();
+      } catch {
+        // No count: the welcome line simply leaves it out.
+      }
+    })();
 
     // Mount only after init() succeeds; see mountFooter().
     this.lifecycleController.mountFooter();

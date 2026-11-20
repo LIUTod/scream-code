@@ -104,12 +104,12 @@ describe('FooterComponent - item fitting', () => {
 
   it('shrinks the model name — not the gauge — to keep the gauge visible', () => {
     const footer = wideFooter();
-    // width 30: the gauge is already down to its bar-less form (17 cols), and
-    // the model name (11 cols) is cut to 6 + `…` so both still fit.
+    // width 30: the gauge is already down to its bar-less form (15 cols), and
+    // the model name (11 cols) is cut to 8 + `…` so both still fit.
     const [line1] = footer.render(30);
     const stripped = strip(line1!);
     expect(visibleWidth(line1!)).toBe(30);
-    expect(stripped).toBe('📟️ scream…   📨 Context：50.0%');
+    expect(stripped).toBe('📟️ scream-k…   📨 Context  50%');
   });
 
   it('drops the gauge when it cannot fit even with the model name fully shrunk', () => {
@@ -127,7 +127,7 @@ describe('FooterComponent - item fitting', () => {
     const [line1] = footer.render(17);
     const stripped = strip(line1!);
     expect(visibleWidth(line1!)).toBe(17);
-    expect(stripped).not.toContain('Context：');
+    expect(stripped).not.toContain('Context');
     expect(stripped).not.toContain('…'); // the model fit whole, no ellipsis needed
     expect(stripped.trimEnd()).toBe('📟️ k2');
   });

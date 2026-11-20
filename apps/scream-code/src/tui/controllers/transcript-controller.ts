@@ -1,3 +1,4 @@
+import { sessionToResume } from '../utils/resume-last';
 import {
   deleteAllKittyImages,
   type Component,
@@ -504,11 +505,9 @@ export class TranscriptController {
   renderWelcome(): void {
     const { state } = this.host;
     this.welcomeComponent?.stopBreathing();
-    const welcome = new WelcomeComponent(
-      state.appState,
-      state.theme.colors,
-      state.ui,
-    );
+    const welcome = new WelcomeComponent(state.appState, state.theme.colors, state.ui, {
+      resumeAvailable: () => sessionToResume(state) !== undefined,
+    });
     this.welcomeComponent = welcome;
     // Once the user has typed anything (even a single character), breathing
     // stays off forever — even across session switches.  This prevents the

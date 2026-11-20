@@ -186,7 +186,7 @@ describe('FooterComponent — exit hint on a narrow terminal', () => {
     const row = strip(footer.render(6)[0]!);
     expect(row).toContain('📟️');
     expect(row).not.toContain('Press');
-    expect(strip(footer.render(60)[0]!)).toContain('📨 Context：');
+    expect(strip(footer.render(60)[0]!)).toContain('📨 Context  ');
     footer.dispose();
   });
 
@@ -194,7 +194,7 @@ describe('FooterComponent — exit hint on a narrow terminal', () => {
     const footer = new FooterComponent(baseState({ model: 'k2' }), darkColors, ui);
     footer.setTransientHint(HINT);
     footer.setTransientHint(null);
-    expect(strip(footer.render(60)[0]!)).toContain('📨 Context：');
+    expect(strip(footer.render(60)[0]!)).toContain('📨 Context  ');
     footer.dispose();
   });
 });

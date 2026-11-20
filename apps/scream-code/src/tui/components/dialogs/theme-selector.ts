@@ -21,6 +21,7 @@ export interface ThemeSelectorOptions {
   readonly colors: ColorPalette;
   readonly onSelect: (theme: Theme) => void;
   readonly onCancel: () => void;
+  readonly breadcrumb?: string | undefined;
 }
 
 export class ThemeSelectorComponent extends ChoicePickerComponent {
@@ -34,6 +35,7 @@ export class ThemeSelectorComponent extends ChoicePickerComponent {
         if (isThemeChoice(value)) opts.onSelect(value);
       },
       onCancel: opts.onCancel,
+      breadcrumb: opts.breadcrumb,
     });
   }
 }

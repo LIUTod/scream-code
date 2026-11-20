@@ -67,10 +67,10 @@ describe('i18n dictionary symmetry', () => {
     expect(mismatches).toEqual([]);
   });
 
-  // Regression guard: this key used to exist only in zh (en.ts was one key short).
-  it('footer.context_plain is defined in both locales', () => {
-    expect(zh['footer.context_plain']).toBe('📨 Context：{percent}');
-    expect(en['footer.context_plain']).toBe('📨 Context：{percent}');
+  // Regression guard: the footer gauge label is the same in both locales.
+  it('footer.context_label is defined in both locales', () => {
+    expect(zh['footer.context_label']).toBe('📨 Context');
+    expect(en['footer.context_label']).toBe('📨 Context');
   });
 });
 
@@ -78,8 +78,8 @@ describe('i18n t() interpolation', () => {
   it('interpolates named params', async () => {
     const { t, setLocale } = await loadI18n({ LANG: 'en_US.UTF-8' });
     setLocale('en');
-    expect(t('footer.context', { bar: '▓▓░░', percent: '4.1%' })).toBe(
-      '📨 Context：▓▓░░ 4.1%',
+    expect(t('welcome.hint_last', { title: 'Fix the title', time: '2h ago' })).toBe(
+      'Last session: Fix the title (2h ago)',
     );
   });
 
@@ -102,7 +102,7 @@ describe('i18n t() interpolation', () => {
   it('keeps the literal {var} when the param is not provided', async () => {
     const { t, setLocale } = await loadI18n({ LANG: 'en_US.UTF-8' });
     setLocale('en');
-    expect(t('footer.context', { bar: '▓░' })).toBe('📨 Context：▓░ {percent}');
+    expect(t('welcome.hint_last', { title: 'Fix' })).toBe('Last session: Fix ({time})');
   });
 
   it('returns the key itself when missing in both dictionaries', async () => {
@@ -118,14 +118,10 @@ describe('i18n setLocale / getLocale', () => {
     const mod = await loadI18n({ LANG: 'en_US.UTF-8' });
     mod.setLocale('en');
     expect(mod.getLocale()).toBe('en');
-    expect(mod.t('footer.context', { bar: 'B', percent: 'P' })).toBe(
-      '📨 Context：B P',
-    );
+    expect(mod.t('welcome.hint_last', { title: 'B', time: 'P' })).toBe('Last session: B (P)');
     mod.setLocale('zh');
     expect(mod.getLocale()).toBe('zh');
-    expect(mod.t('footer.context', { bar: 'B', percent: 'P' })).toBe(
-      '📨 Context：B P',
-    );
+    expect(mod.t('welcome.hint_last', { title: 'B', time: 'P' })).toBe('上次会话：B（P）');
   });
 
   it('silently ignores invalid locales', async () => {
@@ -143,9 +139,7 @@ describe('i18n fallback chain (current locale -> zh -> key)', () => {
     vi.doMock('../src/i18n/locale/en', () => ({ en: {} }));
     const mod = await loadI18n({ LANG: 'en_US.UTF-8' });
     mod.setLocale('en');
-    expect(mod.t('footer.context', { bar: '▓░', percent: '50.0%' })).toBe(
-      '📨 Context：▓░ 50.0%',
-    );
+    expect(mod.t('welcome.hint_last', { title: 'B', time: 'P' })).toBe('上次会话：B（P）');
     // Still missing in zh as well -> raw key.
     expect(mod.t('totally.absent.key')).toBe('totally.absent.key');
   });

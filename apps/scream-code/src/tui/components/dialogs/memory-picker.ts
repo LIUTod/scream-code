@@ -13,7 +13,9 @@
  *   Esc     Cancel / back
  */
 
-import { CHECKBOX_OFF, CHECKBOX_ON, SELECT_POINTER } from '../../constant/symbols';
+import { formatRelativeTime } from '../../utils/relative-time';
+import { CHECKBOX_OFF, CHECKBOX_ON } from '../../constant/symbols';
+import { pointerCell, selectedRow } from '../../utils/select-row';
 import {
   Container,
   matchesKey,
@@ -37,18 +39,6 @@ const ELLIPSIS = '…';
 
 /** One-sentence conclusion: generous for a rule, bounded for prompt injection. */
 const MAX_DISTILLED_CHARS = 200;
-
-function formatRelativeTime(ts: number): string {
-  if (!Number.isFinite(ts) || ts <= 0) return '';
-  const diffSec = Math.floor(Math.max(0, Date.now() - ts) / 1000);
-  if (diffSec < 60) return t('memory.just_now');
-  const minutes = Math.floor(diffSec / 60);
-  if (minutes < 60) return t('memory.minutes_ago', { minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t('memory.hours_ago', { hours });
-  const days = Math.floor(hours / 24);
-  return t('memory.days_ago', { days });
-}
 
 /** Local calendar date as YYYY-MM-DD; avoids the UTC off-by-one of toISOString. */
 function formatDate(ts: number): string {
@@ -450,17 +440,15 @@ export class MemoryPickerComponent extends Container implements Focusable {
       : this.selectedIds.size > 0
         ? t('memory.batch_hint', { count: String(this.selectedIds.size) })
         : t('memory.nav_hint');
-    const labelWidth = visibleWidth(headerLabel);
-    const hintBudget = Math.max(0, width - labelWidth);
-    const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);
-    lines.push(
-      chalk.hex(c.primary).bold(headerLabel) + chalk.hex(c.textMuted)(shownHint),
-    );
+    const shownHint = ` ${truncateToWidth(headerHint, Math.max(1, width - 1), ELLIPSIS)}`;
+    // Title alone on top; the key hint sits under the list in every dialog.
+    lines.push(chalk.hex(c.primary).bold(headerLabel));
     lines.push('');
 
     // Loading
     if (this.loading) {
       lines.push(chalk.hex(c.textMuted)(truncateToWidth(`  ${t('memory.loading')}`, width, ELLIPSIS)));
+      lines.push(chalk.hex(c.textMuted)(shownHint));
       lines.push(chalk.hex(c.primary)('─'.repeat(width)));
       return lines;
     }
@@ -479,6 +467,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
           truncateToWidth(t('memory.auto_extract_hint'), width, ELLIPSIS),
         ));
       }
+      lines.push(chalk.hex(c.textMuted)(shownHint));
       lines.push(chalk.hex(c.primary)('─'.repeat(width)));
       return lines;
     }
@@ -529,6 +518,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
           }
         }
       }
+      lines.push(chalk.hex(c.textMuted)(shownHint));
       lines.push(chalk.hex(c.primary)('─'.repeat(width)));
       return lines;
     }
@@ -557,6 +547,8 @@ export class MemoryPickerComponent extends Container implements Focusable {
       lines.push(chalk.hex(c.textMuted)(truncateToWidth(footer, width, ELLIPSIS)));
     }
 
+    lines.push(chalk.hex(c.textMuted)(shownHint));
+
     lines.push(chalk.hex(c.primary)('─'.repeat(width)));
     return lines;
   }
@@ -567,7 +559,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
     isSelected: boolean,
   ): string[] {
     const c = this.colors;
-    const pointer = isSelected ? SELECT_POINTER : ' ';
+    const pointer = pointerCell(c, isSelected);
     const check = this.selectedIds.has(memo.id) ? CHECKBOX_ON : CHECKBOX_OFF;
     const indent = '  ';
     const indentWidth = visibleWidth(indent);
@@ -591,12 +583,12 @@ export class MemoryPickerComponent extends Container implements Focusable {
     }
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
-    const headerPrefixWidth = visibleWidth(pointer) + 1 + visibleWidth(check) + 1;
+    const headerPrefixWidth = visibleWidth(pointer) + visibleWidth(check) + 1;
     const titleBudget = Math.max(8, width - headerPrefixWidth - trailingWidth);
     const shownTitle = truncateToWidth(singleLine(memo.userNeed), titleBudget, ELLIPSIS);
 
     const checkColor = this.selectedIds.has(memo.id) ? c.primary : c.textDim;
-    let header = chalk.hex(isSelected ? c.primary : c.textDim)(pointer + ' ');
+    let header = pointer;
     header += chalk.hex(checkColor)(check + ' ');
     header += titleStyle(shownTitle);
     if (trailingText.length > 0) header += chalk.hex(c.textDim)(trailingText);
@@ -641,7 +633,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
       );
     }
 
-    return card;
+    return isSelected ? card.map((line) => selectedRow(c, line, width)) : card;
   }
 
   private renderDetail(

@@ -1045,7 +1045,7 @@ describe('SessionEventHandler', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
 
-    // This is the frame that keeps the footer's `📨 Context：… xx%` gauge alive.
+    // This is the frame that keeps the footer's `📨 Context  ━━─── xx%` gauge alive.
     handler.handleEvent(
       {
         ...baseEvent('agent.status.updated'),

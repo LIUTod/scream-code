@@ -1,4 +1,5 @@
 import type { ModelAlias, ThinkingEffort } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ChoicePickerComponent } from '#/tui/components/dialogs/choice-picker';
@@ -12,7 +13,8 @@ import { darkColors } from '#/tui/theme/colors';
 const ANSI_SGR = /\u001B\[[0-9;]*m/g;
 
 function strip(text: string): string {
-  return text.replaceAll(ANSI_SGR, '');
+  // The selected row is padded to the full width (its bar); compare the text only.
+  return text.replaceAll(ANSI_SGR, '').trimEnd();
 }
 
 describe('ChoicePickerComponent', () => {
@@ -39,7 +41,7 @@ describe('ChoicePickerComponent', () => {
 
     const out = picker.render(120).map(strip);
 
-    expect(out).toContain('  ❯ ASK ← current');
+    expect(out).toContain(`  ❯ ASK ${t('dialog.current')}`);
     expect(out).toContain('    Answer in conversation without modifying anything.');
     expect(out).toContain('    Automatically approve tool actions and plan transitions.');
   });
@@ -54,7 +56,7 @@ describe('ChoicePickerComponent', () => {
       onSelect,
       onCancel,
     });
-    expect(editor.render(120).map(strip)).toContain('  ❯ Vim ← current');
+    expect(editor.render(120).map(strip)).toContain(`  ❯ Vim ${t('dialog.current')}`);
 
     const model = new ModelSelectorComponent({
       models: {
@@ -73,7 +75,7 @@ describe('ChoicePickerComponent', () => {
       onCancel,
     });
     const modelOutput = model.render(120).map(strip);
-    expect(modelOutput).toContain('  ❯ Scream K2 (Scream Code) ← current');
+    expect(modelOutput).toContain(`  ❯ Scream K2 (Scream Code) ${t('dialog.current')}`);
     expect(modelOutput).toContain(' Thinking（全局设置）');
     expect(modelOutput).toContain('  off  low  medium  [ high ]  xhigh  max');
     expect(modelOutput).toContain(' 多模态能力');
@@ -87,7 +89,7 @@ describe('ChoicePickerComponent', () => {
       onSelect,
       onCancel,
     });
-    expect(theme.render(120).map(strip)).toContain('  ❯ 浅色 ← current');
+    expect(theme.render(120).map(strip)).toContain(`  ❯ 浅色 ${t('dialog.current')}`);
 
     const permission = new PermissionSelectorComponent({
       currentValue: 'yolo',
@@ -95,7 +97,7 @@ describe('ChoicePickerComponent', () => {
       onSelect,
       onCancel,
     });
-    expect(permission.render(120).map(strip)).toContain('  ❯ YES ← current');
+    expect(permission.render(120).map(strip)).toContain(`  ❯ YES ${t('dialog.current')}`);
 
     const settings = new SettingsSelectorComponent({
       colors: darkColors,
@@ -545,5 +547,28 @@ describe('ModelSelectorComponent search and pagination', () => {
 
     const absent = makeSelector(models).selector;
     expect(rendered(absent)).not.toContain('生图模型');
+  });
+
+  it('names the menu it came from, starts on the entry left, and pages only with several pages', () => {
+    const picker = new ChoicePickerComponent({
+      title: 'Theme',
+      breadcrumb: 'Settings',
+      initialValue: 'b',
+      options: [
+        { value: 'a', label: 'A' },
+        { value: 'b', label: 'B' },
+        { value: 'c', label: 'C' },
+      ],
+      colors: darkColors,
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+    const out = picker.render(80).map(strip);
+    expect(out).toContain(' Settings › Theme');
+    expect(out).toContain('  ❯ B');
+    expect(out.some((line) => line.includes(t('dialog.back')))).toBe(true);
+    // One page: Right must not jump to the last entry.
+    picker.handleInput('\u001B[C');
+    expect(picker.render(80).map(strip)).toContain('  ❯ B');
   });
 });

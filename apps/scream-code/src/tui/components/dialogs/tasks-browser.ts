@@ -13,6 +13,7 @@
  * fire the `on*` callbacks back to the controller.
  */
 
+import { pointerCell, selectableRow } from '../../utils/select-row';
 import {
   Container,
   Key,
@@ -697,9 +698,12 @@ export class TasksBrowserApp extends Container implements Focusable {
   }
 
   private renderAgentRow(agent: AgentRow, selected: boolean, innerWidth: number): string {
+    return selectableRow(this.props.colors, this.renderAgentRowText(agent, selected, innerWidth), innerWidth, selected);
+  }
+
+  private renderAgentRowText(agent: AgentRow, selected: boolean, innerWidth: number): string {
     const colors = this.props.colors;
-    const pointer = selected ? '> ' : '  ';
-    const pointerStyled = chalk.hex(selected ? colors.primary : colors.textDim)(pointer);
+    const pointerStyled = pointerCell(colors, selected);
     const marker = chalk.hex(agentStatusColor(colors, agent.status))(
       agent.status === 'idle' ? '○' : '●',
     );
@@ -722,9 +726,12 @@ export class TasksBrowserApp extends Container implements Focusable {
   }
 
   private renderListRow(task: BackgroundTaskInfo, selected: boolean, innerWidth: number): string {
+    return selectableRow(this.props.colors, this.renderListRowText(task, selected, innerWidth), innerWidth, selected);
+  }
+
+  private renderListRowText(task: BackgroundTaskInfo, selected: boolean, innerWidth: number): string {
     const colors = this.props.colors;
-    const pointer = selected ? '> ' : '  ';
-    const pointerStyled = chalk.hex(selected ? colors.primary : colors.textDim)(pointer);
+    const pointerStyled = pointerCell(colors, selected);
 
     const idColor = selected ? colors.primary : task.taskId.startsWith('agent-')
       ? colors.success

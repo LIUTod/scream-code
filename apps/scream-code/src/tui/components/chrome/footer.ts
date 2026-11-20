@@ -4,7 +4,7 @@
  *
  * Layout:
  *   Line 1 (identity strip): `📟️ <model>` · `<balance>` · `📁 Git +N-M`
- *           … right-aligned context gauge `📨 Context：<bar> <percent>`
+ *           … right-aligned context gauge `📨 Context  <bar> <percent>`
  *           (a transient hint takes that right side while active)
  *   Line 2 (run strip): `↓ 缓存命中: xx%` · `计划/融合` · `RLM` · `群狼`
  *           (each only while that mode is on, mode-coloured and bold)
@@ -49,10 +49,10 @@ function safeUsage(usage: number): number {
 }
 
 const CONTEXT_BAR_WIDTH = 10;
-// Slim progress bar glyphs: filled cell / empty cell (Geometric Shapes,
-// 1 column each — same class as the ◆ channel dot already in use).
-const CONTEXT_BAR_FILLED = '▰';
-const CONTEXT_BAR_EMPTY = '▱';
+// A thin gauge: heavy rule for the used share, light rule for the rest — one
+// continuous line, lighter on the row than a chain of blocks (both 1 column).
+const CONTEXT_BAR_FILLED = '━';
+const CONTEXT_BAR_EMPTY = '─';
 const BALANCE_FLASH_MS = 1500;
 
 function currencySymbol(currency: string): string {
@@ -62,30 +62,33 @@ function currencySymbol(currency: string): string {
 }
 
 /**
- * Slim progress bar for context usage: `▰▰▰▱▱▱▱▱▱▱` (10 cells).
- * One glyph per cell keeps the row visually light; the fill is floored so the
- * bar never overstates usage (100% covers the whole row). NaN/undefined coerce
- * through safeUsageRatio first.
+ * Context gauge: `📨 Context  ━━━─────── 28%`.
+ *
+ * The label is dim; the used share and the percentage carry the usage colour
+ * (plain text while usage is low, then warning, then error), and the unused
+ * share is a dim track — so the reading, not the label, is what stands out.
+ * The fill is floored so the gauge never overstates usage, but any non-zero
+ * usage keeps one cell lit (an empty gauge next to "<1%" reads as a bug);
+ * the percentage is floored too, `<1%` below one percent. `barWidth` 0 drops
+ * the gauge on narrow rows and keeps label and percentage.
  */
-function formatContextBar(usage: number, width: number = CONTEXT_BAR_WIDTH): string {
+function formatContextStatus(
+  usage: number,
+  barWidth: number,
+  colors: ColorPalette,
+  usageColor: string,
+): string {
   const clamped = Math.min(1, Math.max(0, safeUsageRatio(usage)));
-  // Floor so the bar never overstates, but any non-zero usage keeps one cell
-  // lit — an all-empty bar next to "5.5%" reads as a bug.
+  const percent = clamped > 0 && clamped < 0.01 ? '<1%' : `${String(Math.floor(clamped * 100))}%`;
+  const label = chalk.hex(colors.textDim)(t('footer.context_label'));
+  const reading = chalk.hex(usageColor)(percent);
+  if (barWidth <= 0) return `${label}  ${reading}`;
   const filled =
-    clamped >= 1 ? width : clamped > 0 ? Math.max(1, Math.floor(clamped * width)) : 0;
-  return `${CONTEXT_BAR_FILLED.repeat(filled)}${CONTEXT_BAR_EMPTY.repeat(width - filled)}`;
-}
-
-function formatContextStatus(usage: number, barWidth = CONTEXT_BAR_WIDTH): string {
-  // `📨 Context：▰▰▱▱▱▱▱▱▱▱ 28.8%` — the bar is the gauge, the percentage is
-  // gauge. Absolute token counts were dropped: they made the row read like a
-  // ledger and duplicated what `/status` already reports.
-  // `barWidth` 0 collapses the bar on narrow terminals, which needs its own
-  // template so no trailing space is left where the bar used to sit.
-  const clamped = Number.isFinite(usage) ? Math.min(1, Math.max(0, usage)) : 0;
-  const percent = `${(clamped * 100).toFixed(1)}%`;
-  if (barWidth <= 0) return t('footer.context_plain', { percent });
-  return t('footer.context', { percent, bar: formatContextBar(usage, barWidth) });
+    clamped >= 1 ? barWidth : clamped > 0 ? Math.max(1, Math.floor(clamped * barWidth)) : 0;
+  const bar =
+    chalk.hex(usageColor)(CONTEXT_BAR_FILLED.repeat(filled)) +
+    chalk.hex(colors.border)(CONTEXT_BAR_EMPTY.repeat(barWidth - filled));
+  return `${label}  ${bar} ${reading}`;
 }
 
 /** Format goal wall-clock duration compactly: `3m`, `1m30s`, `45s`. */
@@ -125,7 +128,8 @@ function pickContextColor(usage: number, maxTokens: number, colors: ColorPalette
   const level = contextLevel(safeUsage(usage), maxTokens);
   if (level === 'error') return colors.error;
   if (level === 'warning') return colors.warning;
-  return colors.textDim;
+  // Plain text, not dim: the used share must stand out from the dim track.
+  return colors.text;
 }
 
 // ── Gradient status line for footer line 2 ───────────────────────────
@@ -495,10 +499,10 @@ export class FooterComponent implements Component {
       });
     }
 
-    // Context gauge: `📨 Context：▰▰▱▱▱… 28.8%`, the whole readout in the usage
-    // colour. The bar shrinks 10 → 6 → none cells before the gauge itself is
-    // dropped; a transient hint (Ctrl+C confirmation) takes its place while
-    // active. Both are the last droppable thing on the row.
+    // Context gauge: `📨 Context  ━━━─────── 28%` (see formatContextStatus).
+    // The bar shrinks 10 → 6 → none cells before the gauge itself is dropped;
+    // a transient hint (Ctrl+C confirmation) takes its place while active.
+    // Both are the last droppable thing on the row.
     const gauge: FitItem = hint !== null
       ? {
           id: 'hint',
@@ -511,8 +515,11 @@ export class FooterComponent implements Component {
           rank: 0.2,
           dropRank: 0.05,
           variants: CONTEXT_BAR_STEPS.map((barWidth) =>
-            chalk.hex(pickContextColor(state.contextUsage, state.maxContextTokens, colors))(
-              formatContextStatus(state.contextUsage, barWidth),
+            formatContextStatus(
+              state.contextUsage,
+              barWidth,
+              colors,
+              pickContextColor(state.contextUsage, state.maxContextTokens, colors),
             ),
           ),
         };

@@ -18,6 +18,7 @@ export interface EditorSelectorOptions {
   readonly colors: ColorPalette;
   readonly onSelect: (value: string) => void;
   readonly onCancel: () => void;
+  readonly breadcrumb?: string | undefined;
 }
 
 export class EditorSelectorComponent extends ChoicePickerComponent {
@@ -29,6 +30,7 @@ export class EditorSelectorComponent extends ChoicePickerComponent {
       colors: opts.colors,
       onSelect: opts.onSelect,
       onCancel: opts.onCancel,
+      breadcrumb: opts.breadcrumb,
     });
   }
 }

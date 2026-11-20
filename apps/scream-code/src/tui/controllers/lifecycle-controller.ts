@@ -38,6 +38,9 @@ import { readLineFooterStatus } from '../utils/line-status';
 import { isDeadTerminalError } from '../utils/dead-terminal';
 import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
+import { notifyTerminalOnce } from '../utils/terminal-notification';
+import { hostShowsDesktopNotifications } from '#/host/desktop-notify';
+import { readHostSettings } from '#/host/settings';
 import { installTerminalThemeTracking } from '../utils/terminal-theme';
 import { resolveWaveColor, WAVE_YELLOW_AT_MS } from '../utils/wave-color';
 import { PulseWaveLoader } from '../components/chrome/pulse-wave-loader';
@@ -289,6 +292,28 @@ export class LifecycleController {
   }
 
   private jobsPollTimer: ReturnType<typeof setInterval> | undefined;
+  /** The count of items needing the person, last seen by the jobs poll; undefined before the first. */
+  private lastWaiting: number | undefined;
+  private waitingNotices = 0;
+
+  /**
+   * Where the background cannot show a system notification itself (a Mac
+   * without terminal-notifier, SSH, a Linux without a desktop), the terminal
+   * raises it when a new approval or question waits for the person — from the
+   * terminal app, so a click brings this window forward. Memories wait quietly,
+   * as in the background; items already waiting at start only show in the footer.
+   */
+  private announceNewWaiting(waiting: number): void {
+    const previous = this.lastWaiting;
+    this.lastWaiting = waiting;
+    if (previous === undefined || waiting <= previous) return;
+    if (hostShowsDesktopNotifications() || !readHostSettings().desktopNotifications) return;
+    this.waitingNotices += 1;
+    notifyTerminalOnce(this.host.state, `jobs-waiting:${String(this.waitingNotices)}`, {
+      title: t('host.notify.waiting_title'),
+      body: t('host.notify.waiting_body', { count: String(waiting) }),
+    });
+  }
   /** The Jobs panel's last snapshot, refreshed by the jobs poll. */
   private sidebarJobs: SidebarJobsData | undefined;
 
@@ -300,6 +325,7 @@ export class LifecycleController {
   startJobsPolling(): void {
     const POLL_INTERVAL_MS = 30_000;
     const apply = (status: JobsFooterStatus): void => {
+      this.announceNewWaiting(status.needsYou ?? 0);
       this.sidebarJobs = { hostRunning: status.hostRunning, waiting: status.waiting, rows: status.jobs ?? [] };
       this.host.setAppState({ jobsEnabled: status.enabled, jobsWaiting: status.waiting, jobsHostRunning: status.hostRunning });
     };

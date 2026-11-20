@@ -100,8 +100,7 @@ export const en: Record<string, string> = {
     'Set session_header = "{name}" under this provider in config.toml to supply the required session id.',
 
   // ─── Footer hints ─────────────
-  'footer.context': '📨 Context：{bar} {percent}',
-  'footer.context_plain': '📨 Context：{percent}',
+  'footer.context_label': '📨 Context',
   'footer.hit': 'Cache hit',
   // Shorter label used before the cache-hit readout is dropped on narrow terminals.
   'footer.hit_short': 'Cache',
@@ -189,10 +188,14 @@ export const en: Record<string, string> = {
   'welcome.like_active': 'like active',
   'welcome.like_inactive': 'like not loaded',
   'welcome.help_hint': '/help for help',
+  'welcome.hint_last': 'Last session: {title} ({time})',
+  'welcome.hint_resume_key': 'resume',
+  'welcome.hint_memory': '{count} memories',
+  'welcome.hint_waiting': '{count} waiting',
 
   // ─── Language ─────────────────
   'language.picker_title': 'Language / 语言',
-  'language.picker_hint': '↑↓ Select · Enter confirm · Esc cancel',
+  'language.picker_hint': '↑↓ select · Enter confirm · Esc cancel',
   'language.unchanged': 'Language unchanged: "{locale}".',
   'language.save_failed': 'Failed to save language: {error}',
   'language.switched': 'Language switched to {locale}',
@@ -374,7 +377,7 @@ export const en: Record<string, string> = {
   'mcp.update_plugin_blocked': '"{name}" is provided by a plugin — update it in /plugin instead.',
   'mcp.disabled_done': '{name} disabled.',
   'mcp.options_title': 'Chrome DevTools options',
-  'mcp.options_hint': 'Enter change  Esc discard (only "Save and restart" writes)',
+  'mcp.options_hint': '↑↓ select · Enter change · Esc discard (only "Save and restart" writes)',
   'mcp.auth_action': 'auth',
   'mcp.auth_needed_hint': 'Needs OAuth: press a to start the login (opens the authorization page in your browser).',
   'mcp.auth_discovering': 'Discovering OAuth metadata for {name}…',
@@ -412,7 +415,7 @@ export const en: Record<string, string> = {
   'mcp.skills_install_failed': 'Skill install failed: {msg}',
   'mcp.skills_removed': '{count} upstream skill(s) removed.',
   'mcp.skills_remove_failed': 'Skill removal failed: {msg}',
-  'mcp.confirm_hint': 'Enter confirm  Esc cancel',
+  'mcp.confirm_hint': '↑↓ select · Enter confirm · Esc cancel',
   'mcp.uninstalled': '{name} uninstalled.',
   'mcp.no_session': 'Please create or resume a session first.',
   'mcp.manage_title': 'MCP Management ({count} connected)',
@@ -429,7 +432,7 @@ export const en: Record<string, string> = {
   'mcp.detected_starting': 'Detected installation, starting...',
   'mcp.start_failed': 'Start failed: {msg}',
   'mcp.uninstall_failed': 'Uninstall failed: {msg}',
-  'mcp.footer_hint': 'Enter select  a auth  o options  d uninstall  Esc back',
+  'mcp.footer_hint': '↑↓ select · Enter confirm · a auth · o options · d uninstall · Esc back',
   'mcp.macos_only': 'macOS only',
 
   // ─── line channel ─────────────
@@ -639,10 +642,12 @@ export const en: Record<string, string> = {
   'makeskill.wait': 'Please wait for the current response to finish before using /make-skill',
 
   // ─── Dialog common ────────────
-  'dialog.nav': '↑↓ Navigate',
-  'dialog.page': '←→ Page',
-  'dialog.select': 'Enter Select',
-  'dialog.cancel': 'Esc Cancel',
+  'dialog.nav': '↑↓ select',
+  'dialog.page': '←→ page',
+  'dialog.select': 'Enter confirm',
+  'dialog.cancel': 'Esc cancel',
+  'dialog.back': 'Esc back',
+  'dialog.current': '← current',
   'dialog.search_placeholder': '(type to search)',
 
   // ─── Session picker ───────────
@@ -658,14 +663,14 @@ export const en: Record<string, string> = {
   'session_picker.batch_hint': '[space] select · [a] all · [d] delete selected ({count})',
   'session.picker_title': 'Sessions ',
   'session.delete_confirm': '⚠️ Press Enter to confirm delete, Esc to cancel',
-  'session.picker_hint': '(↑↓ Navigate, Enter Open, Space Mark, a All, d Delete, Esc Cancel)',
+  'session.picker_hint': '↑↓ select · Enter open · Space mark · a all · d delete · Esc cancel',
 
   // ─── Model selector ───────────
-  'model.nav_model': '↑↓ Model',
-  'model.nav_thinking': '←→ Thinking',
-  'model.nav_page': 'PgUp/PgDn Page',
-  'model.nav_select': 'Enter Switch model',
-  'model.nav_cancel': 'Esc Cancel',
+  'model.nav_model': '↑↓ model',
+  'model.nav_thinking': '←→ thinking',
+  'model.nav_page': 'PgUp/PgDn page',
+  'model.nav_select': 'Enter switch model',
+  'model.nav_cancel': 'Esc cancel',
   'model.search_placeholder': '(type to search)',
   'model.select_title': ' Select Model',
   'model.search_label': ' Search: ',
@@ -739,7 +744,7 @@ export const en: Record<string, string> = {
   'memory.search_label': 'Search: ',
   'memory.notebook_title': 'Memory Notebook ',
   'memory.esc_clear_search': '(Esc clear search)',
-  'memory.nav_hint': '(↑↓ Navigate, Enter View, Space Mark, a All, i Inject, d Delete, / Search, Esc Close)',
+  'memory.nav_hint': '↑↓ select · Enter view · Space mark · a all · i inject · d delete · / search · Esc close',
   'memory.loading': 'Loading...',
   'memory.no_match': 'No memories matching "{query}".',
   'memory.empty': 'No memories yet.',
@@ -1022,16 +1027,16 @@ export const en: Record<string, string> = {
   'subagent.follow_default_desc':
     'Config role/compaction model first when unbound, then the main model',
   'subagent.title': 'Subagent Model Binding',
-  'subagent.hint': '↑↓ Select subagent · Enter bind model · Esc cancel',
+  'subagent.hint': '↑↓ select subagent · Enter bind model · Esc cancel',
   'subagent.bind_title': 'Bind {profile}',
-  'subagent.model_hint': '↑↓ Select model · Enter confirm · Esc back',
+  'subagent.model_hint': '↑↓ select model · Enter confirm · Esc back',
   'subagent.save_failed': 'Save failed: {msg}',
   'subagent.stale_binding': '{alias} (stale)',
   'subagent.invalid_alias': 'Model alias {alias} does not exist',
 
   // ─── Model DIY (per-purpose bindings) ───
   'modeldiy.title': 'Model DIY',
-  'modeldiy.hint': '↑↓ Select · Enter confirm · Esc cancel',
+  'modeldiy.hint': '↑↓ select · Enter confirm · Esc cancel',
   'modeldiy.entry_roles': 'Models by role (fallback)',
   'modeldiy.entry_roles_desc':
     'Default model per role class; applies when the subagent has no explicit binding (writer and designer are never role-routed)',
@@ -1041,7 +1046,7 @@ export const en: Record<string, string> = {
   'modeldiy.entry_profiles': 'Models by subagent type (priority)',
   'modeldiy.entry_profiles_desc': 'Pin one subagent profile to a model; wins over the role binding',
   'modeldiy.roles_title': 'Models by Role',
-  'modeldiy.roles_hint': '↑↓ Select role · Enter bind model · Esc back',
+  'modeldiy.roles_hint': '↑↓ select role · Enter bind model · Esc back',
   'modeldiy.role_read': 'read · explore/plan/verify',
   'modeldiy.role_read_desc':
     'Members: explore, plan, verify — read-tier subagents (code recon, planning, gate runs)',
@@ -1053,7 +1058,7 @@ export const en: Record<string, string> = {
     'Members: reviewer, oracle — judgement-tier subagents (diff review, architecture review)',
   'modeldiy.bind_title': 'Bind {name}',
   'modeldiy.housekeeping_title': 'Compaction Model',
-  'modeldiy.housekeeping_hint': '↑↓ Select model · Enter confirm · Esc back',
+  'modeldiy.housekeeping_hint': '↑↓ select model · Enter confirm · Esc back',
 
   // ─── Knowledge document tree ────
   'kdoctree.no_title': '(untitled)',
@@ -1180,7 +1185,6 @@ export const en: Record<string, string> = {
   'mcpstatus.more_summary': 'MCP servers: {count} more ({detail})',
 
   // ─── permission-selector ───────
-  'permission.auto': 'Auto',
   'permission.auto_desc': 'Run fully without interaction. Tool operations are auto-approved; agent questions are skipped so it can decide on its own.',
   'permission.yolo_desc': 'Auto-approve tool operations (dangerous commands included). The agent still brings its questions and plan reviews to you.',
   'permission.bot_desc': 'Unattended mode: reversible actions auto-approve; anything else is denied and listed in the report.',
@@ -1555,7 +1559,7 @@ export const en: Record<string, string> = {
   'evolution.hint': 'Pick a change to see what it touched and roll it back',
   'evolution.empty': 'No changes recorded yet. The weekly self-review and approved changes are recorded here.',
   'evolution.skills': 'Skills: {names}',
-  'evolution.memories': '{count} memories',
+  'evolution.memories': 'Memory {count}',
   'evolution.rollback': 'Roll back this change',
   'evolution.rolled_back': 'Rolled back: {message}',
   'evolution.rollback_failed': 'Rollback failed: {error}',
@@ -1794,9 +1798,6 @@ export const en: Record<string, string> = {
   'badge.wolfpack': 'Wolfpack',
   'badge.rlm': 'RLM',
   'badge.goal': 'Goal',
-  'badge.yes': 'YES',
-  'badge.bot': 'BOT',
-  'badge.ask': 'ASK',
 
   // ─── Knowledge Web (in-browser) ────
   'kw.embedding_downloading': 'Vector model downloading…',
@@ -1873,6 +1874,7 @@ export const en: Record<string, string> = {
   'host.notify.job_failed_body': '{title}; open a terminal and see /jobs',
   'host.notify.continued_title': 'Scream: background work finished',
   'host.notify.waiting_title': 'Scream: something waits for you',
+  'host.notify.waiting_body': '{count} waiting — see /jobs',
   'host.msg.continued_done': 'The work handed to the background is done: {title}\n{detail}',
   'host.msg.continued_stopped': 'The work handed to the background did not finish: {title}\n{detail}',
   'host.log.started_channel': 'Background host started (chat channel: {channel}). Press Ctrl+C to exit.',

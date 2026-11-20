@@ -10,12 +10,13 @@ const LANGUAGE_OPTIONS: readonly ChoiceOption[] = [
   { value: 'en', label: 'English 英文' },
 ];
 
-export function handleLanguageCommand(host: SlashCommandHost): void {
+export function handleLanguageCommand(host: SlashCommandHost, back?: () => void): void {
   const current = getLocale();
   host.mountEditorReplacement(
     new ChoicePickerComponent({
       title: t('language.picker_title'),
-      hint: t('language.picker_hint'),
+      // From /settings the default hint applies, which says Esc goes back.
+      hint: back === undefined ? t('language.picker_hint') : undefined,
       options: [...LANGUAGE_OPTIONS],
       currentValue: current,
       colors: host.state.theme.colors,
@@ -25,7 +26,9 @@ export function handleLanguageCommand(host: SlashCommandHost): void {
       },
       onCancel: () => {
         host.restoreEditor();
+        back?.();
       },
+      breadcrumb: back === undefined ? undefined : t('settings.title'),
     }),
   );
 }

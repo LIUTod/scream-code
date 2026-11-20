@@ -20,7 +20,7 @@ import chalk from 'chalk';
 
 import { t } from '@scream-code/config';
 
-import { SELECT_POINTER } from '../../constant/symbols';
+import { currentMark, pointerCell, selectableRow } from '../../utils/select-row';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';
@@ -44,6 +44,10 @@ export interface ChoicePickerOptions {
   readonly hint?: string;
   readonly formatHint?: (text: string, colors: ColorPalette) => string;
   readonly notice?: string;
+  /** The menu this one was opened from: shown before the title (`设置 › 主题`), and Esc goes back to it. */
+  readonly breadcrumb?: string | undefined;
+  /** Row the cursor starts on when no option is current (e.g. the one just left). */
+  readonly initialValue?: string | undefined;
   /** Muted lines under the title, one per entry (a status block, say). */
   readonly details?: readonly string[];
   readonly options: readonly ChoiceOption[];
@@ -64,7 +68,6 @@ export interface ChoicePickerOptions {
   readonly onDispose?: () => void;
 }
 
-const CURRENT_MARK = '← current';
 
 function wrapDescription(text: string, width: number): string[] {
   const maxWidth = Math.max(1, width);
@@ -97,7 +100,8 @@ export class ChoicePickerComponent extends Container implements Focusable {
   constructor(opts: ChoicePickerOptions) {
     super();
     this.opts = opts;
-    const currentIdx = opts.options.findIndex((o) => o.value === opts.currentValue);
+    const startValue = opts.currentValue ?? opts.initialValue;
+    const currentIdx = opts.options.findIndex((o) => o.value === startValue);
     this.list = new SearchableList({
       items: opts.options,
       toSearchText: (o) => `${o.label} ${o.description ?? ''}`,
@@ -118,13 +122,13 @@ export class ChoicePickerComponent extends Container implements Focusable {
       this.opts.onCancel();
       return;
     }
-    // Left/Right page through the list (this picker has no horizontal control).
-    if (matchesKey(data, Key.left)) {
-      this.list.pageUp();
-      return;
-    }
-    if (matchesKey(data, Key.right)) {
-      this.list.pageDown();
+    // Left/Right page through a list of several pages (the hint says so);
+    // on a single page they do nothing instead of jumping to an end.
+    if (matchesKey(data, Key.left) || matchesKey(data, Key.right)) {
+      if (this.list.view().page.pageCount > 1) {
+        if (matchesKey(data, Key.left)) this.list.pageUp();
+        else this.list.pageDown();
+      }
       return;
     }
     if (
@@ -161,26 +165,21 @@ export class ChoicePickerComponent extends Container implements Focusable {
 
     const navParts = [t('dialog.nav')];
     if (view.page.pageCount > 1) navParts.push(t('dialog.page'));
-    navParts.push(t('dialog.select'), t('dialog.cancel'));
+    navParts.push(t('dialog.select'), this.opts.breadcrumb === undefined ? t('dialog.cancel') : t('dialog.back'));
     const hint = this.opts.hint ?? navParts.join(' · ');
 
     const titleSuffix =
       searchable && view.query.length === 0 ? chalk.hex(colors.textMuted)(`  ${t('dialog.search_placeholder')}`) : '';
     const lines: string[] = [
       chalk.hex(colors.primary)('─'.repeat(width)),
-      chalk.hex(colors.primary).bold(` ${this.opts.title}`) + titleSuffix,
+      ' ' + breadcrumbPrefix(this.opts.breadcrumb, colors) + chalk.hex(colors.primary).bold(this.opts.title) + titleSuffix,
     ];
     for (const detail of this.opts.details ?? []) {
-      lines.push(chalk.hex(colors.textDim)(` ${truncateToWidth(detail, Math.max(1, width - 1))}`));
+      lines.push(truncateToWidth(` ${detailLine(detail, colors)}`, width));
     }
     if (searchable && view.query.length > 0) {
       lines.push(chalk.hex(colors.primary)(` Search: `) + chalk.hex(colors.text)(view.query));
     }
-    lines.push(
-      this.opts.formatHint === undefined
-        ? chalk.hex(colors.textMuted)(` ${hint}`)
-        : this.opts.formatHint(` ${hint}`, colors),
-    );
     if (this.opts.notice !== undefined) {
       lines.push(chalk.hex(colors.success)(` ${this.opts.notice}`));
     }
@@ -193,18 +192,14 @@ export class ChoicePickerComponent extends Container implements Focusable {
       const opt = options[i]!;
       const isSelected = i === view.selectedIndex;
       const isCurrent = opt.value === this.opts.currentValue;
-      const pointer = isSelected ? SELECT_POINTER : ' ';
-      const labelStyle = optionLabelStyle(opt, isSelected, colors);
-      let line = chalk.hex(isSelected ? colors.primary : colors.textDim)(`  ${pointer} `);
-      line += labelStyle(opt.label);
-      if (isCurrent) {
-        line += ' ' + chalk.hex(colors.success)(CURRENT_MARK);
-      }
-      lines.push(line);
+      let line = `  ${pointerCell(colors, isSelected)}`;
+      line += optionLabelStyle(opt, isSelected, colors)(opt.label);
+      if (isCurrent) line += currentMark(colors);
+      lines.push(selectableRow(colors, line, width, isSelected));
       if (opt.description !== undefined && opt.description.length > 0) {
         const descriptionWidth = Math.max(1, width - 4);
         for (const descLine of wrapDescription(opt.description, descriptionWidth)) {
-          lines.push(chalk.hex(colors.textMuted)(`    ${descLine}`));
+          lines.push(selectableRow(colors, chalk.hex(colors.textMuted)(`    ${descLine}`), width, isSelected));
         }
       }
     }
@@ -217,6 +212,12 @@ export class ChoicePickerComponent extends Container implements Focusable {
         ),
       );
     }
+    // The key hint sits under the list in every dialog.
+    lines.push(
+      this.opts.formatHint === undefined
+        ? chalk.hex(colors.textMuted)(` ${hint}`)
+        : this.opts.formatHint(` ${hint}`, colors),
+    );
     lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
     return lines.map((line) => truncateToWidth(line, width));
   }
@@ -231,4 +232,20 @@ function optionLabelStyle(
     return selected ? chalk.hex(colors.error).bold : chalk.hex(colors.error);
   }
   return selected ? chalk.hex(colors.primary).bold : chalk.hex(colors.text);
+}
+
+/**
+ * A status line under the title. "名称：值" reads as a field — the name dim,
+ * the value in plain text, like the sidebar panels; any other line is a dim note.
+ */
+function detailLine(detail: string, colors: ColorPalette): string {
+  // A short name (not a time like 12:30, not a URL's scheme) then the value.
+  const field = /^([^：:/\d][^：:/]{0,11}[：:])(?!\/)(.+)$/.exec(detail);
+  if (field === null) return chalk.hex(colors.textDim)(detail);
+  return chalk.hex(colors.textDim)(field[1]!) + chalk.hex(colors.text)(field[2]!);
+}
+
+/** `设置 › ` before a sub-menu's title, dim; empty for a top-level menu. */
+export function breadcrumbPrefix(breadcrumb: string | undefined, colors: ColorPalette): string {
+  return breadcrumb === undefined ? '' : chalk.hex(colors.textDim)(`${breadcrumb} › `);
 }

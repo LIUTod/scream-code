@@ -22,6 +22,11 @@ export interface JobSummaryRow {
 export interface JobsFooterStatus {
   readonly enabled: number;
   readonly waiting: number;
+  /**
+   * Of those, the ones worth a heads-up: approvals and questions. Memories
+   * wait quietly, as the background treats them (host/run.ts onNewItem).
+   */
+  readonly needsYou?: number;
   readonly hostRunning: boolean;
   /** Enabled jobs, soonest next run first (the sidebar's Jobs panel). */
   readonly jobs?: readonly JobSummaryRow[];
@@ -32,12 +37,14 @@ export async function readJobsFooterStatus(now: number = Date.now()): Promise<Jo
     const home = getDataDir();
     const on = new JobStore(home).list().filter((job) => job.enabled);
     const enabled = on.length;
-    const waiting = listInbox(home).filter((item) => item.status === 'pending' && item.expiresAt > now).length;
+    const pending = listInbox(home).filter((item) => item.status === 'pending' && item.expiresAt > now);
+    const waiting = pending.length;
+    const needsYou = pending.filter((item) => item.kind !== 'memory').length;
     const hostRunning = enabled > 0 ? (await readHostStatus()).running : false;
     const jobs = on
       .map((job) => ({ title: job.title, lastOk: job.runs.at(-1)?.ok, nextRunAt: job.nextRunAt }))
       .toSorted((a, b) => (a.nextRunAt ?? Number.POSITIVE_INFINITY) - (b.nextRunAt ?? Number.POSITIVE_INFINITY));
-    return { enabled, waiting, hostRunning, jobs };
+    return { enabled, waiting, needsYou, hostRunning, jobs };
   } catch {
     return { enabled: 0, waiting: 0, hostRunning: false };
   }

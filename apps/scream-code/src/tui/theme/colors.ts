@@ -110,6 +110,10 @@ export interface ColorPalette {
   // Roles
   roleUser: string;
   roleUserBg: string;
+  /** Background bar behind the selected row of every list (pickers, the `/` menu). */
+  selectionBg: string;
+  /** Dim and muted text on the selection bar is lifted to this, so it stays readable there. */
+  selectionMuted: string;
   roleAssistant: string;
   roleThinking: string;
   roleTool: string;
@@ -169,6 +173,10 @@ export const darkColors: ColorPalette = {
 
   roleUser: '#f7e308',
   roleUserBg: '#f7e308',
+  // Clearly lighter than common dark terminal grounds (≥1.6:1 on #272b36),
+  // with the primary green still ≥4.5:1 on it.
+  selectionBg: '#3b5124',
+  selectionMuted: '#b8c4a8',
   roleAssistant: dark.gray100,
   roleThinking: dark.gray500,
   roleTool: dark.amber400,
@@ -226,6 +234,8 @@ export const lightColors: ColorPalette = {
 
   roleUser: '#bd5302',
   roleUserBg: '#bd5302',
+  selectionBg: '#e3ecd3',
+  selectionMuted: '#5F5F5F',
   roleAssistant: light.gray900,
   roleThinking: light.gray700,
   roleTool: light.amber800,

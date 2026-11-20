@@ -10,7 +10,7 @@ function getPermissionOptions(): readonly ChoiceOption[] {
   return [
     {
       value: 'auto',
-      label: t('permission.auto'),
+      label: permissionModeLabel('auto'),
       description: t('permission.auto_desc'),
     },
     {
@@ -40,6 +40,7 @@ export interface PermissionSelectorOptions {
   readonly colors: ColorPalette;
   readonly onSelect: (mode: PermissionMode) => void;
   readonly onCancel: () => void;
+  readonly breadcrumb?: string | undefined;
 }
 
 export class PermissionSelectorComponent extends ChoicePickerComponent {
@@ -53,6 +54,7 @@ export class PermissionSelectorComponent extends ChoicePickerComponent {
         if (isPermissionModeChoice(value)) opts.onSelect(value);
       },
       onCancel: opts.onCancel,
+      breadcrumb: opts.breadcrumb,
     });
   }
 }

@@ -50,32 +50,32 @@ function makeFooter(state: AppState) {
 }
 
 describe('FooterComponent — context NaN resilience', () => {
-  it('NaN usage → renders 0.0% (never literal "NaN%")', () => {
+  it('NaN usage → renders 0% (never literal "NaN%")', () => {
     const fc = makeFooter(baseState({ contextUsage: Number.NaN }));
     const out = strip(fc.render(120).join(''));
     expect(out).not.toMatch(/NaN/);
-    expect(out).toContain('▱▱▱▱▱▱▱▱▱▱');
+    expect(out).toContain('📨 Context  ────────── 0%');
   });
 
-  it('undefined-ish (coerced) usage → renders 0.0%', () => {
+  it('undefined-ish (coerced) usage → renders 0%', () => {
     const fc = makeFooter(
       baseState({ contextUsage: undefined as unknown as number }),
     );
     const out = strip(fc.render(120).join(''));
     expect(out).not.toMatch(/NaN/);
-    expect(out).toContain('▱▱▱▱▱▱▱▱▱▱');
+    expect(out).toContain('📨 Context  ────────── 0%');
   });
 
-  it('clamps ratios above 1.0 → renders 100.0%', () => {
+  it('clamps ratios above 1.0 → renders 100%', () => {
     const fc = makeFooter(baseState({ contextUsage: 1.5 }));
     const out = strip(fc.render(120).join(''));
-    expect(out).toContain('▰▰▰▰▰▰▰▰▰▰');
+    expect(out).toContain('━━━━━━━━━━ 100%');
   });
 
-  it('ratio 0.427 → renders 42.7%', () => {
+  it('ratio 0.427 → renders 42% (floored, never overstated)', () => {
     const fc = makeFooter(baseState({ contextUsage: 0.427 }));
     const out = strip(fc.render(200).join(''));
-    expect(out).toContain('▰▰▰▰▱▱▱▱▱▱');
+    expect(out).toContain('📨 Context  ━━━━────── 42%');
   });
 
   it('reports the percentage only — absolute token counts are gone', () => {
@@ -84,8 +84,8 @@ describe('FooterComponent — context NaN resilience', () => {
     );
     const out = strip(fc.render(200).join(''));
     expect(out).not.toMatch(/Infinity|NaN/);
-    expect(out).toContain('▱▱▱▱▱▱▱▱▱▱');
-    expect(out).toContain('📨 Context：');
+    expect(out).toContain('📨 Context  ────────── 0%');
+    expect(out).toContain('📨 Context  ');
     // Neither the raw count nor the window size is printed any more.
     expect(out).not.toContain('500/');
     expect(out).not.toContain('0/0');
@@ -99,7 +99,7 @@ describe('FooterComponent — context NaN resilience', () => {
     const out = strip(footer.render(200).join(''));
     expect(out).toContain('scream-k2-5');
     expect(out).not.toContain(' k2 ');
-    expect(out).toContain('▰▰▰▰▰▱▱▱▱▱');
+    expect(out).toContain('━━━━━─────');
   });
 
   it('renders a water-level progress bar ahead of the percentage', () => {
@@ -108,22 +108,22 @@ describe('FooterComponent — context NaN resilience', () => {
     );
     const out = strip(fc.render(200).join(''));
     // 28.8% × 10 cells = 2.88 → 2 filled cells (floored).
-    expect(out).toContain('📨 Context：▰▰▱▱▱▱▱▱▱▱ 28.8%');
+    expect(out).toContain('📨 Context  ━━──────── 28%');
   });
 
   it('keeps at least one lit cell for a tiny non-zero usage', () => {
     const out = strip(
       makeFooter(baseState({ contextUsage: 0.005 })).render(200).join(''),
     );
-    // 0.5% would floor to zero cells; an empty bar beside "0.5%" reads as a bug.
-    expect(out).toContain('📨 Context：▰▱▱▱▱▱▱▱▱▱ 0.5%');
+    // 0.5% would floor to zero cells; an empty bar beside "<1%" reads as a bug.
+    expect(out).toContain('📨 Context  ━───────── <1%');
   });
 
   it('renders an all-empty bar at 0% and an all-filled bar at >=100%', () => {
     const empty = strip(makeFooter(baseState({ contextUsage: 0 })).render(200).join(''));
-    expect(empty).toContain('▱▱▱▱▱▱▱▱▱▱');
+    expect(empty).toContain('📨 Context  ────────── 0%');
     const full = strip(makeFooter(baseState({ contextUsage: 1.5 })).render(200).join(''));
-    expect(full).toContain('▰▰▰▰▰▰▰▰▰▰');
+    expect(full).toContain('📨 Context  ━━━━━━━━━━ 100%');
   });
 
   it('does not show a thinking label in the footer', () => {
@@ -165,7 +165,7 @@ describe('FooterComponent — context NaN resilience', () => {
     const footer = makeFooter(baseState());
 
     const [line1, line2] = footer.render(120);
-    expect(strip(line1 ?? '')).toContain('📨 Context：');
+    expect(strip(line1 ?? '')).toContain('📨 Context  ');
     expect(strip(line2 ?? '')).toContain('↓ 缓存命中: --');
     expect(strip(line2 ?? '')).toContain('Line:');
     // The gauge no longer shares a row with the hit rate.
@@ -205,7 +205,7 @@ describe('FooterComponent — context NaN resilience', () => {
     }
   });
 
-  it('colors the whole gauge — label, percentage and bar — as one span', () => {
+  it('keeps the label dim, the used share and the reading in the usage colour, the rest as a dim track', () => {
     const previousLevel = chalk.level;
     chalk.level = 3;
     try {
@@ -213,18 +213,16 @@ describe('FooterComponent — context NaN resilience', () => {
         baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
       );
       const out = fc.render(200).join('');
-      // The reset must come right after the bar, i.e. the bar is inside the
-      // usage colour like the rest of the reading.
-      expect(out).toContain(
-        `${hexToSgr(darkColors.textDim)}📨 Context：▰▰▰▰▰▱▱▱▱▱ 50.0%\u001B[39m`,
-      );
+      expect(out).toContain(`${hexToSgr(darkColors.textDim)}📨 Context\u001B[39m`);
+      expect(out).toContain(`${hexToSgr(darkColors.text)}━━━━━\u001B[39m${hexToSgr(darkColors.border)}─────\u001B[39m`);
+      expect(out).toContain(`${hexToSgr(darkColors.text)}50%\u001B[39m`);
     } finally {
       chalk.level = previousLevel;
     }
   });
 
   it('shrinks the bar only as far as the row needs: 10 cells, then 6, then none', () => {
-    // `📟️ scream-k2-5` is 14 columns; the gauge is 28 / 24 / 17 columns wide with a
+    // `📟️ scream-k2-5` is 14 columns; the gauge is 26 / 22 / 15 columns wide with a
     // 10-cell / 6-cell / no bar, and the row keeps 3 columns between the two.
     const footer = makeFooter(
       baseState({
@@ -235,24 +233,24 @@ describe('FooterComponent — context NaN resilience', () => {
       }),
     );
     const at = (width: number): string => strip(footer.render(width)[0] ?? '');
-    expect(at(45)).toContain('📨 Context：▰▰▰▰▰▱▱▱▱▱ 50.0%');
-    expect(at(44)).toContain('📨 Context：▰▰▰▱▱▱ 50.0%');
-    expect(at(41)).toContain('📨 Context：▰▰▰▱▱▱ 50.0%');
-    expect(at(40)).toContain('📨 Context：50.0%');
-    expect(at(40)).not.toMatch(/[▰▱]/);
-    expect(at(34)).toContain('📟️ scream-k2-5');
-    expect(at(34)).toContain('📨 Context：50.0%');
+    expect(at(43)).toContain('📨 Context  ━━━━━───── 50%');
+    expect(at(42)).toContain('📨 Context  ━━━─── 50%');
+    expect(at(39)).toContain('📨 Context  ━━━─── 50%');
+    expect(at(38)).toContain('📨 Context  50%');
+    expect(at(38)).not.toMatch(/[━─]/);
+    expect(at(32)).toContain('📟️ scream-k2-5');
+    expect(at(32)).toContain('📨 Context  50%');
     // Below that the model name is cut instead — the gauge keeps its percentage.
-    expect(at(33)).toContain('📨 Context：50.0%');
-    expect(at(33)).toContain('…');
-    for (const width of [45, 44, 41, 40, 34, 33]) expect(visibleWidth(at(width))).toBe(width);
+    expect(at(31)).toContain('📨 Context  50%');
+    expect(at(31)).toContain('…');
+    for (const width of [43, 42, 39, 38, 32, 31]) expect(visibleWidth(at(width))).toBe(width);
   });
 
   it('keeps the full 10-cell bar on a roomy 60-column row', () => {
     const footer = makeFooter(
       baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
     );
-    expect(strip(footer.render(60)[0] ?? '')).toContain('📨 Context：▰▰▰▰▰▱▱▱▱▱ 50.0%');
+    expect(strip(footer.render(60)[0] ?? '')).toContain('📨 Context  ━━━━━───── 50%');
   });
 
   it('keeps the gauge flush against the right edge on line 1', () => {
@@ -260,7 +258,7 @@ describe('FooterComponent — context NaN resilience', () => {
       baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
     );
     const line1 = footer.render(60)[0] ?? '';
-    expect(strip(line1).endsWith('📨 Context：▰▰▰▰▰▱▱▱▱▱ 50.0%')).toBe(true);
+    expect(strip(line1).endsWith('📨 Context  ━━━━━───── 50%')).toBe(true);
     expect(visibleWidth(line1)).toBe(60);
   });
 
@@ -345,10 +343,10 @@ describe('FooterComponent — two-line layout', () => {
       baseState({ contextUsage: 0.288, contextTokens: 288_000, maxContextTokens: 1_000_000 }),
     );
     const [line1, line2] = footer.render(120);
-    // Envelope mark + `Context：` label, then bar, then the percentage.
-    expect(strip(line1!)).toContain('📨 Context：▰▰▱▱▱▱▱▱▱▱ 28.8%');
+    // Envelope mark + `Context` label, then the gauge, then the percentage.
+    expect(strip(line1!)).toContain('📨 Context  ━━──────── 28%');
     // Right-aligned to the terminal edge: no padding after the bar.
-    expect(strip(line1!).endsWith('▰▰▱▱▱▱▱▱▱▱ 28.8%')).toBe(true);
+    expect(strip(line1!).endsWith('━━──────── 28%')).toBe(true);
     expect(strip(line2!)).not.toContain('Context');
     expect(visibleWidth(line1!)).toBe(120);
   });
@@ -357,24 +355,21 @@ describe('FooterComponent — two-line layout', () => {
     const footer = makeFooter(
       baseState({ contextUsage: 0.1, contextTokens: 100_000, maxContextTokens: 1_000_000 }),
     );
-    expect(strip(footer.render(120)[0] ?? '')).toContain('📨 Context：');
+    expect(strip(footer.render(120)[0] ?? '')).toContain('📨 Context  ━───────── 10%');
 
     // Live path: `agent.status.updated` patches appState.contextUsage, the TUI
     // re-runs footer.setState(), and the next frame must show the new ratio.
     footer.setState(
       baseState({ contextUsage: 0.62, contextTokens: 620_000, maxContextTokens: 1_000_000 }),
     );
-    expect(strip(footer.render(120)[0] ?? '')).toContain('📨 Context：');
+    expect(strip(footer.render(120)[0] ?? '')).toContain('📨 Context  ━━━━━━──── 62%');
 
     footer.setState(
       baseState({ contextUsage: 0.95, contextTokens: 950_000, maxContextTokens: 1_000_000 }),
     );
     const line = strip(footer.render(120)[0] ?? '');
-    expect(line).toContain('📨 Context：');
-    // The bar follows the same value: 95% of 10 cells = 9 filled (8 deep +
-    // 1 foam), 1 empty.
-    // 95% floors to 9 filled cells; the row still ends at the bar.
-    expect(line).toMatch(/📨 Context：[▰▱]{10} 95\.0%$/);
+    // 95% floors to 9 filled cells; the row ends at the reading.
+    expect(line).toMatch(/📨 Context {2}━{9}─ 95%$/);
 
     footer.dispose();
   });
@@ -389,11 +384,11 @@ describe('FooterComponent — two-line layout', () => {
       }),
     );
     // 38 columns: the model name takes 14, so only the bar-less gauge fits and
-    // the bar-less template must not leave the double space the bar used to occupy.
+    // the bar-less gauge must not leave the extra space the bar used to occupy.
     const line1 = strip(footer.render(38)[0]!);
-    expect(line1).toContain('📨 Context：50.0%');
-    expect(line1).not.toContain('Context: ');
-    expect(line1).not.toMatch(/[▰▱]/);
+    expect(line1).toContain('📨 Context  50%');
+    expect(line1).not.toMatch(/Context {3}/);
+    expect(line1).not.toMatch(/[━─]/);
   });
 
   it('lets a transient hint take the line-1 right side while line 2 keeps the channel', () => {

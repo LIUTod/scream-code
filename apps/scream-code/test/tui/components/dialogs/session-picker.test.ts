@@ -1,3 +1,4 @@
+import { t } from '@scream-code/config';
 import { visibleWidth } from '@liutod-scream/pi-tui';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -48,9 +49,9 @@ describe('SessionPickerComponent', () => {
 
     const output = renderPlain(component);
 
-    expect(output).toContain('2m ago');
-    expect(output).toContain('3h ago');
-    expect(output).not.toContain('just now');
+    expect(output).toContain(t('memory.minutes_ago', { minutes: 2 }));
+    expect(output).toContain(t('memory.hours_ago', { hours: 3 }));
+    expect(output).not.toContain(t('memory.just_now'));
   });
 
   it('renders title, full session id, work_dir, and last_prompt for each session', () => {
@@ -177,8 +178,8 @@ describe('SessionPickerComponent', () => {
     const lines = component.render(120).map((line) => stripAnsi(line));
     const currentLine = lines.find((line) => line.includes('this is current'));
     const otherLine = lines.find((line) => line.includes('not current'));
-    expect(currentLine).toContain('(current)');
-    expect(otherLine).not.toContain('(current)');
+    expect(currentLine).toContain(t('dialog.current'));
+    expect(otherLine).not.toContain(t('dialog.current'));
   });
 
   it('places the relative time on the same line as the title, not right-aligned', () => {
@@ -207,7 +208,7 @@ describe('SessionPickerComponent', () => {
     const headerLine = lines.find((line) => line.includes('Short title'));
     expect(headerLine).toBeDefined();
     // Title and time sit side-by-side with only the small inline separator.
-    expect(headerLine).toMatch(/Short title\s{1,4}5m ago/);
+    expect(headerLine).toMatch(new RegExp(`Short title\\s{1,4}${t('memory.minutes_ago', { minutes: 5 })}`));
     // No long run of trailing spaces, i.e. not right-aligned.
     expect(headerLine).not.toMatch(/Short title\s{8,}/);
   });

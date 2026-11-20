@@ -89,7 +89,7 @@ describe('/mermaid 面板', () => {
       .join('\n');
     const asciiLine = text.split('\n').find((line) => line.includes(t('mermaid.option.ascii')));
     expect(asciiLine).toBeDefined();
-    expect(asciiLine).toContain('current');
+    expect(asciiLine).toContain(t('dialog.current'));
   });
 
   it('选定后写入偏好、收起面板并重画屏上内容', async () => {
