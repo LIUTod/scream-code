@@ -428,7 +428,7 @@ describe('CustomEditor permission mode badge', () => {
     const editor = makeEditor();
     editor.permissionMode = 'yolo';
 
-    expect(topBorder(editor, 40)).toContain(`${permissionModeLabel('yolo')} ▸`);
+    expect(topBorder(editor, 40)).toContain(`${permissionModeLabel('yolo')} ▸▸`);
     // Every mark is one cell per glyph, so the prefix must not shift the border.
     for (const width of [10, 12, 20, 40, 80]) {
       const line = topBorder(editor, width);
@@ -499,22 +499,28 @@ describe('CustomEditor permission mode badge', () => {
   });
 
   it('marks how far each mode lets the agent run, flowing while it works and holding while it waits', () => {
-    expect(['auto', 'yolo', 'ask', 'bot'].map((mode) => idleModeMark(mode as never))).toEqual(['▸▸', '▸', '‖', '↻']);
-    // Working: the arrows flow frame by frame; BOT turns; ASK holds.
+    expect(['auto', 'yolo', 'ask', 'bot'].map((mode) => idleModeMark(mode as never))).toEqual(['▸▸▸', '▸▸ ', ' ‖ ', ' ◜ ']);
+    // Working: the arrows flow frame by frame; BOT turns through four arcs; ASK holds.
     expect([0, 240, 480].map((now) => modeMark('auto', 'running', now, true))).toEqual(['▹▸▸', '▸▹▸', '▸▸▹']);
-    expect([0, 240].map((now) => modeMark('yolo', 'running', now, true))).toEqual(['▹▸', '▸▹']);
-    expect([0, 240].map((now) => modeMark('bot', 'running', now, true))).toEqual(['↻', '↺']);
-    expect(modeMark('ask', 'running', 240, true)).toBe('‖');
+    expect([0, 240].map((now) => modeMark('yolo', 'running', now, true))).toEqual(['▹▸ ', '▸▹ ']);
+    expect([0, 150, 300, 450].map((now) => modeMark('bot', 'running', now, true))).toEqual([' ◜ ', ' ◝ ', ' ◞ ', ' ◟ ']);
+    expect(modeMark('ask', 'running', 240, true)).toBe(' ‖ ');
+    // Every mark is three cells in every state: the badge never changes width.
+    for (const mode of ['auto', 'yolo', 'ask', 'bot'] as const) {
+      for (const activity of ['idle', 'running', 'waiting'] as const) {
+        for (const now of [0, 150, 240, 300, 450, 480]) expect(visibleWidth(modeMark(mode, activity, now, true))).toBe(3);
+      }
+    }
     // Motion off: the first frame, always.
     expect(modeMark('auto', 'running', 480, false)).toBe('▹▸▸');
     // Waiting on the person: the pause mark in every mode.
-    expect(modeMark('auto', 'waiting', 0, true)).toBe('‖');
+    expect(modeMark('auto', 'waiting', 0, true)).toBe(' ‖ ');
 
     const editor = makeEditor();
     editor.permissionMode = 'yolo';
     editor.activity = 'waiting';
-    expect(topBorder(editor, 40)).toContain(`${permissionModeLabel('yolo')} ‖`);
+    expect(topBorder(editor, 40)).toContain(`${permissionModeLabel('yolo')}  ‖ `);
     editor.activity = 'running';
-    expect(topBorder(editor, 40)).toMatch(/YES [▹▸]{2}/);
+    expect(topBorder(editor, 40)).toMatch(/YES [▹▸]{2} /);
   });
 });

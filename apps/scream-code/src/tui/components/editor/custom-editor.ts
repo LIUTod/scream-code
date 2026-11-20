@@ -622,21 +622,25 @@ export type EditorActivity = 'idle' | 'running' | 'waiting';
 
 /**
  * The mark after the permission-mode label, a transport control that says how
- * far the mode lets the agent run: AUTO `▸▸` (all the way), YES `▸` (stops only
- * for the high-risk few), ASK `‖` (reads, never changes), BOT `↻` (works on its
- * own). While the agent works the arrows flow (`▹` travels along them) and BOT
- * turns; while it waits on the person (an approval or a question) the badge
+ * far the mode lets the agent run: AUTO `▸▸▸` (all the way), YES `▸▸` (stops
+ * only for the high-risk few), ASK `‖` (reads, never changes), BOT `◜` (works on
+ * its own). While the agent works the arrows flow (`▹` travels along them) and
+ * BOT turns; while it waits on the person (an approval or a question) the badge
  * shows `‖` in the warning colour, breathing. All marks are one-cell glyphs
  * with no emoji presentation. With motion off every mark holds still.
  */
-const MODE_MARKS: Readonly<Record<PermissionMode, { idle: string; running: readonly string[] }>> = {
-  auto: { idle: '▸▸', running: ['▹▸▸', '▸▹▸', '▸▸▹'] },
-  yolo: { idle: '▸', running: ['▹▸', '▸▹'] },
-  ask: { idle: '‖', running: ['‖'] },
-  bot: { idle: '↻', running: ['↻', '↺'] },
+// Every mark is three cells in every state, so the badge never changes width
+// (the arrow count is the scale: AUTO three, YES two). BOT turns through four
+// quarter arcs; ◜◝◞◟ are narrow even where ambiguous-width glyphs are wide.
+const MODE_MARKS: Readonly<
+  Record<PermissionMode, { idle: string; running: readonly string[]; frameMs: number }>
+> = {
+  auto: { idle: '▸▸▸', running: ['▹▸▸', '▸▹▸', '▸▸▹'], frameMs: 240 },
+  yolo: { idle: '▸▸ ', running: ['▹▸ ', '▸▹ '], frameMs: 240 },
+  ask: { idle: ' ‖ ', running: [' ‖ '], frameMs: 240 },
+  bot: { idle: ' ◜ ', running: [' ◜ ', ' ◝ ', ' ◞ ', ' ◟ '], frameMs: 150 },
 };
-const MODE_MARK_FRAME_MS = 240;
-const WAITING_MARK = '‖';
+const WAITING_MARK = ' ‖ ';
 const WAITING_BREATH_MS = 700;
 
 /** The resting mark of a mode (exported for tests and the docs' examples). */
@@ -648,8 +652,8 @@ export function idleModeMark(mode: PermissionMode): string {
 export function modeMark(mode: PermissionMode, activity: EditorActivity, now: number, motion: boolean): string {
   if (activity === 'waiting') return WAITING_MARK;
   if (activity === 'idle') return MODE_MARKS[mode].idle;
-  const frames = MODE_MARKS[mode].running;
-  return motion ? frames[Math.floor(now / MODE_MARK_FRAME_MS) % frames.length]! : frames[0]!;
+  const { running: frames, frameMs } = MODE_MARKS[mode];
+  return motion ? frames[Math.floor(now / frameMs) % frames.length]! : frames[0]!;
 }
 
 function getPermissionModeColor(mode: PermissionMode, colors: ColorPalette): string {
