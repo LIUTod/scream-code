@@ -499,11 +499,11 @@ describe('CustomEditor permission mode badge', () => {
   });
 
   it('marks how far each mode lets the agent run, flowing while it works and holding while it waits', () => {
-    expect(['auto', 'yolo', 'ask', 'bot'].map((mode) => idleModeMark(mode as never))).toEqual(['▸▸▸', '▸▸ ', ' ‖ ', ' ◜ ']);
-    // Working: the arrows flow frame by frame; BOT turns through four arcs; ASK holds.
+    expect(['auto', 'yolo', 'ask', 'bot'].map((mode) => idleModeMark(mode as never))).toEqual(['▸▸▸', '▸▸ ', ' ‖ ', '🤖 ']);
+    // Working: the arrows flow frame by frame; BOT holds its robot still; ASK holds.
     expect([0, 240, 480].map((now) => modeMark('auto', 'running', now, true))).toEqual(['▹▸▸', '▸▹▸', '▸▸▹']);
     expect([0, 240].map((now) => modeMark('yolo', 'running', now, true))).toEqual(['▹▸ ', '▸▹ ']);
-    expect([0, 150, 300, 450].map((now) => modeMark('bot', 'running', now, true))).toEqual([' ◜ ', ' ◝ ', ' ◞ ', ' ◟ ']);
+    expect([0, 80, 160, 240].map((now) => modeMark('bot', 'running', now, true))).toEqual(['🤖 ', '🤖 ', '🤖 ', '🤖 ']);
     expect(modeMark('ask', 'running', 240, true)).toBe(' ‖ ');
     // Every mark is three cells in every state: the badge never changes width.
     for (const mode of ['auto', 'yolo', 'ask', 'bot'] as const) {

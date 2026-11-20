@@ -623,22 +623,24 @@ export type EditorActivity = 'idle' | 'running' | 'waiting';
 /**
  * The mark after the permission-mode label, a transport control that says how
  * far the mode lets the agent run: AUTO `▸▸▸` (all the way), YES `▸▸` (stops
- * only for the high-risk few), ASK `‖` (reads, never changes), BOT `◜` (works on
- * its own). While the agent works the arrows flow (`▹` travels along them) and
- * BOT turns; while it waits on the person (an approval or a question) the badge
- * shows `‖` in the warning colour, breathing. All marks are one-cell glyphs
- * with no emoji presentation. With motion off every mark holds still.
+ * only for the high-risk few), ASK `‖` (reads, never changes), BOT `🤖` (works on
+ * its own). While the agent works the arrows flow (`▹` travels along them); BOT
+ * holds its robot still (no animation). While it waits on the person (an
+ * approval or a question) the badge shows `‖` in the warning colour, breathing.
+ * With motion off every mark holds still.
  */
 // Every mark is three cells in every state, so the badge never changes width
-// (the arrow count is the scale: AUTO three, YES two). BOT turns through four
-// quarter arcs; ◜◝◞◟ are narrow even where ambiguous-width glyphs are wide.
+// (the arrow count is the scale: AUTO three, YES two). BOT is a single static
+// robot emoji: 🤖 measures 2 cells in visibleWidth, plus one trailing space = 3,
+// matching the arrows — the same 2-cell emoji convention the footer's 📟 model
+// marker already relies on.
 const MODE_MARKS: Readonly<
   Record<PermissionMode, { idle: string; running: readonly string[]; frameMs: number }>
 > = {
   auto: { idle: '▸▸▸', running: ['▹▸▸', '▸▹▸', '▸▸▹'], frameMs: 240 },
   yolo: { idle: '▸▸ ', running: ['▹▸ ', '▸▹ '], frameMs: 240 },
   ask: { idle: ' ‖ ', running: [' ‖ '], frameMs: 240 },
-  bot: { idle: ' ◜ ', running: [' ◜ ', ' ◝ ', ' ◞ ', ' ◟ '], frameMs: 150 },
+  bot: { idle: '🤖 ', running: ['🤖 '], frameMs: 240 },
 };
 const WAITING_MARK = ' ‖ ';
 const WAITING_BREATH_MS = 700;
