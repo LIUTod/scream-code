@@ -171,7 +171,11 @@ describe('AgentTool', () => {
     // no longer "agent registry"
     expect(subagentTypeDescription).not.toContain('registry');
     expect(subagentTypeDescription).toContain('agent type');
-    expect(properties['run_in_background']?.description).toContain('Foreground is the default');
+    // run_in_background is now an override, not the default path: omitted =
+    // auto (short foreground window then background), so the parent never
+    // hard-blocks. The description must teach that contract.
+    expect(properties['run_in_background']?.description).toContain('never hard-block');
+    expect(properties['run_in_background']?.description).toContain('OMIT IT');
   });
 
   it('does not mention background-only timeout details in the timeout description', () => {

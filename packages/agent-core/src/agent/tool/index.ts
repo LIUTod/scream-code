@@ -1581,6 +1581,11 @@ export class ToolManager {
               allowBackground,
               log: this.agent.log,
               allowedSpawns,
+              // How an omitted run_in_background resolves: 'auto' (short
+              // foreground window then background) by default, so the parent
+              // never hard-blocks on a long subagent.
+              subagentMode: this.agent.screamConfig?.loopControl?.subagentMode,
+              foregroundBudgetMs: this.agent.screamConfig?.loopControl?.subagentForegroundBudgetMs,
               // Hard anti-cycle cap: the caller's spawn depth (root = 0, +1 per
               // spawned subagent, maintained by the subagent host on every
               // spawn) bounds nested Agent spawning.

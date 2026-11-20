@@ -809,11 +809,14 @@ describe('subagent collaboration integration', () => {
       }),
     };
     // Foreground call, no timeout: the wait can only end early through the
-    // request leg.
+    // request leg. Explicit run_in_background: false pins the legacy unbounded
+    // foreground path — under the default auto mode this call would otherwise
+    // carry a 30s budget and stop exercising what this test is about.
     const tool = new AgentTool(host, backgroundManager as never);
     const execution = tool.resolveExecution({
       prompt: 'original prompt',
       description: 'needs input',
+      run_in_background: false,
     } as never) as { execute(ctx: unknown): Promise<{ output: string; isError?: boolean }> };
     const execPromise = execution.execute({
       toolCallId: 'call_1',
@@ -915,6 +918,9 @@ describe('subagent collaboration integration', () => {
     const execution = tool.resolveExecution({
       prompt: 'original prompt',
       description: 'needs input',
+      // Pin the unbounded foreground wait so the request leg is the only thing
+      // that can end it early (the default auto mode would add a 30s budget).
+      run_in_background: false,
     } as never) as { execute(ctx: unknown): Promise<{ output: string; isError?: boolean }> };
     const execPromise = execution.execute({
       toolCallId: 'call_1',

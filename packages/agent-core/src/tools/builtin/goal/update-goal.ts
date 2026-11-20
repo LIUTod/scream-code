@@ -213,9 +213,43 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
     };
   }
 
+  /**
+   * Number of agent-class background tasks still running. Agent task ids carry
+   * the `agent-` prefix (registered via `registerAgentTask`), which is how we
+   * tell a spawned subagent apart from a backgrounded bash command. A host
+   * without a background manager reports 0 — no delegation, nothing to wait for.
+   */
+  private runningSubagentCount(): number {
+    const background = this.agent.background;
+    if (background === undefined) return 0;
+    try {
+      return background.list(true).filter((info) => info.taskId.startsWith('agent-')).length;
+    } catch {
+      return 0;
+    }
+  }
+
   private async handleComplete(goal: Agent['goal']): Promise<ExecutableToolResult> {
     const goalState = goal.getGoal().goal;
     if (!goalState) return { output: 'No active goal.' };
+
+    // Quiescence barrier: a goal must not be marked complete while subagents it
+    // spawned are still running in the background. Their results arrive as
+    // notifications and steer the parent back to work; completing now would
+    // drop that work on the floor. With delegation defaulting to background
+    // (Agent tool subagentMode), this is the common case, so refuse completion
+    // and tell the model to wait for the outstanding agents instead. This never
+    // blocks the turn itself — it returns a normal tool result, and the
+    // completion notifications will re-launch the agent when the children land.
+    const running = this.runningSubagentCount();
+    if (running > 0) {
+      return {
+        output:
+          `Cannot mark the goal complete yet: ${running} subagent${running === 1 ? ' is' : 's are'} still running in the background. ` +
+          'Their results have not been delivered. Do NOT mark the goal complete until they finish — ' +
+          'their completion notifications will wake you to continue. If there is nothing else to do, use the wait tool to wait for them, then re-verify and complete the goal.',
+      };
+    }
 
     const output = extractRecentOutput(this.agent.context.history);
     const outputWithNotes = appendGoalNotes(output, goalState.notes);

@@ -6,10 +6,13 @@
  * constructor rather than through the Runtime) to create in-process subagent
  * loop instances.
  *
- * Two modes:
- *   - **Foreground** (default): blocks the parent turn, `await handle.completion`
- *   - **Background**: returns the agent id immediately; the result is delivered
- *     via a notification.
+ * How a call waits for its subagent is resolved by `resolveWait()`:
+ *   - **Auto** (default): a short foreground window returns quick subagents
+ *     inline; a subagent that outlives the window is handed to the background
+ *     so the parent never hard-blocks. Result arrives via a notification.
+ *   - **Background**: returns the task id immediately; result via notification.
+ *   - **Foreground**: legacy inline wait, bounded only by an explicit timeout.
+ * An explicit `run_in_background` argument always overrides the default.
  *
  * `ToolResult.content` is textual; the structured output exposed by
  * `AgentToolOutputSchema` is only used for drift-guard and is not consumed at
@@ -78,7 +81,7 @@ export const AgentToolInputSchema = z.preprocess(
       .boolean()
       .optional()
       .describe(
-        'If true, return immediately without waiting for completion. Foreground is the default; prefer background for long or complex work, parallel subagents, or tasks that may need input or steering while they run.',
+        'Override how this call waits. true = return the task id immediately, result arrives as a later notification. false = wait inline. OMIT IT for normal delegation: the agent gives the subagent a short foreground window and then hands it to the background automatically, so you never hard-block — continue with other work, and the result arrives on its own. Never poll with TaskOutput(block=true).',
       ),
     timeout: z
       .number()
@@ -187,6 +190,10 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
   // turn abort signal remains the way to stop it early.
   readonly longRunning = true;
   private readonly allowBackground: boolean;
+  /** How an omitted `run_in_background` is resolved; see resolveWait(). */
+  private readonly subagentMode: 'auto' | 'background' | 'foreground';
+  /** Foreground window for 'auto' before handing the child to the background. */
+  private readonly foregroundBudgetMs: number;
 
   constructor(
     private readonly subagentHost: SessionSubagentHost,
@@ -199,9 +206,15 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       /** How many spawn hops the calling agent already sits from the root
        *  (root = 0). Consulted by the anti-cycle nesting gate. */
       spawnDepth?: () => number;
+      /** How an omitted `run_in_background` resolves. Default 'auto'. */
+      subagentMode?: 'auto' | 'background' | 'foreground';
+      /** Foreground window (ms) for 'auto'; default 30000. */
+      foregroundBudgetMs?: number;
     },
   ) {
     this.allowBackground = options?.allowBackground ?? this.backgroundManager !== undefined;
+    this.subagentMode = options?.subagentMode ?? 'auto';
+    this.foregroundBudgetMs = options?.foregroundBudgetMs ?? 30_000;
     const log = options?.log;
     const visibleSubagents = filterSubagentsBySpawns(subagents, options?.allowedSpawns);
     const typeLines = buildSubagentDescriptions(visibleSubagents);
@@ -234,13 +247,46 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
   /** Reads the calling agent's spawn depth for the nesting gate. */
   private readonly spawnDepth: () => number;
 
+  /**
+   * Resolve how this call waits for the subagent. An explicit
+   * `run_in_background` always wins. Otherwise the configured mode decides:
+   * - 'background': detached immediately, result arrives as a notification.
+   * - 'foreground': legacy inline wait (only an explicit `timeout` bounds it).
+   * - 'auto': a short foreground window — return inline if the child finishes
+   *   within it, otherwise hand the still-running child to the background so
+   *   the parent never hard-blocks. `runInBackground` stays false because the
+   *   wait goes through awaitForegroundCompletion, which owns the handoff.
+   *
+   * Background is only chosen when dispatch is actually available
+   * (`allowBackground` + a manager); otherwise the call falls back to a
+   * foreground wait rather than erroring, so a capability-limited host keeps
+   * working.
+   */
+  private resolveWait(args: AgentToolInput): { runInBackground: boolean; foregroundBudgetMs: number | undefined } {
+    if (args.run_in_background === true) return { runInBackground: true, foregroundBudgetMs: undefined };
+    if (args.run_in_background === false) {
+      return { runInBackground: false, foregroundBudgetMs: args.timeout === undefined ? undefined : args.timeout * 1000 };
+    }
+    const canBackground = this.allowBackground && this.backgroundManager !== undefined;
+    if (this.subagentMode === 'foreground' || !canBackground) {
+      return { runInBackground: false, foregroundBudgetMs: args.timeout === undefined ? undefined : args.timeout * 1000 };
+    }
+    if (this.subagentMode === 'background') return { runInBackground: true, foregroundBudgetMs: undefined };
+    // 'auto': an explicit timeout overrides the budget; otherwise use the
+    // configured foreground window. A budget of 0 means "don't wait" → detached.
+    if (args.timeout !== undefined) return { runInBackground: false, foregroundBudgetMs: args.timeout * 1000 };
+    if (this.foregroundBudgetMs <= 0) return { runInBackground: true, foregroundBudgetMs: undefined };
+    return { runInBackground: false, foregroundBudgetMs: this.foregroundBudgetMs };
+  }
+
   resolveExecution(args: AgentToolInput): ToolExecution {
     let profileName = args.subagent_type?.length ? args.subagent_type : 'coder';
     const resumeAgentId = args.resume?.trim();
     if (resumeAgentId !== undefined && resumeAgentId.length > 0) {
       profileName = this.subagentHost.getProfileName?.(resumeAgentId) ?? 'subagent';
     }
-    const prefix = args.run_in_background === true ? 'Launching background' : 'Launching';
+    const wait = this.resolveWait(args);
+    const prefix = wait.runInBackground ? 'Launching background' : 'Launching';
     return {
       description: `${prefix} ${profileName} agent: ${args.description}`,
       accesses: ToolAccesses.none(),
@@ -248,7 +294,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         kind: 'agent_call',
         agent_name: profileName,
         prompt: composeSubagentPrompt(args),
-        background: args.run_in_background,
+        background: wait.runInBackground,
       },
       approvalRule: this.name,
       matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, profileName),
@@ -265,7 +311,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
   ): Promise<ExecutableToolResult> {
     try {
       signal.throwIfAborted();
-      const runInBackground = args.run_in_background === true;
+      const wait = this.resolveWait(args);
+      const runInBackground = wait.runInBackground;
       const requestedProfileName = args.subagent_type?.length ? args.subagent_type : undefined;
       const resumeAgentId = args.resume?.trim();
       if (
@@ -321,7 +368,12 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         }
       }
       const backgroundController = runInBackground ? new AbortController() : undefined;
-      const timeoutMs = args.timeout === undefined ? undefined : args.timeout * 1000;
+      // The foreground wait budget: an explicit `timeout` for 'foreground' /
+      // 'background'-explicit calls, or the configured 'auto' window. When it
+      // fires the still-running child is handed to the background, not aborted.
+      const timeoutMs = runInBackground
+        ? (args.timeout === undefined ? undefined : args.timeout * 1000)
+        : wait.foregroundBudgetMs;
       // Foreground child signal: user cancellation propagates through
       // linkAbortSignal, but an explicit timeout only bounds this turn's wait —
       // when it fires the still-running child is handed to the background task
@@ -603,6 +655,11 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     let taskId: string;
     try {
       taskId = backgroundManager.registerAgentTask(handle.completion, description, {
+        // Match the direct-background path: an auto/foreground child handed to
+        // the background must keep the operator-configured deadline, otherwise
+        // a hung child is never reaped — it would hold a concurrency slot and,
+        // via the goal quiescence barrier, block goal completion forever.
+        timeoutMs: this.subagentHost.backgroundTaskTimeoutMs,
         agentId: handle.agentId,
         subagentType: handle.profileName,
         abort: () => {

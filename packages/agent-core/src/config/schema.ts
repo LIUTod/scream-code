@@ -233,6 +233,21 @@ export const LoopControlSchema = z.object({
   // tools from the next turn (one prefix rebuild). 'off' restores the
   // always-resident tool table.
   toolPortal: z.enum(['default', 'off']).optional(),
+  // How the Agent tool waits for a spawned subagent when `run_in_background`
+  // is not set explicitly. The point of this switch is to keep the parent
+  // agent responsive instead of parking its turn inside the tool call.
+  // - 'auto' (default): give the subagent a short foreground window to return
+  //   inline (cheap, keeps short tasks a single message); if it outlives the
+  //   window the still-running child is handed to the background and its result
+  //   arrives as a later notification. Never a hard block.
+  // - 'background': return the task id immediately and let the result arrive as
+  //   a notification — the parent never foreground-waits at all.
+  // - 'foreground': the legacy behavior — await completion inline (still
+  //   bounded by an explicit `timeout`, which hands off to the background).
+  subagentMode: z.enum(['auto', 'background', 'foreground']).optional(),
+  // Foreground window (ms) for `subagentMode: 'auto'` before the child is
+  // handed to the background. Default 30000. `0` behaves like 'background'.
+  subagentForegroundBudgetMs: z.number().int().min(0).optional(),
 });
 
 export type LoopControl = z.infer<typeof LoopControlSchema>;

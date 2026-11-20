@@ -453,6 +453,15 @@ Edit the `RECOMMENDED` array in `apps/scream-code/src/tui/commands/mcp.ts`.
 
 All slash commands are declared in `src/tui/commands/registry.ts` and dispatched in `src/tui/commands/dispatch.ts`. Beyond the session-config-modelling helpers documented in `ScreamTUI`, these commands carry non-trivial state or backend integration:
 
+### Subagent Delegation — non-blocking by default
+
+Delegation never parks the parent's turn waiting for a result. The `Agent` tool resolves how a call waits via `resolveWait()` (`tools/builtin/collaboration/agent.ts`): an explicit `run_in_background` always wins; otherwise `loopControl.subagentMode` decides — **`auto`** (default: a short foreground window returns quick subagents inline, then hands a still-running child to the background), **`background`** (task id immediately), **`foreground`** (legacy inline wait). `subagentForegroundBudgetMs` (default 30000) is the auto window; `0` behaves like `background`. When background dispatch is unavailable (`!allowBackground` or no manager) every mode degrades to a foreground wait rather than erroring.
+
+- **Result delivery is notification-only.** A finished subagent's result is steered into the parent as a `<notification>` (`agent/background/index.ts` → `turn.steer`): an idle parent is woken via `steer → launch` into a new turn; a busy parent buffers it and flushes at the next step boundary. There is nothing to poll — the prompt forbids `TaskOutput(block=true)` / `sleep` loops for this.
+- **`Wait` is the only sanctioned block.** The existing `Wait` tool (event-driven + idle ladder, capped budget) waits for the first settled background task; it is main-only, so the prompt gates its mention behind `{% if IS_MAIN %}` and the tool description avoids naming it for specialists that lack it.
+- **Quiescence barrier** (`tools/builtin/goal/update-goal.ts`): `UpdateGoal(status='complete')` is refused while any agent-class background task (`agent-` prefixed id) is still running, so a goal cannot be marked done before its delegated results land. Non-agent tasks (backgrounded bash) do not gate completion.
+- **Prompt contract**: `system.md`'s delegation paragraph states the non-blocking + never-poll rule for every agent that can spawn; `agent-background-enabled.md` carries the same contract in the tool description.
+
 ### Subagent Collaboration (`ContactParent`)
 
 Proactive child→parent communication: a running subagent can ask its parent for context (`info`), request a handoff (`handoff` — it describes the capability needed, never a named agent), or escalate a decision (`escalate`) — without blocking on a reply.
