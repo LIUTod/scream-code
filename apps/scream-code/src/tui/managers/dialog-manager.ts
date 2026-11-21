@@ -288,10 +288,14 @@ export class DialogManager {
         }
         let distilled = 0;
         let pending = 0;
+        let neverUsed = 0;
         try {
           for await (const memo of store.read()) {
             if ((memo.distilled ?? '').trim().length > 0) distilled += 1;
             if (memo.dreamedAt === undefined || memo.recordedAt > memo.dreamedAt) pending += 1;
+            // Counted over the whole library, not the loaded page: the point of
+            // the number is how much of the notebook recall has never surfaced.
+            if ((memo.recallCount ?? 0) === 0) neverUsed += 1;
           }
         } catch {
           // Counters are a nicety: a store that cannot enumerate still gets the
@@ -303,6 +307,7 @@ export class DialogManager {
         component.setDreamStatus({
           distilled,
           pending,
+          neverUsed,
           ...(tracker?.lastDreamAt === undefined ? {} : { lastAt: tracker.lastDreamAt }),
         });
       } catch {

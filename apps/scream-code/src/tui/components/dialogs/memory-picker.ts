@@ -122,7 +122,7 @@ export interface MemoryPickerOptions {
   onUndoMerge?: (memoId: string) => void;
   /** Dream state shown under the title: how many rules exist, how many memos
    * still need a pass, and when the last pass ran. */
-  dreamStatus?: { distilled: number; pending: number; lastAt?: number };
+  dreamStatus?: { distilled: number; pending: number; neverUsed?: number; lastAt?: number };
 }
 
 type PickerMode = 'list' | 'detail' | 'confirmDelete' | 'editDistilled';
@@ -135,11 +135,11 @@ export class MemoryPickerComponent extends Container implements Focusable {
   private onInject: (memo: MemoryMemoSummary) => void;
   private onDream: (() => void) | undefined;
   private onUndoMerge: ((memoId: string) => void) | undefined;
-  private dreamStatus: { distilled: number; pending: number; lastAt?: number } | undefined;
+  private dreamStatus: { distilled: number; pending: number; neverUsed?: number; lastAt?: number } | undefined;
   /** Unfiltered page as loaded from the store; `memos` is the filtered view. */
   private allMemos: MemoryMemoSummary[] = [];
   /** Which slice of the notebook is on screen. */
-  private view: 'all' | 'distilled' | 'raw' = 'all';
+  private view: 'all' | 'distilled' | 'raw' | 'unused' = 'all';
 
   focused = false;
   private selectedIndex = 0;
@@ -192,7 +192,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
   }
 
   /** Fill in the dream counters once they have been read. */
-  setDreamStatus(status: { distilled: number; pending: number; lastAt?: number }): void {
+  setDreamStatus(status: { distilled: number; pending: number; neverUsed?: number; lastAt?: number }): void {
     this.dreamStatus = status;
     this.ui?.requestRender();
   }
@@ -203,9 +203,11 @@ export class MemoryPickerComponent extends Container implements Focusable {
     this.memos =
       this.view === 'all'
         ? this.allMemos
-        : this.view === 'distilled'
-          ? this.allMemos.filter((memo) => (memo.distilled ?? '').trim().length > 0 || memo.origin === 'dream')
-          : this.allMemos.filter((memo) => (memo.distilled ?? '').trim().length === 0 && memo.origin !== 'dream');
+        : this.view === 'unused'
+          ? this.allMemos.filter((memo) => (memo.recallCount ?? 0) === 0)
+          : this.view === 'distilled'
+            ? this.allMemos.filter((memo) => (memo.distilled ?? '').trim().length > 0 || memo.origin === 'dream')
+            : this.allMemos.filter((memo) => (memo.distilled ?? '').trim().length === 0 && memo.origin !== 'dream');
     this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.memos.length - 1));
     // A different view invalidates any marks made in the old one: otherwise a
     // batch delete would reach memories the person can no longer see.
@@ -392,6 +394,16 @@ export class MemoryPickerComponent extends Container implements Focusable {
       this.ui?.requestRender();
       return;
     }
+    if (ch === 'n' || ch === 'N') {
+      // "Never recalled" is the view that makes dead weight visible: a memo the
+      // recall path has never surfaced is either ahead of its moment or noise,
+      // and there is no way to tell the two apart without being able to look at
+      // exactly those rows. (`u` is already undo-merge.)
+      this.view = this.view === 'unused' ? 'all' : 'unused';
+      this.applyView();
+      this.ui?.requestRender();
+      return;
+    }
   }
 
   private async showDetail(): Promise<void> {
@@ -518,8 +530,8 @@ export class MemoryPickerComponent extends Container implements Focusable {
     // still wants a pass, and when the last one ran. This is what makes /dream's
     // work visible instead of something that happens invisibly.
     if (this.dreamStatus !== undefined) {
-      const { distilled, pending, lastAt } = this.dreamStatus;
-      const status =
+      const { distilled, pending, neverUsed, lastAt } = this.dreamStatus;
+      const dream =
         lastAt === undefined
           ? t('memory.dream_never', { distilled: String(distilled), pending: String(pending) })
           : t('memory.dream_status', {
@@ -527,10 +539,20 @@ export class MemoryPickerComponent extends Container implements Focusable {
               pending: String(pending),
               when: formatRelativeTime(lastAt),
             });
-      lines.push(chalk.hex(c.textMuted)(truncateToWidth(` ${status}`, width, ELLIPSIS)));
+      // How much of the notebook has never been surfaced: the one number that
+      // says whether the library is being used or just accumulated.
+      const usage =
+        neverUsed === undefined ? '' : ` · ${t('memory.never_used', { count: String(neverUsed) })}`;
+      lines.push(chalk.hex(c.textMuted)(truncateToWidth(` ${dream}${usage}`, width, ELLIPSIS)));
     }
     if (this.view !== 'all') {
-      const mode = t(this.view === 'distilled' ? 'memory.filter_distilled' : 'memory.filter_raw');
+      const mode = t(
+        this.view === 'distilled'
+          ? 'memory.filter_distilled'
+          : this.view === 'unused'
+            ? 'memory.filter_unused'
+            : 'memory.filter_raw',
+      );
       lines.push(
         chalk.hex(c.textMuted)(truncateToWidth(` ${t('memory.filter_label', { mode })}`, width, ELLIPSIS)),
       );

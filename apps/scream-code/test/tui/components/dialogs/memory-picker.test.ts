@@ -486,3 +486,24 @@ describe('MemoryPickerComponent — dream integration', () => {
     expect(onUndoMerge).toHaveBeenCalledWith('memo-merged');
   });
 });
+
+describe('MemoryPickerComponent — never recalled', () => {
+  it('shows the library-wide count and filters to unused memos with u', () => {
+    const component = makeComponent([
+      makeSummary({ userNeed: 'recalled a few times', recallCount: 3 }),
+      makeSummary({ userNeed: 'never recalled note' }),
+    ]);
+    // The count comes from the library scan, not from the loaded page.
+    component.setDreamStatus({ distilled: 1, pending: 2, neverUsed: 71 });
+
+    const header = stripAnsi(component.render(160).join('\n'));
+    expect(header).toContain('从未用 71');
+
+    component.handleInput('n');
+    const filtered = stripAnsi(component.render(160).join('\n'));
+    expect(filtered).toContain('仅从未用过');
+    expect(filtered).toContain('never recalled note');
+    // The one that has been surfaced drops out of the view.
+    expect(filtered).not.toContain('recalled a few times');
+  });
+});

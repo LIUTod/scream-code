@@ -744,7 +744,7 @@ export const en: Record<string, string> = {
   'memory.search_label': 'Search: ',
   'memory.notebook_title': 'Memory Notebook ',
   'memory.esc_clear_search': '(Esc clear search)',
-  'memory.nav_hint': '↑↓ select · Enter view · Space mark · a all · i inject · s dream · t filter · d delete · / search · Esc close',
+  'memory.nav_hint': '↑↓ select · Enter view · Space mark · a all · i inject · s dream · t filter · n unused · d delete · / search · Esc close',
   'memory.dream_status': 'Rules {distilled} · to distil {pending} · last dream {when}',
   'memory.dream_never': 'Rules {distilled} · to distil {pending} · never dreamt',
   'memory.filter_all': 'all',
