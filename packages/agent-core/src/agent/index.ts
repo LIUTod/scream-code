@@ -51,7 +51,7 @@ import { USER_PROMPT_ORIGIN } from './context/types';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
-import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createEmbeddingEngine, hasEmbeddingModelCache, parseMemoryMemos, sharedMemoStore, stripMemoryTags, type EmbeddingEngine } from '@scream-code/memory';
+import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createEmbeddingEngine, hasEmbeddingModelCache, parseMemoryMemos, sharedMemoStore, stampProject, stripMemoryTags, type EmbeddingEngine } from '@scream-code/memory';
 import { KnowledgeStore, sharedKnowledgeStore, sharedKnowledgeStoreReady } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
@@ -1459,7 +1459,7 @@ export class Agent {
         memo.sourceSessionId = sessionId;
         memo.sourceSessionTitle = sessionTitle ?? '';
         memo.extractionSource = 'exit';
-        memo.projectDir = this.config.cwd;
+        stampProject(memo, this.config.cwd);
       }
       if (options.pending === true && this.screamHomeDir !== undefined) {
         addMemoryItem(this.screamHomeDir, { sessionId, workDir: this.config.cwd, memories: memos });
@@ -1467,8 +1467,18 @@ export class Agent {
         return memos.length;
       }
       const store = this.memoStore;
-      const results = await Promise.allSettled(memos.map((memo) => store.append(memo)));
-      const failed = results.filter((r) => r.status === 'rejected').length;
+      // Sequential on purpose: two near-identical memos in one batch have to see
+      // each other, and a parallel race would let both through.
+      let failed = 0;
+      let stored = 0;
+      for (const memo of memos) {
+        try {
+          const result = await store.appendUnlessDuplicate(memo);
+          if (result.duplicateOf === undefined) stored += 1;
+        } catch {
+          failed += 1;
+        }
+      }
       if (failed > 0) {
         this.log.warn('Some memory memos failed to store from exit extraction', {
           failed,
@@ -1476,9 +1486,9 @@ export class Agent {
         });
       }
 
-      const stored = memos.length - failed;
       this.log.info('Extracted memory memos on session exit', {
         count: stored,
+        skipped: memos.length - stored - failed,
         sessionId,
       });
       return stored;

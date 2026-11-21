@@ -26,6 +26,12 @@ function makeAgent(options: {
       config: { cwd: options.cwd ?? '/workspace/project' },
       memoStore: {
         append: options.append ?? (async () => {}),
+        // The tool writes through the deduplicating path; the stub keeps its
+        // single `append` seam and reports "stored" so assertions stay on it.
+        appendUnlessDuplicate: async (memo: { id: string; userNeed: string; approach: string; outcome: string }) => {
+          await (options.append ?? (async () => {}))(memo);
+          return { id: memo.id };
+        },
       },
     } as unknown as Agent,
   };

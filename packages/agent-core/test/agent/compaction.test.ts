@@ -3547,8 +3547,10 @@ Trailing text.`;
       getSessionTitle: vi.fn(async () => 'Debug session'),
       memoStore: {
         existsBySourceAndNeed: vi.fn(() => false),
-        append: vi.fn(async (memo: Record<string, unknown>) => {
+        // The recovery path writes through the deduplicating seam.
+        appendUnlessDuplicate: vi.fn(async (memo: Record<string, unknown>) => {
           stored.push(memo);
+          return { id: String(memo['id']) };
         }),
       },
       log: { warn: vi.fn() },
@@ -3560,7 +3562,7 @@ Trailing text.`;
     const agent = fakeAgent();
     await recoverMemosFromCompactionSummary(agent as never, memoBlock);
 
-    expect(agent.memoStore.append).toHaveBeenCalledTimes(1);
+    expect(agent.memoStore.appendUnlessDuplicate).toHaveBeenCalledTimes(1);
     const memo = agent.stored[0]! as Record<string, unknown>;
     expect(memo['userNeed']).toBe('Debug the flaky restart test');
     expect(memo['sourceSessionId']).toBe('sess_007');
@@ -3572,7 +3574,7 @@ Trailing text.`;
     const agent = fakeAgent();
     agent.memoStore.existsBySourceAndNeed = vi.fn(() => true);
     await recoverMemosFromCompactionSummary(agent as never, memoBlock);
-    expect(agent.memoStore.append).not.toHaveBeenCalled();
+    expect(agent.memoStore.appendUnlessDuplicate).not.toHaveBeenCalled();
   });
 
   it('no-ops without a summary, no memoable text, or a memoStore', async () => {
@@ -3581,6 +3583,6 @@ Trailing text.`;
     await recoverMemosFromCompactionSummary(agent as never, '');
     await recoverMemosFromCompactionSummary(agent as never, 'plain text with no memo blocks');
     await recoverMemosFromCompactionSummary(fakeAgent({ memoStore: undefined }) as never, memoBlock);
-    expect(agent.memoStore.append).not.toHaveBeenCalled();
+    expect(agent.memoStore.appendUnlessDuplicate).not.toHaveBeenCalled();
   });
 });

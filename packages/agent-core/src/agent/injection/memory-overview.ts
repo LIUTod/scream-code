@@ -1,4 +1,4 @@
-import { isSameProjectDir } from '@scream-code/memory';
+import { isSameProject, resolveProjectRoot } from '@scream-code/memory';
 
 import { pendingUserPrompt } from './memory-recall';
 import { DynamicInjector } from './injector';
@@ -55,13 +55,14 @@ export class MemoryOverviewInjector extends DynamicInjector {
     const store = this.agent.memoStore!;
     await this.agent.memoStoreReady;
     const projectDir = this.agent.config.cwd;
+    const current = { projectDir, projectRoot: resolveProjectRoot(projectDir) };
     let total = 0;
     let here = 0;
     const projectTags = new Map<string, number>();
     const allTags = new Map<string, number>();
     for await (const memo of store.read()) {
       total += 1;
-      const same = isSameProjectDir(memo.projectDir, projectDir);
+      const same = isSameProject(memo, current);
       if (same) here += 1;
       for (const tag of memo.tags ?? []) {
         const key = tag.trim().toLowerCase();

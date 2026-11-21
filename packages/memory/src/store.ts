@@ -6,6 +6,13 @@ import { dirname, join } from 'pathe';
 import type { DistilledSource, MemoryMemo, MemoryMemoListResult, MemoOrigin } from './models.js';
 import { toSummary } from './models.js';
 import { buildEmbeddingText, EMBEDDING_MODEL_NAME, EMBEDDING_TEXT_VERSION, type EmbeddingEngine } from './embeddings.js';
+import { resolveProjectRoot } from './project.js';
+
+/**
+ * Two memos at least this similar are the same text twice (see
+ * `appendUnlessDuplicate`); dream merges at 0.86, which needs a model.
+ */
+export const WRITE_DUPLICATE_SIMILARITY = 0.95;
 
 const FILE_NAME = 'entries.jsonl';
 const MIGRATION_MARKER = '.migrated';
@@ -184,9 +191,67 @@ export class MemoryMemoStore {
     }
   }
 
-  /** Append a memo. */
+  /**
+   * Append a memo — the raw insert. Write paths that can plausibly see the same
+   * conclusion twice (extraction, the manual tool) go through
+   * `appendUnlessDuplicate` instead; restore paths keep this one.
+   */
   async append(entry: MemoryMemo): Promise<void> {
     return this.withWriteLock(() => this.appendInternal(entry));
+  }
+
+  /**
+   * Append a memo unless the library already holds a near-identical one, in
+   * which case nothing is written and the existing id comes back.
+   *
+   * 0.95 is "the same text again", not "the same idea". At that distance the
+   * copy adds a diluted candidate to every future recall and nothing else, while
+   * the merge that *would* be right — dream's 0.86, where a model rewrites the
+   * combined note — cannot run inline. Skipping the insert is the cheap half:
+   * history is untouched, so there is nothing to undo.
+   *
+   * Runs at write time rather than at flush time because the comparison needs the
+   * text's vector now; one local `embedBatch` is the cost, and an unavailable
+   * engine simply falls back to inserting (a duplicate is cheaper than a lost
+   * memo).
+   */
+  async appendUnlessDuplicate(
+    entry: MemoryMemo,
+    options: { readonly engine?: EmbeddingEngine | undefined; readonly threshold?: number } = {},
+  ): Promise<{ readonly id: string; readonly duplicateOf?: string | undefined }> {
+    const engine = options.engine ?? this.embeddingEngine;
+    if (engine === undefined || !engine.available) {
+      await this.append(entry);
+      return { id: entry.id };
+    }
+    // A duplicate is cheaper than a lost memo: an embedder that errors (a model
+    // that is down, a vector store that is locked) must degrade this check, not
+    // fail the write that called it.
+    const duplicate = await this.findDuplicate(entry, engine, options.threshold).catch(() => undefined);
+    if (duplicate !== undefined) return { id: duplicate, duplicateOf: duplicate };
+    await this.append(entry);
+    return { id: entry.id };
+  }
+
+  /** The id of a memo at least `threshold` similar to `entry`, if any. */
+  private async findDuplicate(
+    entry: MemoryMemo,
+    engine: EmbeddingEngine,
+    threshold?: number,
+  ): Promise<string | undefined> {
+    const vector = await engine.embedBatch([buildEmbeddingText(entry)]).then((batch) => batch?.[0]);
+    if (vector === undefined) return undefined;
+    const scored = await this.scoreByVector(vector, {
+      engine,
+      project: {
+        projectDir: entry.projectDir,
+        ...(entry.projectRoot === undefined ? {} : { projectRoot: entry.projectRoot }),
+      },
+    });
+    const best = scored[0];
+    return best !== undefined && best.score >= (threshold ?? WRITE_DUPLICATE_SIMILARITY)
+      ? best.id
+      : undefined;
   }
 
   /**
@@ -464,6 +529,7 @@ export class MemoryMemoStore {
         extraction_source TEXT NOT NULL CHECK(extraction_source IN ('compaction', 'exit', 'manual')),
         recorded_at INTEGER NOT NULL,
         project_dir TEXT NOT NULL DEFAULT '',
+        project_root TEXT,
         tags TEXT NOT NULL DEFAULT '[]',
         note TEXT,
         distilled TEXT NOT NULL DEFAULT '',
@@ -504,6 +570,32 @@ export class MemoryMemoStore {
       );
     `);
     this.migrateSchema();
+    this.backfillProjectRoots();
+  }
+
+  /**
+   * Give memos written before project roots existed the root their directory
+   * belongs to, so scoping starts working on an existing library instead of only
+   * on new memos. Rows whose directory is not inside a checkout (or is the home
+   * directory) stay NULL and keep the directory fallback, which is exactly the
+   * leniency they had before.
+   *
+   * Idempotent: it only touches rows that still have no root, so after the first
+   * pass it costs one empty query per start.
+   */
+  private backfillProjectRoots(): void {
+    if (this.db === undefined) return;
+    const dirs = this.db
+      .prepare("SELECT DISTINCT project_dir FROM memos WHERE project_root IS NULL AND project_dir <> ''")
+      .all() as Array<{ project_dir: string }>;
+    if (dirs.length === 0) return;
+    const update = this.db.prepare(
+      'UPDATE memos SET project_root = ? WHERE project_root IS NULL AND project_dir = ?',
+    );
+    for (const row of dirs) {
+      const root = resolveProjectRoot(row.project_dir);
+      if (root !== undefined) update.run(root, row.project_dir);
+    }
   }
 
   // Migrate schema: uses PRAGMA table_info column-existence checks rather
@@ -557,6 +649,11 @@ export class MemoryMemoStore {
       // an existing library is processed once and then stays incremental.
       this.db.exec('ALTER TABLE memos ADD COLUMN dreamed_at INTEGER');
     }
+    if (!info.some((col) => col.name === 'project_root')) {
+      // The git root the memo belongs to. Older rows keep NULL and stay on the
+      // directory fallback in `isSameProject`, so nothing becomes unreachable.
+      this.db.exec('ALTER TABLE memos ADD COLUMN project_root TEXT');
+    }
     const embeddingInfo = this.db.prepare('PRAGMA table_info(memory_embeddings)').all() as Array<{
       name: string;
     }>;
@@ -568,6 +665,7 @@ export class MemoryMemoStore {
     // Ensure indexes exist even for databases created before these indexes were added.
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_memos_project_dir ON memos(project_dir);
+      CREATE INDEX IF NOT EXISTS idx_memos_project_root ON memos(project_root);
       CREATE INDEX IF NOT EXISTS idx_memory_embeddings_created_at ON memory_embeddings(created_at DESC);
     `);
   }
@@ -682,9 +780,9 @@ export class MemoryMemoStore {
     const insert = this.db.prepare(
       `INSERT INTO memos (
         id, source_session_id, source_session_title, user_need, approach,
-        outcome, what_failed, what_worked, extraction_source, recorded_at, project_dir, tags,
+        outcome, what_failed, what_worked, extraction_source, recorded_at, project_dir, project_root, tags,
         note, distilled, origin, distilled_from, distilled_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING rowid`,
     );
     const insertFts = this.db.prepare(
@@ -705,6 +803,7 @@ export class MemoryMemoStore {
         entry.extractionSource,
         entry.recordedAt,
         entry.projectDir ?? '',
+        entry.projectRoot ?? null,
         JSON.stringify(entry.tags ?? []),
         entry.note ?? null,
         entry.distilled ?? '',
@@ -968,20 +1067,32 @@ export class MemoryMemoStore {
   }
 
   /**
-   * Cosine similarity of the query to every stored vector (newest first, up
-   * to `candidateLimit`), highest first. Reads no memo rows, so a caller can
-   * look at the whole distribution and load only the few memos it keeps.
+   * Cosine similarity of the query to the candidate vectors, highest first.
+   * Reads no memo rows, so a caller can look at the whole distribution and load
+   * only the few memos it keeps.
+   *
+   * With `project`, candidates are chosen in two tiers: every memo of that
+   * project is scored however old it is, while cross-project memos are capped
+   * newest-first (`crossProjectLimit`). The single recency window this replaces
+   * — newest 2000 overall — silently made older memos unreachable once a library
+   * grew past the cap, which is a correctness cliff, not a performance trade.
    */
   async scoreByVector(
     queryEmbedding: Float32Array,
-    options: { readonly candidateLimit?: number } = {},
+    options: {
+      readonly candidateLimit?: number;
+      readonly project?:
+        | { readonly projectRoot?: string | undefined; readonly projectDir: string }
+        | undefined;
+      readonly crossProjectLimit?: number;
+      /** Overrides the store's engine — a caller that just embedded the query itself. */
+      readonly engine?: EmbeddingEngine | undefined;
+    } = {},
   ): Promise<Array<{ id: string; score: number }>> {
     await this.init();
-    const engine = this.embeddingEngine;
+    const engine = options.engine ?? this.embeddingEngine;
     if (this.db === undefined || engine === undefined) return [];
-    const rows = this.db
-      .prepare('SELECT memory_id, created_at FROM memory_embeddings ORDER BY created_at DESC LIMIT ?')
-      .all(options.candidateLimit ?? 2000) as Array<{ memory_id: string; created_at: number }>;
+    const rows = this.candidateVectors(options);
     const readVector = this.db.prepare('SELECT embedding_json FROM memory_embeddings WHERE memory_id = ?');
     const live = new Set<string>();
     const scored: Array<{ id: string; score: number }> = [];
@@ -1001,9 +1112,54 @@ export class MemoryMemoStore {
       if (cached.vector.length !== queryEmbedding.length) continue;
       scored.push({ id: row.memory_id, score: engine.cosineSimilarity(queryEmbedding, cached.vector) });
     }
-    // Forget vectors of memos that are gone.
-    for (const id of this.vectorCache.keys()) if (!live.has(id)) this.vectorCache.delete(id);
+    // Forget vectors of memos that are gone — but only when the sample covered
+    // the library, otherwise the cross-project cap would evict live entries.
+    if (options.project === undefined) {
+      for (const id of this.vectorCache.keys()) if (!live.has(id)) this.vectorCache.delete(id);
+    }
     return scored.toSorted((a, b) => b.score - a.score);
+  }
+
+  /**
+   * The vectors worth scoring for one query (see `scoreByVector`): the project's
+   * memos whole, everything else capped newest-first.
+   */
+  private candidateVectors(options: {
+    readonly candidateLimit?: number;
+    readonly project?: { readonly projectRoot?: string | undefined; readonly projectDir: string } | undefined;
+    readonly crossProjectLimit?: number;
+  }): Array<{ memory_id: string; created_at: number }> {
+    if (this.db === undefined) return [];
+    const project = options.project;
+    if (project === undefined) {
+      return this.db
+        .prepare('SELECT memory_id, created_at FROM memory_embeddings ORDER BY created_at DESC LIMIT ?')
+        .all(options.candidateLimit ?? 2000) as Array<{ memory_id: string; created_at: number }>;
+    }
+    // Written so no comparison can yield NULL: a NULL in a WHERE triple would
+    // make `NOT (...)` NULL as well, and silently drop every row whose root is
+    // unset — i.e. exactly the memos the fallback exists for.
+    const sameProject = `((m.project_root IS NOT NULL AND m.project_root = ?) OR (m.project_root IS NULL AND (m.project_dir = ? OR m.project_dir = '')))`;
+    const root = project.projectRoot ?? null;
+    const same = this.db
+      .prepare(
+        `SELECT e.memory_id AS memory_id, e.created_at AS created_at
+           FROM memory_embeddings e JOIN memos m ON m.id = e.memory_id
+          WHERE ${sameProject}`,
+      )
+      .all(root, project.projectDir) as Array<{ memory_id: string; created_at: number }>;
+    const cross = this.db
+      .prepare(
+        `SELECT e.memory_id AS memory_id, e.created_at AS created_at
+           FROM memory_embeddings e JOIN memos m ON m.id = e.memory_id
+          WHERE NOT ${sameProject}
+          ORDER BY e.created_at DESC LIMIT ?`,
+      )
+      .all(root, project.projectDir, options.crossProjectLimit ?? 2000) as Array<{
+      memory_id: string;
+      created_at: number;
+    }>;
+    return [...same, ...cross];
   }
 
   /** One memo's stored vector, from the cache `scoreByVector` fills. */
@@ -1482,6 +1638,7 @@ export class MemoryMemoStore {
 function rowToMemo(row: Record<string, unknown>): MemoryMemo {
   const sourceSessionTitle = row['source_session_title'];
   const projectDir = row['project_dir'];
+  const projectRoot = row['project_root'];
   const distilled = row['distilled'];
   const note = row['note'];
   const distilledAt = row['distilled_at'];
@@ -1504,6 +1661,7 @@ function rowToMemo(row: Record<string, unknown>): MemoryMemo {
     extractionSource: row['extraction_source'] as 'compaction' | 'exit' | 'manual',
     recordedAt: Number(row['recorded_at']),
     projectDir: typeof projectDir === 'string' ? projectDir : '',
+    projectRoot: typeof projectRoot === 'string' && projectRoot.length > 0 ? projectRoot : undefined,
     tags: parseTags(row['tags']),
     note: typeof note === 'string' && note.length > 0 ? note : undefined,
     recallCount: typeof recallCount === 'number' && recallCount > 0 ? recallCount : undefined,

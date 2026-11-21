@@ -41,7 +41,7 @@ import { renderMessagesToText } from './render-messages';
 import type { CompactionBeginData, CompactionResult } from './types';
 import { DEFAULT_COMPACTION_CONFIG, DefaultCompactionStrategy, type CompactionStrategy } from './strategy';
 import { basename, dirname } from 'pathe';
-import { parseMemoryMemos, createMemoryMemo, type MemoryMemo } from '@scream-code/memory';
+import { parseMemoryMemos, createMemoryMemo, stampProject, type MemoryMemo } from '@scream-code/memory';
 import type { TodoItem } from '../../todo';
 import type { ContextMessage } from '../context/types';
 import {
@@ -1090,15 +1090,20 @@ export class FullCompaction {
 
     const sessionTitle = await this.agent.getSessionTitle();
 
-    const results = await Promise.allSettled(
-      memos.map((memo) => {
-        memo.sourceSessionId = sessionId;
-        memo.sourceSessionTitle = sessionTitle ?? '';
-        memo.projectDir = this.agent.config.cwd;
-        return memoStore.append(memo);
-      }),
-    );
-    const failed = results.filter((r) => r.status === 'rejected').length;
+    // Sequential: two near-identical memos in one batch must see each other.
+    let failed = 0;
+    let skipped = 0;
+    for (const memo of memos) {
+      memo.sourceSessionId = sessionId;
+      memo.sourceSessionTitle = sessionTitle ?? '';
+      stampProject(memo, this.agent.config.cwd);
+      try {
+        const result = await memoStore.appendUnlessDuplicate(memo);
+        if (result.duplicateOf !== undefined) skipped += 1;
+      } catch {
+        failed += 1;
+      }
+    }
     if (failed > 0) {
       this.agent.log.warn('Some memory memos failed to store from compaction', {
         failed,
@@ -1107,7 +1112,8 @@ export class FullCompaction {
     }
 
     this.agent.log.info('Extracted memory memos from compaction', {
-      count: memos.length,
+      count: memos.length - failed - skipped,
+      skipped,
       sessionId,
     });
   }
@@ -1369,16 +1375,20 @@ export async function recoverMemosFromCompactionSummary(
   const sessionTitle = await agent.getSessionTitle().catch(() => undefined);
   const projectDir = agent.config.cwd;
 
-  const results = await Promise.allSettled(
-    memos.map(async (memo) => {
-      if (memoStore.existsBySourceAndNeed(sessionId, memo.userNeed, memo.approach)) return;
-      memo.sourceSessionId = sessionId;
-      memo.sourceSessionTitle = sessionTitle ?? '';
-      memo.projectDir = projectDir;
-      await memoStore.append(memo);
-    }),
-  );
-  const failed = results.filter((result) => result.status === 'rejected').length;
+  // Sequential, and deduplicated: this runs after a crash, so the same
+  // extraction can legitimately arrive twice.
+  let failed = 0;
+  for (const memo of memos) {
+    if (memoStore.existsBySourceAndNeed(sessionId, memo.userNeed, memo.approach)) continue;
+    memo.sourceSessionId = sessionId;
+    memo.sourceSessionTitle = sessionTitle ?? '';
+    stampProject(memo, projectDir);
+    try {
+      await memoStore.appendUnlessDuplicate(memo);
+    } catch {
+      failed += 1;
+    }
+  }
   if (failed > 0) {
     agent.log.warn('Some recovered memory memos failed to store', { failed });
   }

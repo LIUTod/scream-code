@@ -42,8 +42,13 @@ export interface MemoryMemo {
   extractionSource: 'compaction' | 'exit' | 'manual';
   /** Epoch milliseconds when this entry was created. */
   recordedAt: number;
-  /** Project directory this memo belongs to. */
+  /** Directory the session ran in when this memo was written. */
   projectDir: string;
+  /** Git working-tree root of `projectDir`, when there is one (see `resolveProjectRoot`).
+   * Recorded separately because `projectDir` is only the directory a session was
+   * started in — starting scream in `$HOME` made every memo claim the same
+   * "project" and switched the cross-project guard off. */
+  projectRoot?: string;
   /** Semantic tags summarizing the task domain (3-5 items). */
   tags?: string[];
   /** Optional note/suggestion attached to this memo — a soft, AI-readable
@@ -87,6 +92,7 @@ export interface MemoryMemoSummary {
   extractionSource: string;
   recordedAt: number;
   projectDir: string;
+  projectRoot?: string;
   tags?: string[];
   note?: string;
   recallCount?: number;
@@ -136,6 +142,7 @@ export function createMemoryMemo(
     extractionSource: partial.extractionSource,
     recordedAt: partial.recordedAt ?? Date.now(),
     projectDir: partial.projectDir ?? '',
+    projectRoot: partial.projectRoot,
     tags: normalizedTags(partial.tags),
     note: partial.note,
   };
@@ -163,6 +170,7 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     extractionSource: memo.extractionSource,
     recordedAt: memo.recordedAt,
     projectDir: memo.projectDir,
+    projectRoot: memo.projectRoot,
     tags: memo.tags,
     note: memo.note,
     recallCount: memo.recallCount,

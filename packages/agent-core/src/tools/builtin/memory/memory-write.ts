@@ -1,4 +1,4 @@
-import { createMemoryMemo, generateTags, normalizeTags, stripMemoryTags } from '@scream-code/memory';
+import { createMemoryMemo, generateTags, normalizeTags, stampProject, stripMemoryTags } from '@scream-code/memory';
 import { dirname, basename } from 'pathe';
 import { z } from 'zod';
 
@@ -96,10 +96,20 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
           tags,
           note: note && note.length > 0 ? note : undefined,
           extractionSource: 'manual',
-          projectDir: this.agent.config.cwd,
         });
+        // Both halves of the origin — the cwd and the project it belongs to —
+        // come from one call, so a write path cannot record one without the other.
+        stampProject(memo, this.agent.config.cwd);
 
-        await store.append(memo);
+        // Near-copies land on the existing memo instead of adding a twin: the
+        // library should not grow duplicates between dream passes.
+        const { duplicateOf } = await store.appendUnlessDuplicate(memo);
+        if (duplicateOf !== undefined) {
+          return {
+            isError: false,
+            output: `Already in memory as ${duplicateOf} — this note is a near-copy, nothing was added.`,
+          };
+        }
 
         return {
           isError: false,

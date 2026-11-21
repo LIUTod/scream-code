@@ -1,4 +1,4 @@
-import { recallMemos, type RecalledMemo } from '@scream-code/memory';
+import { recallMemos, resolveProjectRoot, type RecalledMemo } from '@scream-code/memory';
 import { basename, dirname } from 'pathe';
 
 import { isUserAuthoredMessage } from '../context';
@@ -60,6 +60,7 @@ export class MemoryRecallInjector extends DynamicInjector {
       recalled = await recallMemos(store, {
         query,
         projectDir,
+        projectRoot: resolveProjectRoot(projectDir),
         excludeIds: shown,
         sessionId: this.sessionId(),
       });

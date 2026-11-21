@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EmbeddingEngine } from '../src/embeddings.js';
 import { createMemoryMemo, type MemoryMemo } from '../src/models.js';
 import { recallMemos } from '../src/recall.js';
+import { isSameProject } from '../src/project.js';
 import { MemoryMemoStore } from '../src/store.js';
 
 const PROJECT = '/work/app';
@@ -262,7 +263,7 @@ describe('MemoryMemoStore recall bookkeeping', () => {
 
 describe('isSameProjectDir', () => {
   it('matches the same folder and one inside the other; home or no folder belongs to every project', async () => {
-    const { isSameProjectDir } = await import('../src/recall.js');
+    const { isSameProjectDir } = await import('../src/project.js');
     const home = '/Users/me';
     expect(isSameProjectDir('/Users/me/repo', '/Users/me/repo', home)).toBe(true);
     expect(isSameProjectDir('/Users/me/repo/apps/cli', '/Users/me/repo', home)).toBe(true);
@@ -274,5 +275,161 @@ describe('isSameProjectDir', () => {
     expect(isSameProjectDir('', '/Users/me/repo', home)).toBe(true);
     expect(isSameProjectDir('/Users/me/other', '/Users/me/repo', home)).toBe(false);
     expect(isSameProjectDir('/Users/me/repo-old', '/Users/me/repo', home)).toBe(false);
+  });
+});
+
+describe('isSameProject', () => {
+  const home = '/Users/me';
+  const memo = (projectDir: string, projectRoot?: string) => ({ projectDir, projectRoot });
+
+  it('lets the project root decide when both sides know it', () => {
+    const current = memo('/Users/me/repo/apps/cli', '/Users/me/repo');
+    // Two directories of one checkout: the roots agree, and that is the answer.
+    expect(isSameProject(memo('/Users/me/repo/packages/core', '/Users/me/repo'), current, home)).toBe(true);
+    // Different checkouts that happen to share a directory prefix are not the
+    // same project — the case the directory comparison could never see.
+    expect(isSameProject(memo('/Users/me/repo-fork', '/Users/me/repo-fork'), current, home)).toBe(false);
+  });
+
+  it('falls back to the directory comparison for memos written before roots existed', () => {
+    const current = memo('/Users/me/repo', '/Users/me/repo');
+    expect(isSameProject(memo('/Users/me/repo'), current, home)).toBe(true);
+    expect(isSameProject(memo('/Users/me'), current, home)).toBe(true);
+    expect(isSameProject(memo('/opt/other'), current, home)).toBe(false);
+  });
+
+  it('treats a home-directory session as no project of its own', () => {
+    const current = memo('/Users/me', undefined);
+    // Without a root there is nothing to compare, so the fallback keeps the old
+    // leniency: a session started in home accepts memos from checkouts under it.
+    expect(isSameProject(memo('/Users/me/repo', '/Users/me/repo'), current, home)).toBe(true);
+    expect(isSameProject(memo('/Users/me'), current, home)).toBe(true);
+    // ...but a session in a checkout does not accept a memo from a sibling repo.
+    expect(
+      isSameProject(memo('/Users/me/other', '/Users/me/other'), memo('/Users/me/repo', '/Users/me/repo'), home),
+    ).toBe(false);
+  });
+});
+
+describe('scoreByVector candidate tiers', () => {
+  it('keeps an old memo of this project reachable when the cross-project pool is capped', async () => {
+    store.setEmbeddingEngine(engine());
+    // The same project, but the oldest memo in the library.
+    const mine = await memo(0.9, { projectDir: '/work/app/src', projectRoot: '/work/app' });
+    await memo(0.9, { projectDir: '/other/x', projectRoot: '/other' });
+    const newestOther = await memo(0.9, { projectDir: '/third/y', projectRoot: '/third' });
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    db.prepare('UPDATE memory_embeddings SET created_at = ? WHERE memory_id = ?').run(1, mine.id);
+
+    const ids = (
+      await store.scoreByVector(Float32Array.from([1, 0, 0]), {
+        project: { projectDir: '/work/app/src', projectRoot: '/work/app' },
+        crossProjectLimit: 1,
+      })
+    ).map((row) => row.id);
+
+    // The project's own memo is scored however old it is — the recency window it
+    // replaces would have dropped it once the library outgrew the cap...
+    expect(ids).toContain(mine.id);
+    // ...while the cross-project pool keeps only the newest one.
+    expect(ids).toContain(newestOther.id);
+    expect(ids).toHaveLength(2);
+  });
+});
+
+describe('project_root column', () => {
+  it('round-trips the project root', async () => {
+    const entry = await memo(0.9, { projectDir: '/work/app/src', projectRoot: '/work/app' });
+    await expect(store.get(entry.id)).resolves.toMatchObject({ projectRoot: '/work/app' });
+  });
+
+  it('re-adds the column to a database written before it existed', async () => {
+    store.close();
+    const legacy = new DatabaseSync(join(dir, 'memory', 'memos.sqlite'));
+    legacy.exec('DROP INDEX IF EXISTS idx_memos_project_root');
+    legacy.exec('ALTER TABLE memos DROP COLUMN project_root');
+    legacy.close();
+
+    store = new MemoryMemoStore(dir);
+    await store.init();
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    const columns = db
+      .prepare('PRAGMA table_info(memos)')
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(columns).toContain('project_root');
+    // The old rows read back with no root, which is what the fallback expects.
+    await expect(store.get((await memo(0.9)).id)).resolves.toMatchObject({ projectRoot: undefined });
+  });
+});
+
+describe('appendUnlessDuplicate', () => {
+  const build = (userNeed: string) =>
+    createMemoryMemo({
+      userNeed,
+      approach: 'read the gateway docs',
+      outcome: '完成',
+      whatFailed: 'none',
+      whatWorked: 'the docs had the limit',
+      extractionSource: 'manual',
+      sourceSessionId: 'session-dedupe',
+    });
+  const vector = (values: number[]): EmbeddingEngine => ({
+    ...engine(),
+    embedBatch: async () => [Float32Array.from(values)],
+  });
+
+  it('keeps one copy of the same note and stores a different one', async () => {
+    // The library already holds a memo at the stub's vector.
+    const first = await memo(1);
+
+    // The same note again — same vector, so the same text — arrives with a fresh
+    // id: a twin that would only dilute every future recall.
+    await expect(store.appendUnlessDuplicate(build('align the retry window'), { engine: vector([1, 0, 0]) })).resolves.toEqual({
+      id: first.id,
+      duplicateOf: first.id,
+    });
+
+    // A different conclusion (its own vector) still lands.
+    const other = build('deploy the docs site');
+    const stored = await store.appendUnlessDuplicate(other, { engine: vector([0, 1, 0]) });
+    expect(stored.duplicateOf).toBeUndefined();
+    expect(stored.id).toBe(other.id);
+    await expect(store.get(other.id)).resolves.toBeDefined();
+  });
+
+  it('falls back to a plain append when no embedding engine is available', async () => {
+    const entry = build('no engine here');
+    const stored = await store.appendUnlessDuplicate(entry, { engine: undefined });
+    expect(stored).toMatchObject({ id: entry.id });
+    await expect(store.get(entry.id)).resolves.toBeDefined();
+  });
+});
+
+describe('appendUnlessDuplicate — failure modes', () => {
+  const build = (userNeed: string) =>
+    createMemoryMemo({
+      userNeed,
+      approach: 'try it',
+      outcome: '完成',
+      whatFailed: 'none',
+      whatWorked: 'it worked',
+      extractionSource: 'manual',
+      sourceSessionId: 'session-failure',
+    });
+
+  it('still stores the memo when the embedder throws', async () => {
+    // A model that is down must cost a duplicate check, not the note itself.
+    const broken: EmbeddingEngine = {
+      ...engine(),
+      embedBatch: async () => {
+        throw new Error('embedder offline');
+      },
+    };
+    const entry = build('survive a broken embedder');
+    await expect(store.appendUnlessDuplicate(entry, { engine: broken })).resolves.toEqual({
+      id: entry.id,
+    });
+    await expect(store.get(entry.id)).resolves.toBeDefined();
   });
 });

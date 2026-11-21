@@ -28,13 +28,14 @@
  *   session itself, memos already shown, low-confidence compaction fallbacks
  *   and in-progress snapshots without a distilled rule.
  * - **This project first.** A memo from another project needs
- *   {@link RECALL_OTHER_PROJECT_MIN_SIMILARITY}. "This project" is judged by
- *   path, loosely ({@link isSameProjectDir}): memos are stamped with the cwd
- *   a session started in, and people start sessions in a subfolder of a repo
- *   or in their home folder (102 of the 106 real memos carry the home dir).
+ *   {@link RECALL_OTHER_PROJECT_MIN_SIMILARITY}. "This project" is the git root
+ *   of the working directory ({@link isSameProject}), falling back to the
+ *   directory comparison for memos written before roots were recorded: stamping
+ *   the bare cwd meant 84 of 87 real memos claimed the same home directory, which
+ *   made every memo look like the current project.
  */
 
-import { homedir } from 'node:os';
+import { isSameProject } from './project.js';
 
 import type { MemoryMemo } from './models.js';
 import type { MemoryMemoStore } from './store.js';
@@ -62,6 +63,8 @@ export interface RecallRequest {
   readonly query: string;
   /** Working directory of the conversation asking. */
   readonly projectDir: string;
+  /** Project (git root) of the working directory, when it is inside a checkout. */
+  readonly projectRoot?: string | undefined;
   /** Memos already shown in this conversation. */
   readonly excludeIds?: ReadonlySet<string>;
   /** The conversation asking: what it wrote itself is already in its context. */
@@ -89,7 +92,15 @@ export async function recallMemos(store: MemoryMemoStore, request: RecallRequest
   const queryVector = vectors?.[0];
   if (queryVector === undefined) return [];
 
-  const scored = await store.scoreByVector(queryVector);
+  // Two tiers, so an old memo of this project can never be crowded out by a
+  // recency window: every memo of this project is scored, cross-project memos
+  // are capped newest-first.
+  const scored = await store.scoreByVector(queryVector, {
+    project: {
+      projectDir: request.projectDir,
+      ...(request.projectRoot === undefined ? {} : { projectRoot: request.projectRoot }),
+    },
+  });
   if (scored.length === 0) return [];
   const median = scored[Math.floor(scored.length / 2)]!.score;
   const baseline = scored.length < SMALL_STORE ? Math.min(median, SMALL_STORE_BASELINE) : median;
@@ -109,7 +120,7 @@ export async function recallMemos(store: MemoryMemoStore, request: RecallRequest
     }
     if (memo.tags?.includes(FALLBACK_TAG) === true) continue;
     if (IN_PROGRESS_OUTCOME.test(memo.outcome) && (memo.distilled ?? '') === '') continue;
-    const sameProject = isSameProjectDir(memo.projectDir, request.projectDir);
+    const sameProject = isSameProject(memo, request);
     if (!sameProject && score < RECALL_OTHER_PROJECT_MIN_SIMILARITY) continue;
     if (kept.some((entry) => entry.memo.userNeed === memo.userNeed && entry.memo.sourceSessionId === memo.sourceSessionId)) {
       continue;
@@ -122,23 +133,4 @@ export async function recallMemos(store: MemoryMemoStore, request: RecallRequest
     if (vector !== undefined) keptVectors.push(vector);
   }
   return kept;
-}
-
-function normalizeDir(dir: string): string {
-  const slashed = dir.replaceAll('\\', '/').replace(/\/+$/, '');
-  return process.platform === 'win32' ? slashed.toLowerCase() : slashed;
-}
-
-/**
- * Whether a memo stamped with `memoDir` belongs to the project at
- * `projectDir`: the same folder, one inside the other (a session started in
- * a subfolder of the repo), or a memo not tied to any project — no folder, or
- * the home folder a session was started in.
- */
-export function isSameProjectDir(memoDir: string, projectDir: string, home: string = homedir()): boolean {
-  if (memoDir === '') return true;
-  const memo = normalizeDir(memoDir);
-  if (memo === normalizeDir(home)) return true;
-  const project = normalizeDir(projectDir);
-  return memo === project || project.startsWith(`${memo}/`) || memo.startsWith(`${project}/`);
 }
