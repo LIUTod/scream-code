@@ -25,7 +25,7 @@ import {
   writeRuntimeMarker,
   type RuntimeMarkerInfo,
 } from './utils/runtime-marker';
-import { sharedMemoStore } from '@scream-code/memory';
+import { DreamTracker, sharedMemoStore } from '@scream-code/memory';
 import { isJobRunSession } from './utils/channel-sessions';
 import { isEmptySessionShell } from './utils/session-picker-rows';
 import { getDataDir } from '../utils/paths';
@@ -877,6 +877,29 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   sendQueuedMessage(session: Session, item: QueuedMessage): void {
     this.inputController.sendQueuedMessage(session, item);
+  }
+
+  /** Start /dream from the memory panel: same path as typing the command. */
+  startDream(): void {
+    const session = this.session;
+    if (session === undefined) {
+      this.showError(t('constant.no_active_session'));
+      return;
+    }
+    this.sendSkillActivation(session, 'dream', '');
+  }
+
+  /** Last dream timestamp, for the memory panel header. */
+  async readDreamTracker(): Promise<{ lastDreamAt?: number } | undefined> {
+    try {
+      const tracker = new DreamTracker(getDataDir());
+      const state = await tracker.readState();
+      if (state?.lastDreamAt === undefined) return undefined;
+      const at = new Date(state.lastDreamAt).getTime();
+      return Number.isFinite(at) ? { lastDreamAt: at } : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   sendSkillActivation(session: Session, skillName: string, skillArgs: string): void {

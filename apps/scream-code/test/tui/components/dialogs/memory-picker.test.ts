@@ -399,3 +399,90 @@ describe('MemoryPickerComponent — editing the latest distillation', () => {
     expect(output).not.toContain('Enter 保存');
   });
 });
+
+describe('MemoryPickerComponent — dream integration', () => {
+  let originalLocale: ReturnType<typeof getLocale>;
+  beforeEach(() => {
+    originalLocale = getLocale();
+    setLocale('zh');
+  });
+  afterEach(() => {
+    setLocale(originalLocale);
+  });
+
+  function withDreamStatus(
+    memos: MemoryMemoSummary[],
+    dreamStatus: { distilled: number; pending: number; lastAt?: number },
+    counts: { onDream?: () => void; onUndoMerge?: (id: string) => void } = {},
+  ): MemoryPickerComponent {
+    return new MemoryPickerComponent({
+      store: {
+        init: async () => {},
+        list: async () => ({ memos, total: memos.length }),
+        get: async () => undefined,
+        update: async () => true,
+      } as unknown as MemoryMemoStore,
+      memos,
+      total: memos.length,
+      loading: false,
+      colors: getColorPalette('dark'),
+      onCancel: vi.fn(),
+      onInject: vi.fn(),
+      dreamStatus,
+      ...counts,
+    });
+  }
+
+  it('shows how many rules exist, how much still wants a pass, and when the last one ran', () => {
+    const component = withDreamStatus([makeSummary()], { distilled: 7, pending: 12, lastAt: Date.now() - 3 * 86_400_000 });
+    const text = stripAnsi(component.render(160).join('\n'));
+    expect(text).toContain('归纳 7 条');
+    expect(text).toContain('待整理 12 条');
+  });
+
+  it('says the notebook has never been dreamt when there is no timestamp', () => {
+    const component = withDreamStatus([makeSummary()], { distilled: 0, pending: 3 });
+    expect(stripAnsi(component.render(160).join('\n'))).toContain('尚未整理');
+  });
+
+  it('starts a dream pass on s, after closing the panel', () => {
+    const onDream = vi.fn();
+    const component = withDreamStatus([makeSummary()], { distilled: 0, pending: 1 }, { onDream });
+    component.handleInput('s');
+    expect(onDream).toHaveBeenCalledTimes(1);
+  });
+
+  it('filters to rules only on t, and back again', () => {
+    const raw = makeSummary({ id: 'memo-raw', userNeed: '还没归纳的原始记忆' });
+    const rule = makeSummary({ id: 'memo-rule', userNeed: '已经归纳的规则', distilled: '当 X 时先做 Y' });
+    const component = withDreamStatus([raw, rule], { distilled: 1, pending: 1 });
+
+    component.handleInput('t');
+    let text = stripAnsi(component.render(160).join('\n'));
+    expect(text).toContain('已经归纳的规则');
+    expect(text).not.toContain('还没归纳的原始记忆');
+    expect(text).toContain('筛选：仅归纳');
+
+    component.handleInput('t');
+    text = stripAnsi(component.render(160).join('\n'));
+    expect(text).toContain('还没归纳的原始记忆');
+    expect(text).not.toContain('已经归纳的规则');
+  });
+
+  it('drops marks when the view changes, so a batch delete cannot reach hidden memories', () => {
+    const raw = makeSummary({ id: 'memo-raw', userNeed: '原始' });
+    const rule = makeSummary({ id: 'memo-rule', userNeed: '规则', distilled: '当 X 时先做 Y' });
+    const component = withDreamStatus([raw, rule], { distilled: 1, pending: 1 });
+    component.handleInput(' '); // mark the first (raw) memory
+    component.handleInput('t'); // switch to rules only
+    const text = stripAnsi(component.render(160).join('\n'));
+    expect(text).not.toContain('已选');
+  });
+
+  it('asks to undo the merge behind the selected memory on u', () => {
+    const onUndoMerge = vi.fn();
+    const component = withDreamStatus([makeSummary({ id: 'memo-merged' })], { distilled: 1, pending: 0 }, { onUndoMerge });
+    component.handleInput('u');
+    expect(onUndoMerge).toHaveBeenCalledWith('memo-merged');
+  });
+});

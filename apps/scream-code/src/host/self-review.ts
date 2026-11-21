@@ -43,7 +43,7 @@ export function selfReviewPrompt(does: JobDoes): string {
       ? 'Make small changes yourself (write or edit a skill); every change is recorded and can be rolled back. Do not delete skills. Anything larger, any memory and anything to do with plugins: ask with AskUserQuestion — it goes to the person — and carry on.'
       : 'Change nothing: only propose. The person decides.',
     'Never touch permissions, budgets, config.toml or anything outside the skills folder.',
-    'Propose retiring a skill listed under "never invoked". From <memory-use>, say which memories helped this week (by id), and propose tidying memories never recalled for a month (merge near-duplicates with /dream, delete the rest).',
+    'Propose retiring a skill listed under "never invoked". From <memory-use>, say which memories helped this week (by id), and propose distilling the memories never recalled for a month with /dream — a new rule, or a merge when they repeat each other. Never propose deleting memories.',
     'Where an error rate is compared with the week before, say whether last week\'s changes helped.',
     'Reply in the language the person writes in. End with what you changed, what you propose, and the one thing the person should look at.',
   ].join(' ');

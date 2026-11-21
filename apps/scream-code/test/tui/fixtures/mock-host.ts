@@ -335,6 +335,8 @@ export function makeMockSlashCommandHost(
   const state = createMockTUIState({ appState: options.appState });
 
   const host: SlashCommandHost = {
+    startDream: vi.fn(),
+    readDreamTracker: async () => undefined,
     state,
     session: options.session as Session | undefined,
     harness: (options.harness ?? makeMockHarness()) as unknown as ScreamHarness,

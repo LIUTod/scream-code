@@ -23,6 +23,7 @@ const caps = vi.hoisted(() => ({
   picker: [] as any[],
   help: [] as any[],
   memory: [] as any[],
+  memoryInstances: [] as Array<{ fills: Array<{ memos: unknown[]; total: number }>; statuses: unknown[] }>,
   approval: [] as Array<{ args: any[]; instance: any }>,
   preview: [] as Array<{ props: any; instance: any }>,
   question: [] as Array<{ args: any[]; instance: any }>,
@@ -61,10 +62,15 @@ vi.mock('../../../src/tui/components/dialogs/memory-picker.js', () => ({
   MemoryPickerComponent: class {
     stop = vi.fn();
     props: Record<string, unknown>;
+    fills: Array<{ memos: unknown[]; total: number }> = [];
+    statuses: unknown[] = [];
     constructor(props: any) {
       this.props = props;
       caps.memory.push(props);
+      caps.memoryInstances.push(this);
     }
+    setMemos(memos: unknown[], total: number): void { this.fills.push({ memos, total }); }
+    setDreamStatus(status: unknown): void { this.statuses.push(status); }
     render(): string[] { return []; }
     invalidate(): void {}
     handleInput(): void {}
@@ -135,6 +141,8 @@ function makeHost(options: {
   const approvalController = { respond: vi.fn(), cancelAll: vi.fn(), setUIHooks: vi.fn() };
   const questionController = { respond: vi.fn(), cancelAll: vi.fn(), setUIHooks: vi.fn() };
   const host: DialogManagerHost = {
+    startDream: vi.fn(),
+    readDreamTracker: async () => undefined,
     state,
     approvalController: approvalController as never,
     questionController: questionController as never,
@@ -426,17 +434,22 @@ describe('DialogManager — memory picker', () => {
     expect(state.activeDialog).toBeNull();
   });
 
-  it('lazy load re-mounts only while the picker is still open', async () => {
-    const { manager, state } = makeHost();
+  it('lazy load fills the mounted picker instead of mounting a second one', async () => {
+    // Two mounts used to race: a late status read could repaint an empty page
+    // over the loaded one, so /memory looked blank after being reopened.
+    const { manager } = makeHost();
     manager.showMemoryPicker();
     expect(caps.memory[0]!.loading).toBe(true);
     const store = caps.stores[0]!;
     store.list.mockResolvedValueOnce({ memos: [memo], total: 7 });
     await settle();
     expect(store.init).toHaveBeenCalled();
-    expect(caps.memory.length).toBe(2);
-    expect(caps.memory[1]!.loading).toBe(false);
-    expect(caps.memory[1]!.total).toBe(7);
+    expect(caps.memory.length).toBe(1);
+    const instance = caps.memoryInstances[0]!;
+    expect(instance.fills).toEqual([{ memos: [memo], total: 7 }]);
+    // The dream counters land on the same instance, never on a second one.
+    expect(instance.statuses).toHaveLength(1);
+    expect(instance.statuses[0]).toMatchObject({ distilled: 0, pending: 0 });
   });
 
   it('hideMemoryPicker restores the editor', () => {

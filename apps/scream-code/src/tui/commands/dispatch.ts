@@ -170,6 +170,10 @@ export interface SlashCommandHost {
   showMemoryPicker(): void;
   sendNormalUserInput(text: string): void;
   sendSkillActivation(session: Session, skillName: string, skillArgs: string): void;
+  /** Start a dream pass from the memory panel. */
+  startDream(): void;
+  /** Last dream timestamp for the memory panel header. */
+  readDreamTracker(): Promise<{ lastDreamAt?: number } | undefined>;
   readonly skillCommandMap: Map<string, string>;
 
   /** Trigger an immediate line daemon liveness poll (bypasses the 30 s interval). */

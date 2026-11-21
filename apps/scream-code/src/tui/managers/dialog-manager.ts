@@ -38,6 +38,10 @@ export interface DialogManagerHost {
   /** 退出 /tasks 等全屏接管组件,让后续 editor 替换能挂载到真实容器。 */
   exitFullScreenTakeover(): void;
   sendNormalUserInput(text: string): void;
+  /** Start /dream from the memory panel. */
+  startDream(): void;
+  /** Last dream timestamp for the memory panel header. */
+  readDreamTracker(): Promise<{ lastDreamAt?: number } | undefined>;
   resumeSession(sessionId: string): Promise<{ switched: boolean; blocked?: boolean }>;
   switchToSession(session: Session, message: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
@@ -55,6 +59,8 @@ export interface DialogManagerHost {
  * Encapsulates all dialog / picker / panel operations.
  */
 export class DialogManager {
+  /** The memory picker on screen right now; async fills check they still own it. */
+  private memoryPicker: MemoryPickerComponent | undefined;
   private activeApprovalPanel: ApprovalPanelComponent | undefined;
   private activeQuestionDialog: QuestionDialogComponent | undefined;
   private approvalPreview:
@@ -224,51 +230,90 @@ export class DialogManager {
   // =========================================================================
   // Memory picker
   // =========================================================================
-  showMemoryPicker(
-    preloadedMemos?: MemoryMemoSummary[],
-    preloadedTotal?: number,
-  ): void {
+  showMemoryPicker(preloadedMemos?: MemoryMemoSummary[], preloadedTotal?: number): void {
     const store = sharedMemoStore(getDataDir());
 
     const hasData = preloadedMemos !== undefined;
-    const memos = preloadedMemos ?? [];
-    const total = preloadedTotal ?? 0;
+    const component = new MemoryPickerComponent({
+      store,
+      memos: preloadedMemos ?? [],
+      total: preloadedTotal ?? 0,
+      loading: !hasData,
+      colors: this.host.state.theme.colors,
+      ui: this.host.state.ui,
+      onDream: () => {
+        this.memoryPicker = undefined;
+        this.host.state.activeDialog = null;
+        this.restoreEditor();
+        this.host.startDream();
+      },
+      onUndoMerge: (memoId: string) => {
+        void (async () => {
+          const undone = await store.revertMerge(memoId);
+          this.host.showStatus(t(undone ? 'memory.undo_merge_ok' : 'memory.undo_merge_none'));
+          this.memoryPicker = undefined;
+          this.showMemoryPicker();
+        })();
+      },
+      onCancel: () => {
+        this.memoryPicker = undefined;
+        this.host.state.activeDialog = null;
+        this.restoreEditor();
+      },
+      onInject: (memo: MemoryMemoSummary) => {
+        this.host.sendNormalUserInput(formatMemoryMemoForInjection(memo));
+        this.host.showStatus(t('dialog.memo_injected', { id: memo.id }));
+        this.memoryPicker = undefined;
+        this.host.state.activeDialog = null;
+        this.restoreEditor();
+      },
+    });
 
-    if (!hasData) {
-      void store.init().then(async () => {
-        try {
-          const result = await store.list({ limit: 50 });
-          if (this.host.state.activeDialog === 'memory-picker') {
-            this.showMemoryPicker(result.memos, result.total);
-          }
-        } catch { /* ignore */ }
-      });
-    }
-
+    this.memoryPicker = component;
     this.host.state.activeDialog = 'memory-picker';
-    this.mountEditorReplacement(
-      new MemoryPickerComponent({
-        store,
-        memos,
-        total,
-        loading: !hasData,
-        colors: this.host.state.theme.colors,
-        ui: this.host.state.ui,
-        onCancel: () => {
-          this.host.state.activeDialog = null;
-          this.restoreEditor();
-        },
-        onInject: (memo) => {
-          this.host.sendNormalUserInput(formatMemoryMemoForInjection(memo));
-          this.host.showStatus(t('dialog.memo_injected', { id: memo.id }));
-          this.host.state.activeDialog = null;
-          this.restoreEditor();
-        },
-      }),
-    );
+    this.mountEditorReplacement(component);
+
+    // One async fill for this mount: memos (when not preloaded) and the dream
+    // counters. Both land on the component that is actually on screen — a
+    // second mount would race the first one, and the loser used to paint an
+    // empty page over a loaded one (the panel looked empty after reopening).
+    void (async () => {
+      const stillMounted = (): boolean => this.memoryPicker === component;
+      try {
+        await store.init();
+        if (!hasData) {
+          const page = await store.list({ limit: 50 });
+          if (!stillMounted()) return;
+          component.setMemos(page.memos, page.total);
+        }
+        let distilled = 0;
+        let pending = 0;
+        try {
+          for await (const memo of store.read()) {
+            if ((memo.distilled ?? '').trim().length > 0) distilled += 1;
+            if (memo.dreamedAt === undefined || memo.recordedAt > memo.dreamedAt) pending += 1;
+          }
+        } catch {
+          // Counters are a nicety: a store that cannot enumerate still gets the
+          // "last dream" line rather than nothing at all.
+        }
+        if (!stillMounted()) return;
+        const tracker = await this.host.readDreamTracker();
+        if (!stillMounted()) return;
+        component.setDreamStatus({
+          distilled,
+          pending,
+          ...(tracker?.lastDreamAt === undefined ? {} : { lastAt: tracker.lastDreamAt }),
+        });
+      } catch {
+        // An unreadable store or tracker just means no counters; the list is
+        // whatever the component already had.
+      }
+    })();
   }
 
   hideMemoryPicker(): void {
+    this.memoryPicker = undefined;
     this.host.state.activeDialog = null;
     this.restoreEditor();
   }

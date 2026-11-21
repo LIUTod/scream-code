@@ -116,6 +116,13 @@ export interface MemoryPickerOptions {
   ui?: TUI;
   onCancel: () => void;
   onInject: (memo: MemoryMemoSummary) => void;
+  /** Start a dream pass for the person (the panel closes first). */
+  onDream?: () => void;
+  /** Undo the merge that produced this memo, if it was one. */
+  onUndoMerge?: (memoId: string) => void;
+  /** Dream state shown under the title: how many rules exist, how many memos
+   * still need a pass, and when the last pass ran. */
+  dreamStatus?: { distilled: number; pending: number; lastAt?: number };
 }
 
 type PickerMode = 'list' | 'detail' | 'confirmDelete' | 'editDistilled';
@@ -126,6 +133,13 @@ export class MemoryPickerComponent extends Container implements Focusable {
   private readonly ui: TUI | undefined;
   private onCancel: () => void;
   private onInject: (memo: MemoryMemoSummary) => void;
+  private onDream: (() => void) | undefined;
+  private onUndoMerge: ((memoId: string) => void) | undefined;
+  private dreamStatus: { distilled: number; pending: number; lastAt?: number } | undefined;
+  /** Unfiltered page as loaded from the store; `memos` is the filtered view. */
+  private allMemos: MemoryMemoSummary[] = [];
+  /** Which slice of the notebook is on screen. */
+  private view: 'all' | 'distilled' | 'raw' = 'all';
 
   focused = false;
   private selectedIndex = 0;
@@ -159,6 +173,43 @@ export class MemoryPickerComponent extends Container implements Focusable {
     this.ui = opts.ui;
     this.onCancel = opts.onCancel;
     this.onInject = opts.onInject;
+    this.onDream = opts.onDream;
+    this.onUndoMerge = opts.onUndoMerge;
+    this.dreamStatus = opts.dreamStatus;
+    this.allMemos = opts.memos;
+  }
+
+  /** Replace the page after an async load finished. The dialog updates the
+   * mounted component instead of mounting a second one: two pickers racing each
+   * other is how an empty page used to overwrite a loaded one. */
+  setMemos(memos: MemoryMemoSummary[], total: number): void {
+    this.allMemos = memos;
+    this.loading = false;
+    this.total = total;
+    this.applyView();
+    this.selectedIndex = 0;
+    this.ui?.requestRender();
+  }
+
+  /** Fill in the dream counters once they have been read. */
+  setDreamStatus(status: { distilled: number; pending: number; lastAt?: number }): void {
+    this.dreamStatus = status;
+    this.ui?.requestRender();
+  }
+
+  /** Filter the loaded page. Kept separate from loading so switching views is
+   * instant and does not re-query the store. */
+  private applyView(): void {
+    this.memos =
+      this.view === 'all'
+        ? this.allMemos
+        : this.view === 'distilled'
+          ? this.allMemos.filter((memo) => (memo.distilled ?? '').trim().length > 0 || memo.origin === 'dream')
+          : this.allMemos.filter((memo) => (memo.distilled ?? '').trim().length === 0 && memo.origin !== 'dream');
+    this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.memos.length - 1));
+    // A different view invalidates any marks made in the old one: otherwise a
+    // batch delete would reach memories the person can no longer see.
+    this.selectedIds.clear();
   }
 
   private async loadMemos(): Promise<void> {
@@ -167,12 +218,12 @@ export class MemoryPickerComponent extends Container implements Focusable {
     try {
       await this.store.init();
       const result = await this.store.list({ limit: 50, search: this.searchQuery || undefined });
-      this.memos = result.memos;
+      this.allMemos = result.memos;
+      this.applyView();
       this.total = result.total;
       this.selectedIndex = 0;
-      // A data reload invalidates any batch selection.
-      this.selectedIds.clear();
     } catch {
+      this.allMemos = [];
       this.memos = [];
       this.total = 0;
     } finally {
@@ -321,6 +372,26 @@ export class MemoryPickerComponent extends Container implements Focusable {
       this.searchInput = '';
       return;
     }
+    if (ch === 's' || ch === 'S') {
+      // Hand over to /dream: the panel closes so the person can watch the pass.
+      if (this.onDream !== undefined) {
+        this.onCancel();
+        this.onDream();
+      }
+      return;
+    }
+    if (ch === 'u' || ch === 'U') {
+      const memo = this.memos[this.selectedIndex];
+      if (memo && this.onUndoMerge !== undefined) this.onUndoMerge(memo.id);
+      return;
+    }
+    if (ch === 't' || ch === 'T') {
+      // Cycle the view: everything → rules only → raw only.
+      this.view = this.view === 'all' ? 'distilled' : this.view === 'distilled' ? 'raw' : 'all';
+      this.applyView();
+      this.ui?.requestRender();
+      return;
+    }
   }
 
   private async showDetail(): Promise<void> {
@@ -443,6 +514,27 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const shownHint = ` ${truncateToWidth(headerHint, Math.max(1, width - 1), ELLIPSIS)}`;
     // Title alone on top; the key hint sits under the list in every dialog.
     lines.push(chalk.hex(c.primary).bold(headerLabel));
+    // Dream state next to the title: how many rules the notebook holds, how much
+    // still wants a pass, and when the last one ran. This is what makes /dream's
+    // work visible instead of something that happens invisibly.
+    if (this.dreamStatus !== undefined) {
+      const { distilled, pending, lastAt } = this.dreamStatus;
+      const status =
+        lastAt === undefined
+          ? t('memory.dream_never', { distilled: String(distilled), pending: String(pending) })
+          : t('memory.dream_status', {
+              distilled: String(distilled),
+              pending: String(pending),
+              when: formatRelativeTime(lastAt),
+            });
+      lines.push(chalk.hex(c.textMuted)(truncateToWidth(` ${status}`, width, ELLIPSIS)));
+    }
+    if (this.view !== 'all') {
+      const mode = t(this.view === 'distilled' ? 'memory.filter_distilled' : 'memory.filter_raw');
+      lines.push(
+        chalk.hex(c.textMuted)(truncateToWidth(` ${t('memory.filter_label', { mode })}`, width, ELLIPSIS)),
+      );
+    }
     lines.push('');
 
     // Loading
@@ -567,7 +659,9 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const titleStyle = isSelected ? chalk.hex(titleColor).bold : chalk.hex(titleColor);
 
     const sources = memo.distilledFrom ?? [];
-    const isRule = memo.origin !== undefined && memo.origin !== 'session';
+    // A memo counts as a rule when it carries a distilled conclusion, whatever
+    // its origin: distilling in place keeps a person-recorded memo's origin.
+    const isRule = (memo.distilled ?? '').trim().length > 0 || memo.origin === 'dream';
     const time = formatRelativeTime(isRule ? (memo.distilledAt ?? memo.recordedAt) : memo.recordedAt);
     const src = isRule
       ? memo.origin === 'user'
