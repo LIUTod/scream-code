@@ -428,6 +428,9 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
             reservation,
             agentId: handle.agentId,
             subagentType: handle.profileName,
+            // Progress sampling for the task surface: without it the parent's
+            // only reading of a running child is an empty log (see getActivity).
+            activity: () => this.subagentHost.liveActivity(handle.agentId),
             abort: () => {
               backgroundController?.abort();
             },
@@ -457,7 +460,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
           '',
           `description: ${args.description}`,
           '',
-          `next_step: The completion arrives automatically in a later turn — no polling needed. To peek at progress without blocking, call TaskOutput(task_id="${taskId}", block=false).`,
+          `next_step: The completion arrives automatically in a later turn — no polling needed. TaskOutput(task_id="${taskId}", block=false) samples progress on demand: a running subagent writes nothing to its log until it finishes, so read subagent_steps / subagent_tool_calls and compare two samples — an empty log is normal and is not a sign of a stall.`,
           `resume_hint: To continue or recover this same subagent later, call Agent(resume="${handle.agentId}", prompt="..."). The parameter is agent_id ("${handle.agentId}"), NOT task_id ("${taskId}") or source_id from a later <notification>. Recovery cases: a later <notification type="task.lost" | "task.failed" | "task.killed"> for this subagent — its conversation history is preserved across session restarts and resume will pick it up.`,
         ];
         return { output: lines.join('\n') };
@@ -662,6 +665,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         timeoutMs: this.subagentHost.backgroundTaskTimeoutMs,
         agentId: handle.agentId,
         subagentType: handle.profileName,
+        activity: () => this.subagentHost.liveActivity(handle.agentId),
         abort: () => {
           childController.abort();
         },
@@ -709,7 +713,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     this.subagentHost.markBackground?.(handle.agentId);
     const nextStep =
       reason.kind === 'timeout'
-        ? `next_step: The subagent exceeded the foreground timeout (${reason.timeoutMs}ms) and was moved to the background instead of being aborted. Its completion arrives automatically in a later turn — no polling needed. To peek at progress without blocking, call TaskOutput(task_id="${taskId}", block=false).`
+        ? `next_step: The subagent exceeded the foreground timeout (${reason.timeoutMs}ms) and was moved to the background instead of being aborted. Its completion arrives automatically in a later turn — no polling needed. TaskOutput(task_id="${taskId}", block=false) samples progress on demand: a running subagent writes nothing to its log until it finishes, so read subagent_steps and compare two samples instead of treating an empty log as a stall.`
         : `next_step: The subagent raised a request and was moved to the background so you can answer it in real time. The request text arrives with the subagent message at your next step boundary. Reply with SendSubagentMessage — the subagent keeps running and a steer lands inside its live turn (operation "interject" if it must be read immediately, e.g. it is stuck in a long tool call). Its completion arrives automatically in a later turn — no polling needed; if you have nothing else to do, use the Wait tool to wait for it.`;
     return {
       kind: 'backgrounded',

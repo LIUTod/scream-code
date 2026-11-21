@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { testAgent } from '../agent/harness/agent';
-import { SessionSubagentHost } from '../../src/session/subagent-host';
+import { EventSubscriptionBus } from '../../src/agent/events';
+import { SessionSubagentHost, SubagentActivityTracker } from '../../src/session/subagent-host';
 import { AgentTool } from '../../src/tools/builtin/collaboration/agent';
 import type { Agent } from '../../src/agent';
 import type { ResolvedAgentProfile } from '../../src/profile';
@@ -55,19 +56,21 @@ function fakeSession(parent: Agent, child: Agent) {
 
 /** A background manager that records registrations and issues task ids. */
 function fakeBackgroundManager() {
-  const registered: Array<{ taskId: string }> = [];
+  const registered: Array<{ taskId: string; opts: Record<string, unknown> }> = [];
   let n = 0;
   return {
     registered,
     reserveSlot: vi.fn(() => ({ release: vi.fn() })),
-    registerAgentTask: vi.fn((completion: Promise<unknown>, _desc: string, _opts: unknown) => {
-      n += 1;
-      const taskId = `agent-task-${n}`;
-      registered.push({ taskId });
-      // Swallow the completion so a late-settling child is never unhandled.
-      void completion.catch(() => {});
-      return taskId;
-    }),
+    registerAgentTask: vi.fn(
+      (completion: Promise<unknown>, _desc: string, opts: Record<string, unknown> = {}) => {
+        n += 1;
+        const taskId = `agent-task-${n}`;
+        registered.push({ taskId, opts });
+        // Swallow the completion so a late-settling child is never unhandled.
+        void completion.catch(() => {});
+        return taskId;
+      },
+    ),
   };
 }
 
@@ -118,4 +121,111 @@ describe('Agent tool auto mode — parent is not parked on a slow subagent (real
     expect(controller.signal.aborted).toBe(false);
     releaseChild();
   });
+
+  it('hands the manager a live-activity probe bound to the child it started', async () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    child.mockNextResponse({
+      type: 'text',
+      text: 'child finished its work and returned a summary long enough to be valid.',
+    });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+    const background = fakeBackgroundManager();
+    const tool = new AgentTool(host, background as never, undefined, {
+      allowBackground: true,
+      subagentMode: 'auto',
+      foregroundBudgetMs: 0,
+    });
+    const controller = new AbortController();
+    const exec = tool.resolveExecution({ prompt: 'do a thing', description: 'a thing' } as never) as {
+      execute(ctx: unknown): Promise<ExecutableToolResult>;
+    };
+    await exec.execute({
+      toolCallId: 'call_probe',
+      signal: controller.signal,
+    } as unknown as ExecutableToolContext);
+
+    // The wiring is what this test owns: the task registered for a backgrounded
+    // child carries a probe aimed at that child, so TaskOutput's
+    // `getActivity` has something to read. What the probe counts is pinned by
+    // the tracker test below, against a child whose event stream the test owns
+    // — asserting a live sample here would race the child's own run.
+    const registration = background.registered[0];
+    expect(registration).toBeDefined();
+    expect(registration?.opts['agentId']).toBe('agent-0');
+    expect(typeof registration?.opts['activity']).toBe('function');
+    expect((registration?.opts['activity'] as () => unknown)()).toEqual(host.liveActivity('agent-0'));
+  });
 });
+
+describe('SubagentActivityTracker', () => {
+  it('counts steps and tool calls, and forgets a child when its run ends', () => {
+    const tracker = new SubagentActivityTracker();
+    const bus = new EventSubscriptionBus();
+    tracker.track({ eventBus: bus }, 'agent-0');
+    expect(tracker.sample('agent-0')).toEqual({ steps: 0, toolCalls: 0 });
+
+    bus.dispatch({ type: 'turn.step.started', turnId: 0, step: 1 });
+    bus.dispatch({ type: 'turn.step.started', turnId: 0, step: 2 });
+    bus.dispatch({ type: 'tool.call.started', turnId: 1, toolCallId: 'c1', name: 'Read', args: {} });
+    expect(tracker.sample('agent-0')).toEqual({ steps: 2, toolCalls: 1 });
+
+    // A sample is a copy: later work cannot rewrite what a parent already read.
+    const first = tracker.sample('agent-0');
+    bus.dispatch({ type: 'turn.step.started', turnId: 1, step: 1 });
+    expect(first).toEqual({ steps: 2, toolCalls: 1 });
+
+    // The run ends: counters and subscription go with it, so a late event on
+    // the dead bus cannot resurrect a sample.
+    tracker.release('agent-0');
+    expect(tracker.sample('agent-0')).toBeUndefined();
+    bus.dispatch({ type: 'turn.step.started', turnId: 5, step: 1 });
+    expect(tracker.sample('agent-0')).toBeUndefined();
+
+    // Re-tracking a child (a resume rebuilds the Agent, hence a new bus)
+    // starts a fresh count instead of double-subscribing the old one.
+    const nextBus = new EventSubscriptionBus();
+    tracker.track({ eventBus: nextBus }, 'agent-0');
+    nextBus.dispatch({ type: 'turn.step.started', turnId: 0, step: 1 });
+    expect(tracker.sample('agent-0')).toEqual({ steps: 1, toolCalls: 0 });
+  });
+  
+  it('keeps counting after a compaction rewrites the child history', () => {
+    // The counters are event-fed on purpose: a history scan would drop when a
+    // fold rewrites the context, and a falling count reads as a stall.
+    const tracker = new SubagentActivityTracker();
+    const bus = new EventSubscriptionBus();
+    tracker.track({ eventBus: bus }, 'agent-0');
+    for (let step = 0; step < 6; step += 1) {
+      bus.dispatch({ type: 'turn.step.started', turnId: 0, step });
+    }
+    expect(tracker.sample('agent-0')?.steps).toBe(6);
+    // A compaction emits nothing the tracker subtracts; the next step still
+    // raises the count.
+    bus.dispatch({ type: 'turn.step.started', turnId: 0, step: 6 });
+    expect(tracker.sample('agent-0')?.steps).toBe(7);
+  });
+});
+
+describe('SessionSubagentHost.liveActivity', () => {
+  it('has no sample for a child it never tracked', () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    const session = fakeSession(parent.agent, child.agent);
+    session.agents.set('agent-0', child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    // The counters live in the tracker, which only a spawn or a resume fills:
+    // an agent merely being present is not a sample, and reporting zeroes for
+    // it would invent a progress reading that nothing backs.
+    expect(host.liveActivity('agent-0')).toBeUndefined();
+    expect(host.liveActivity('agent-never-existed')).toBeUndefined();
+  });
+});
+

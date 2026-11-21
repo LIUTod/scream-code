@@ -64,6 +64,24 @@ export type BackgroundTaskKind = 'bash' | 'agent';
 /** Lifecycle phases observed by `onLifecycle` subscribers. */
 export type BackgroundLifecycleEvent = 'started' | 'updated' | 'terminated';
 
+/**
+ * Live progress of a running agent task, as counted from the child's own event
+ * stream (`SubagentActivityTracker`, wired by the `Agent` tool).
+ *
+ * An agent task writes to `output.log` exactly once — the final result, on
+ * settlement — so `outputSizeBytes` is structurally 0 for the entire run and
+ * says nothing about whether the child is advancing. This is the honest
+ * liveness signal instead: cumulative counters, never a verdict. One sample
+ * proves nothing; two samples taken apart that show a higher count prove
+ * progress.
+ */
+export interface BackgroundTaskActivity {
+  /** Model steps started so far (`turn.step.started`). */
+  readonly steps: number;
+  /** Tool calls started so far (`tool.call.started`). */
+  readonly toolCalls: number;
+}
+
 export interface BackgroundTaskInfo {
   readonly taskId: string;
   readonly command: string;
@@ -131,6 +149,12 @@ interface ManagedProcess {
   agentId?: string | undefined;
   /** Subagent profile name (agent tasks only). */
   subagentType?: string | undefined;
+  /**
+   * Live-progress probe for an agent task (agent tasks only). Deliberately a
+   * callable rather than a cached value: the manager has no heartbeat, and a
+   * sampled-on-demand counter cannot go stale. Read only via `getActivity`.
+   */
+  activityProbe?: (() => BackgroundTaskActivity | undefined) | undefined;
   /** Non-terminal-reclassification reason (e.g. no live process at restore; see `markLoadedTasksLost`). */
   failureReason?: string | undefined;
   /** True after stop() has requested cancellation but before terminal status is chosen. */
@@ -229,6 +253,20 @@ export function generateTaskId(kind: BackgroundTaskKind): string {
     suffix += _ALPHABET[bytes[i]! % 36];
   }
   return `${kind}-${suffix}`;
+}
+
+/**
+ * True when a task id names an agent-class task — the ones registered through
+ * `registerAgentTask`, whose ids carry the `agent-` prefix (`generateTaskId`).
+ *
+ * One definition, three readers: persistence, completion notifications and the
+ * progress surface must agree on which tasks drive a subagent. The id is the
+ * only discriminator that survives a restore, because `agentId` is unknown for
+ * tasks registered without an explicit one and stays unpersisted for them (see
+ * `persistLive`).
+ */
+export function isAgentTaskId(taskId: string): boolean {
+  return taskId.startsWith('agent-');
 }
 
 /**
@@ -745,6 +783,30 @@ export class BackgroundProcessManager {
   }
 
   /**
+   * Sample the live progress of a running agent task, or `undefined` when
+   * there is nothing honest to report (bash task, missing probe, terminal
+   * task above all: a finished task's counters are worthless because its
+   * result is already in the log).
+   *
+   * Kept out of `getTask()` / `toInfo()` on purpose: `toInfo` runs on every
+   * lifecycle event and on every `list()`, which the `/tasks` panel polls, and
+   * a snapshot that carries a lazily-called probe would make every one of those
+   * reads invoke it. Only the progress read path asks for a sample.
+   */
+  getActivity(taskId: string): BackgroundTaskActivity | undefined {
+    const entry = this.processes.get(taskId);
+    if (entry === undefined) return undefined;
+    if (TERMINAL_STATUSES.has(entry.status)) return undefined;
+    try {
+      return entry.activityProbe?.();
+    } catch {
+      // A probe is diagnostics, never correctness: a child that cannot be
+      // sampled must not turn a progress read into a failing tool call.
+      return undefined;
+    }
+  }
+
+  /**
    * Return the output snapshot used by TaskOutput.
    *
    * Persisted logs are preferred when the task was registered with an
@@ -1007,7 +1069,10 @@ export class BackgroundProcessManager {
   /**
    * Register a Promise-based agent task (no JianProcess). Used by
    * AgentTool for background subagent dispatch. Agent tasks appear in
-   * `list()` / `getTask()` but have pid=0 and empty output.
+   * `list()` / `getTask()` but have pid=0 and no output at all until they
+   * settle — the final result is appended in one write at completion, so a
+   * zero-byte log is a running child's normal state, not a stall. Live
+   * progress is available separately from `getActivity()`.
    *
    * `opts.timeoutMs` wraps the completion in an external deadline. On
    * deadline fire, the task is marked `failed` with `timedOut=true`
@@ -1026,6 +1091,8 @@ export class BackgroundProcessManager {
       agentId?: string;
       /** Subagent profile name; surfaced on task info. */
       subagentType?: string;
+      /** Live-progress probe, read by `getActivity()` while the task runs. */
+      activity?: () => BackgroundTaskActivity | undefined;
     } = {},
   ): string {
     if (opts.reservation) {
@@ -1045,6 +1112,7 @@ export class BackgroundProcessManager {
       // handle.profileName.
       agentId: opts.agentId ?? taskId,
       subagentType: opts.subagentType ?? 'agent',
+      activityProbe: opts.activity,
       // Dummy JianProcess — agent tasks are Promise-based, not process-based
       proc: {
         stdin: { write: () => false, end: () => {} } as never,
@@ -1134,6 +1202,15 @@ export class BackgroundProcessManager {
         // and stopRequested cases where a non-abort failure won the
         // race): generic failure. `timedOut` stays unset so consumers
         // can distinguish this from a true external deadline.
+        //
+        // The message goes into the task's output first — but only while the
+        // task is still unresolved. A stop or a deadline that already
+        // finalized this task keeps its verdict: its log must not end up
+        // presenting a cancellation with a failure diagnosis.
+        const message = error instanceof Error ? error.message : String(error);
+        if (!TERMINAL_STATUSES.has(entry.status) && message.length > 0) {
+          this.appendOutput(entry, `[agent error] ${message}\n`);
+        }
         await this.finalizeTerminal(entry, 'failed', 1);
       })
       .finally(() => {
@@ -1281,7 +1358,7 @@ export class BackgroundProcessManager {
   private persistLive(entry: ManagedProcess): Promise<void> {
     if (this.sessionDir === undefined) return Promise.resolve();
     const sessionDir = this.sessionDir;
-    const isAgentTask = entry.taskId.startsWith('agent-');
+    const isAgentTask = isAgentTaskId(entry.taskId);
     const task: PersistedTask = {
       task_id: entry.taskId,
       command: entry.command,

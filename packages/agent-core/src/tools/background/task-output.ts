@@ -10,6 +10,13 @@
  * For terminal tasks the output also surfaces why the task ended:
  * `timed_out` when an agent task was aborted by its deadline, and
  * `stop_reason` when the task was explicitly stopped via `TaskStop`.
+ *
+ * For a *running* agent task the report carries `elapsed_seconds`, the
+ * remaining deadline, and the live counters counted from the child's own
+ * event stream (`subagent_steps` / `subagent_tool_calls`), and it says plainly
+ * that an empty log is normal. An agent task writes its log once, on
+ * settlement, so `output_size_bytes` carries no liveness information — reading
+ * it as one invites killing a child that is working.
  */
 
 import { z } from 'zod';
@@ -18,7 +25,9 @@ import type { BuiltinTool } from '../../agent/tool';
 import type { ExecutableToolResult, ToolExecution } from '../../loop/types';
 import {
   isBackgroundTaskTerminal,
+  isAgentTaskId,
   type BackgroundProcessManager,
+  type BackgroundTaskActivity,
   type BackgroundTaskStatus,
 } from './manager';
 import { toInputJsonSchema } from '../support/input-schema';
@@ -114,6 +123,46 @@ export class TaskOutputTool implements BuiltinTool<TaskOutputInput> {
       `description: ${current.description}`,
       `command: ${current.command}`,
     ];
+    // Agent tasks: elapsed time, the deadline the task will end on, and the
+    // live counters sampled from the child's own history. An agent task
+    // writes its log once, on settlement, so these counters (not the byte
+    // count) are the only reading of a running child. `isAgentTaskId` is the
+    // same discriminator persistence and notifications use, so the three
+    // surfaces cannot disagree about what kind of task this is.
+    const agentTask = isAgentTaskId(current.taskId);
+    const running = !isBackgroundTaskTerminal(current.status);
+    // Hoisted out of the block below: `next_step` must only tell the reader to
+    // compare counters that this same report actually carries.
+    let activity: BackgroundTaskActivity | undefined;
+    if (agentTask) {
+      const endedAt = current.endedAt ?? Date.now();
+      lines.push(
+        `elapsed_seconds: ${String(Math.max(0, Math.round((endedAt - current.startedAt) / 1000)))}`,
+      );
+      const deadlineMs = current.timeoutMs ?? 0;
+      if (running && deadlineMs > 0) {
+        const remaining = Math.max(
+          0,
+          Math.round((current.startedAt + deadlineMs - Date.now()) / 1000),
+        );
+        lines.push(`deadline_seconds_remaining: ${String(remaining)}`);
+      }
+      activity = running ? this.manager.getActivity(current.taskId) : undefined;
+      if (activity !== undefined) {
+        lines.push(
+          `subagent_steps: ${String(activity.steps)}`,
+          `subagent_tool_calls: ${String(activity.toolCalls)}`,
+        );
+      } else if (running) {
+        // Silence here would undo the point of this report: the reader must
+        // know the sample is missing, not mistake its absence for zero.
+        lines.push(
+          'subagent_steps: unavailable',
+          'subagent_steps_note: the child could not be sampled (no activity probe, or it failed), ' +
+            'so this report carries no progress reading — wait for the completion notification.',
+        );
+      }
+    }
     if (output.outputPath !== undefined) {
       lines.push(`output_path: ${output.outputPath}`);
     }
@@ -137,6 +186,15 @@ export class TaskOutputTool implements BuiltinTool<TaskOutputInput> {
       `output_preview_bytes: ${String(output.previewBytes)}`,
       `output_truncated: ${String(output.truncated)}`,
     );
+    // Say why the log is empty while an agent task runs. Without this the
+    // bytes line reads as "started, produced nothing" — the exact misreading
+    // that gets a healthy subagent stopped for being "stuck".
+    if (running && agentTask && output.outputSizeBytes === 0) {
+      lines.push(
+        'output_pending: A subagent writes its log only when it finishes, so an empty log is a ' +
+          'running child\'s normal state. output_size_bytes carries no liveness information.',
+      );
+    }
     // The full, never-truncated log is readable from disk via the `Read`
     // tool whenever it was persisted. Surface that guidance unconditionally
     // — even when the preview already shows everything — so the model knows
@@ -157,6 +215,15 @@ export class TaskOutputTool implements BuiltinTool<TaskOutputInput> {
       );
     } else {
       lines.push('full_output_available: false');
+    }
+
+    if (running && agentTask && activity !== undefined) {
+      lines.push(
+        'next_step: The completion arrives automatically in a later turn; this read is a progress ' +
+          'sample, not a watchdog. One sample cannot show progress — compare subagent_steps with a ' +
+          'later one. A child whose deadline is set is reaped by it, and stopping a task is a ' +
+          'decision for the user, never a way to check whether it is alive.',
+      );
     }
 
     // When the preview omits the head of the log, emit an explicit

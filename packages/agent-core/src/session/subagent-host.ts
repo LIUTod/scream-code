@@ -204,8 +204,80 @@ export type SubagentHandle = {
   readonly completion: Promise<SubagentCompletion>;
 };
 
+/**
+ * Live progress of a running child, as counted from its own event stream.
+ *
+ * Exists because the parent's only other window into a background child is its
+ * task entry, and an agent task writes no output until it settles — so "no
+ * output" is indistinguishable from "no progress" unless something counts the
+ * child. Both fields are cumulative and per run: compare two samples, never
+ * judge one.
+ */
+export type SubagentActivity = {
+  /** Model steps started so far (`turn.step.started`). */
+  readonly steps: number;
+  /** Tool calls started so far (`tool.call.started`). */
+  readonly toolCalls: number;
+};
+
+/** Mutable counters behind one `SubagentActivity` sample. */
+type ActivityCounters = { steps: number; toolCalls: number };
+
+/**
+ * Live step/tool counters for the children a host runs, fed by each child's own
+ * event bus.
+ *
+ * Event-fed rather than history-scanned, for the same reason the counters exist
+ * at all: a parent reads them to decide whether a quiet child is alive, so a
+ * number that lies in the safe direction is still a lie. A full compaction folds
+ * earlier turns into one summary message, so a history count would *drop*
+ * mid-run and read as a stall; step and tool events are append-only facts that
+ * only ever add up.
+ *
+ * Counters are per run, not per conversation: `release` drops them with the run,
+ * so a resume reports the work it started with rather than the total of a
+ * conversation whose result the parent already read.
+ */
+export class SubagentActivityTracker {
+  private readonly counters = new Map<string, ActivityCounters>();
+  private readonly subscriptions = new Map<string, () => void>();
+
+  /** Start counting `childId`; re-tracking replaces the previous subscription. */
+  track(child: Pick<Agent, 'eventBus'>, childId: string): void {
+    this.release(childId);
+    const counters: ActivityCounters = { steps: 0, toolCalls: 0 };
+    this.counters.set(childId, counters);
+    const offStep = child.eventBus.subscribe('turn.step.started', () => {
+      counters.steps += 1;
+    });
+    const offTool = child.eventBus.subscribe('tool.call.started', () => {
+      counters.toolCalls += 1;
+    });
+    this.subscriptions.set(childId, () => {
+      offStep();
+      offTool();
+    });
+  }
+
+  /** A copy of the counters, or `undefined` when nothing is tracked. */
+  sample(childId: string): SubagentActivity | undefined {
+    const counters = this.counters.get(childId);
+    if (counters === undefined) return undefined;
+    return { steps: counters.steps, toolCalls: counters.toolCalls };
+  }
+
+  /** Stop counting and forget the counters — the child's run is over. */
+  release(childId: string): void {
+    this.subscriptions.get(childId)?.();
+    this.subscriptions.delete(childId);
+    this.counters.delete(childId);
+  }
+}
+
 export class SessionSubagentHost {
   private readonly activeChildren = new Map<string, ActiveChild>();
+  /** Per-run step/tool counters, fed by each child's own event bus. */
+  private readonly activity = new SubagentActivityTracker();
   /** Per-turn budget (≤4 accepted) for child→parent collaboration requests. */
   private readonly childRequestCounts = new Map<string, number>();
   /** Dedupe keys seen within the current turn, per child. */
@@ -272,6 +344,18 @@ export class SessionSubagentHost {
     return alias.trim();
   }
 
+  /**
+   * Sample a live child's progress, or `undefined` once it is gone (released at
+   * the end of its run) or was never tracked.
+   *
+   * The pair is cumulative for the current run: one sample says "this child has
+   * done N steps", and only two samples taken apart can show that N is still
+   * growing.
+   */
+  liveActivity(agentId: string): SubagentActivity | undefined {
+    return this.activity.sample(agentId);
+  }
+
   async spawn(profileName: string, options: RunSubagentOptions): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
 
@@ -290,6 +374,7 @@ export class SessionSubagentHost {
     // still answer once this child is evicted, because the Agent tool reads it
     // to validate the parent's `spawns` whitelist on the resume path.
     this.childProfiles.set(id, profile.name);
+    this.activity.track(agent, id);
     // RLM recursion depth: every spawned child starts one level deeper than
     // its spawner — the counter lives on the agent instance, not the process,
     // and is incremented on every spawn (whether the spawn came from the RLM
@@ -369,6 +454,7 @@ export class SessionSubagentHost {
 
     const profileName = child.config.profileName ?? 'subagent';
     this.childProfiles.set(agentId, profileName);
+    this.activity.track(child, agentId);
     // Resume is a spawn by another name, so it must clear the same `spawns`
     // whitelist the Agent tool enforces on the spawn path — from one source of
     // truth (`spawnWhitelistFor`, the expression agent/tool/index.ts derives
@@ -578,6 +664,10 @@ export class SessionSubagentHost {
       this.childRequestCounts.delete(terminal.childId);
       this.childRequestSeen.delete(terminal.childId);
       this.parentMessageSeen.delete(terminal.childId);
+      // The counters describe this run: the subscription goes with the child
+      // that fed it (a resumed child is a new Agent instance with a new bus),
+      // and a stale subscription on a reused instance would double-count.
+      this.activity.release(terminal.childId);
       // A wake-up registration cannot outlive its child's run: the completion
       // leg settles the Agent tool's race anyway, and dropping the entry here
       // covers every exit path (completion, failure, abort) even when no

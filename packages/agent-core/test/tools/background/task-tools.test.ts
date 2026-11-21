@@ -1218,3 +1218,176 @@ describe('TaskStopTool on running agents', () => {
 
 // Reuse imports from the top of the file. The helper-suite needs
 // mkdtemp/tmpdir/join — already imported at the top.
+
+// An agent task's log is written once, on settlement — so "no output yet" and
+// "no progress" look identical unless the tool samples the child. These pin
+// the reading that replaced the byte count, and the refusal to let a running
+// child's empty log read as a stall.
+describe('TaskOutputTool — a running agent task', () => {
+  it('reports live counters and names the empty log as normal', async () => {
+    const manager = new BackgroundProcessManager();
+    let finish!: (value: { result: string }) => void;
+    try {
+      // Settled at the end of the test: an armed deadline timer outlives
+      // `_reset()` (which clears maps only), so a never-settling completion
+      // would leave a 10-minute handle behind for the whole suite.
+      const completion = new Promise<{ result: string }>((resolve) => {
+        finish = resolve;
+      });
+      const taskId = manager.registerAgentTask(completion, 'review the diff', {
+        timeoutMs: 600_000,
+        agentId: 'agent-running',
+        subagentType: 'reviewer',
+        activity: () => ({ steps: 4, toolCalls: 11 }),
+      });
+
+      const result = await executeTool(
+        new TaskOutputTool(manager),
+        context('c_agent_running', { task_id: taskId }),
+      );
+      expect(result.isError).toBe(false);
+      const content = toolContentString(result);
+
+      expect(content).toContain('status: running');
+      expect(content).toContain('subagent_steps: 4');
+      expect(content).toContain('subagent_tool_calls: 11');
+      expect(content).toMatch(/^elapsed_seconds: \d+$/m);
+      expect(content).toMatch(/^deadline_seconds_remaining: \d+$/m);
+      expect(content).toContain('output_size_bytes: 0');
+      // The zero is explained where it is printed, and the tool refuses to let
+      // it read as a stall — the misreading that got two working subagents
+      // stopped for being "stuck".
+      expect(content).toContain('output_pending:');
+      expect(content).toContain('no liveness information');
+      expect(content).toContain('next_step:');
+      expect(content).toContain('compare subagent_steps');
+
+      finish({ result: 'late result' });
+      await expect(manager.wait(taskId, 5_000)).resolves.toMatchObject({ status: 'completed' });
+    } finally {
+      manager._reset();
+    }
+  });
+
+  it('drops the counters and the caveats once the task settles', async () => {
+    const manager = new BackgroundProcessManager();
+    try {
+      const taskId = manager.registerAgentTask(Promise.resolve({ result: 'done' }), 'finished child', {
+        agentId: 'agent-done',
+        activity: () => ({ steps: 9, toolCalls: 9 }),
+      });
+      await expect(manager.wait(taskId, 5_000)).resolves.toMatchObject({ status: 'completed' });
+
+      const content = toolContentString(
+        await executeTool(new TaskOutputTool(manager), context('c_agent_done', { task_id: taskId })),
+      );
+
+      expect(content).toContain('status: completed');
+      // A finished run's counters are worthless: its result is in the log.
+      expect(content).not.toContain('subagent_steps:');
+      expect(content).not.toContain('output_pending:');
+      expect(content).not.toContain('deadline_seconds_remaining:');
+      expect(content).toContain('[output]\ndone');
+    } finally {
+      manager._reset();
+    }
+  });
+
+  it('keeps the failure reason of a failed agent task in its log', async () => {
+    const manager = new BackgroundProcessManager();
+    try {
+      const taskId = manager.registerAgentTask(Promise.reject(new Error('child turn blew up')), 'doomed child', {
+        agentId: 'agent-failed',
+      });
+      await expect(manager.wait(taskId, 5_000)).resolves.toMatchObject({ status: 'failed' });
+
+      const content = toolContentString(
+        await executeTool(
+          new TaskOutputTool(manager),
+          context('c_agent_failed', { task_id: taskId }),
+        ),
+      );
+      expect(content).toContain('status: failed');
+      // The status alone is not a diagnosis: for an agent task the child's
+      // error is the only evidence there is, and it must reach the log.
+      expect(content).toContain('[agent error] child turn blew up');
+    } finally {
+      manager._reset();
+    }
+  });
+
+  it('says the sample is unavailable rather than printing nothing', async () => {
+    const manager = new BackgroundProcessManager();
+    try {
+      const bashTask = manager.register(immediateProcess(0), 'sleep 0', 'shell task');
+      const agentTask = manager.registerAgentTask(
+        new Promise<{ result: string }>(() => {}),
+        'broken probe',
+        {
+          agentId: 'agent-broken',
+          activity: () => {
+            throw new Error('probe failed');
+          },
+        },
+      );
+
+      expect(manager.getActivity(bashTask)).toBeUndefined();
+      // Diagnostics only: a failing probe must not fail the progress read.
+      expect(manager.getActivity(agentTask)).toBeUndefined();
+
+      const content = toolContentString(
+        await executeTool(
+          new TaskOutputTool(manager),
+          context('c_probe_throws', { task_id: agentTask }),
+        ),
+      );
+      expect(content).toContain('status: running');
+      expect(content).toContain('output_pending:');
+      // A missing sample is stated, never left as a silent gap — and the
+      // "compare two samples" advice is withheld, because this report has
+      // none to compare.
+      expect(content).toContain('subagent_steps: unavailable');
+      expect(content).toContain('subagent_steps_note:');
+      expect(content).not.toContain('next_step:');
+    } finally {
+      manager._reset();
+    }
+  });
+
+  it('keeps the stop verdict when a rejection lands after it', async () => {
+    // 1ms grace: the stop path waits out the kill grace before it finalizes.
+    const manager = new BackgroundProcessManager({ killGracePeriodMs: 1 });
+    let rejectCompletion!: (error: unknown) => void;
+    try {
+      const completion = new Promise<{ result: string }>((_resolve, reject) => {
+        rejectCompletion = reject;
+      });
+      const taskId = manager.registerAgentTask(completion, 'stopped child', {
+        agentId: 'agent-stopped',
+      });
+      // The child never settles on its own, so the stop is what ends it.
+      await expect(manager.stop(taskId, 'operator cancelled')).resolves.toMatchObject({
+        status: 'killed',
+      });
+
+      // A model/network failure that loses the race must not rewrite history:
+      // an earlier registration of the same rejection used to append a failure
+      // diagnosis to a task already marked cancelled.
+      rejectCompletion(new Error('model call failed'));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const content = toolContentString(
+        await executeTool(
+          new TaskOutputTool(manager),
+          context('c_stop_race', { task_id: taskId }),
+        ),
+      );
+      expect(content).toContain('status: killed');
+      expect(content).toContain('stop_reason: operator cancelled');
+      expect(content).not.toContain('[agent error]');
+    } finally {
+      manager._reset();
+    }
+  });
+});

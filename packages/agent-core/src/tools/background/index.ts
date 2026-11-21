@@ -2,8 +2,9 @@
  * Background task management tools barrel.
  */
 
-export { BackgroundProcessManager, generateTaskId } from './manager';
+export { BackgroundProcessManager, generateTaskId, isAgentTaskId } from './manager';
 export type {
+  BackgroundTaskActivity,
   BackgroundTaskInfo,
   BackgroundTaskKind,
   BackgroundTaskOutputSnapshot,

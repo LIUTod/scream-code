@@ -4,6 +4,7 @@ import type { Agent } from '../..';
 import {
   BackgroundProcessManager,
   type BackgroundTaskInfo,
+  isAgentTaskId,
   isBackgroundTaskTerminal,
   type ReconcileResult,
 } from '../../tools/builtin';
@@ -284,14 +285,6 @@ export class BackgroundManager extends BackgroundProcessManager {
 
 function notificationKey(origin: BackgroundTaskOrigin): string {
   return `${origin.taskId}\0${origin.status}\0${origin.notificationId}`;
-}
-
-/**
- * Agent-class tasks are the ones registered through `registerAgentTask`; their
- * ids carry the `agent-` prefix (generateTaskId in tools/background/manager).
- */
-function isAgentTaskId(taskId: string): boolean {
-  return taskId.startsWith('agent-');
 }
 
 /**
