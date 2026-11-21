@@ -95,6 +95,11 @@ export const DEFAULT_AUTO_APPROVE_TOOLS: ReadonlySet<string> = new Set([
   'TaskList',
   'TaskOutput',
   'CronList',
+  // The job ledger is the same kind of read as TaskList / CronList above. It was
+  // absent, so ask mode sent `JobList` to the approval prompt — which in a
+  // background report job (ask mode, no approval handler) is not a question but
+  // a refusal, and the run had to fall back to reading `host/jobs.json` by hand.
+  'JobList',
   'WebSearch',
   'PaperSearch',
   'FetchURL',

@@ -1,6 +1,7 @@
 import type { Agent } from '../..';
 import type { PermissionPolicy } from '../types';
 import { AskModeGuardDenyPermissionPolicy } from './ask-mode-guard-deny';
+import { AskModeReadOnlyApprovePermissionPolicy } from './ask-mode-readonly-approve';
 import { AskModeReadOnlyMcpApprovePermissionPolicy } from './ask-mode-readonly-mcp-approve';
 import { AutoModeApprovePermissionPolicy } from './auto-mode-approve';
 import { AutoModeAskUserQuestionDenyPermissionPolicy } from './auto-mode-ask-user-question-deny';
@@ -119,6 +120,13 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     // default-approve list so a helper that declares itself destructive still asks; auto/
     // yolo approve earlier in the chain and user/session grants run above this point.
     new DestructiveHintAskPermissionPolicy(),
+    // Ask mode: the catalog's read-only tools run without a prompt. Sits this low on
+    // purpose — user rules, sensitive-file access, outside-cwd paths and destructive
+    // hints all run above it, so it approves only what none of them flagged. Without it
+    // a background report job (ask mode, no approval handler) silently lost ReadGroup /
+    // AstGrep / MemoryLookup / KnowledgeLookup and every other read tool the legacy
+    // default-approve list never carried.
+    new AskModeReadOnlyApprovePermissionPolicy(agent),
     // Tool is in the default-approve list (read-only / UI helpers) → approve.
     new DefaultToolApprovePermissionPolicy(),
     // ManagePlugin's read-only actions (list/info/check/marketplace) → approve. Mutating

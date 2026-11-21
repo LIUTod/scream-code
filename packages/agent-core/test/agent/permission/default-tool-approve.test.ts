@@ -35,6 +35,13 @@ describe('DefaultToolApprovePermissionPolicy', () => {
     expect(policy.evaluate(policyContext('CronList', {}))).toEqual({ kind: 'approve' });
   });
 
+  it('auto-approves JobList', () => {
+    // The job ledger is read-only and argument-free, exactly like CronList. It
+    // was missing here, so ask mode prompted for it — and a background report
+    // job has no approval handler, which made a read an unanswerable refusal.
+    expect(policy.evaluate(policyContext('JobList', {}))).toEqual({ kind: 'approve' });
+  });
+
   it('does not approve CronCreate', () => {
     expect(
       policy.evaluate(policyContext('CronCreate', { cron: '*/5 * * * *', prompt: 'ping' })),

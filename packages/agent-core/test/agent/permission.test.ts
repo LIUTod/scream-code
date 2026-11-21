@@ -720,6 +720,7 @@ describe('Permission policy chain', () => {
       'cwd-outside-file-write-ask',
       'wolfpack-mode-approve',
       'destructive-hint-ask',
+      'ask-mode-readonly-approve',
       'default-tool-approve',
       'manage-plugin-read-only-approve',
       'git-cwd-write-approve',
