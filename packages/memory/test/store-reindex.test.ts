@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryMemoStore } from '../src/store.js';
 import { createMemoryMemo } from '../src/models.js';
 import { EMBEDDING_TEXT_VERSION, type EmbeddingEngine } from '../src/embeddings.js';
+import { DatabaseSync } from 'node:sqlite';
 
 /**
  * The bookkeeping a dream pass depends on: vectors that can be re-derived after
@@ -76,6 +77,29 @@ describe('memory store — dream bookkeeping', () => {
     // A second call has nothing left to do — the row carries the current text
     // version, so it is neither missing nor stale.
     await expect(store.backfillMissingEmbeddings({ limit: 10 })).resolves.toBe(0);
+  });
+
+  it('re-embeds a row written from the old text shape', async () => {
+    // A distilled rule only reaches recall if a row from the previous text
+    // shape is actually rebuilt — the flush used to treat "has a row" as done
+    // and left every pre-existing memo on the old text forever.
+    store.setEmbeddingEngine(fakeEngine());
+    await store.append(memo('stale'));
+    await settle();
+
+    const db = new DatabaseSync(join(tmpDir, 'memory', 'memos.sqlite'));
+    db.exec('UPDATE memory_embeddings SET text_version = 1');
+    db.close();
+
+    await expect(store.backfillMissingEmbeddings({ limit: 10 })).resolves.toBe(1);
+    await settle();
+
+    const check = new DatabaseSync(join(tmpDir, 'memory', 'memos.sqlite'));
+    const row = check.prepare('SELECT text_version AS version FROM memory_embeddings WHERE memory_id = ?').get('stale') as
+      | { version: number }
+      | undefined;
+    check.close();
+    expect(row?.version).toBe(EMBEDDING_TEXT_VERSION);
   });
 
   it('marks memos as looked at, which is what makes a later pass incremental', async () => {

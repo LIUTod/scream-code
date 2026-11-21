@@ -54,12 +54,21 @@ const InductionSchema = z.object({
 });
 
 const ConsolidationApplySchema = z.object({
-  merges: z.array(MergeSchema).max(8).describe('Near-duplicate groups to fold into one memory each.'),
-  distillations: z.array(DistillationSchema).max(15).describe('Existing memories that gain a rule.'),
+  merges: z
+    .array(MergeSchema)
+    .max(8)
+    .optional()
+    .describe('Near-duplicate groups to fold into one memory each. Omit when there are none.'),
+  distillations: z
+    .array(DistillationSchema)
+    .max(15)
+    .optional()
+    .describe('Existing memories that gain a rule. Omit when there are none.'),
   inductions: z
     .array(InductionSchema)
     .max(4)
-    .describe('New rules induced from several related memories; sources stay untouched.'),
+    .optional()
+    .describe('New rules induced from several related memories; sources stay untouched. Omit when there are none.'),
 });
 
 export type MemoryConsolidateApplyInput = z.infer<typeof ConsolidationApplySchema>;
@@ -142,13 +151,13 @@ export class MemoryConsolidateApplyTool implements BuiltinTool<MemoryConsolidate
         }
 
         const result = await applyConsolidation(store, {
-          merges: args.merges.map((merge) => ({
+          merges: (args.merges ?? []).map((merge) => ({
             memoIds: merge.memoIds,
             merged: merge.merged,
             ...(merge.allowSupersede === true ? { allowSupersede: true } : {}),
           })),
-          distillations: args.distillations,
-          inductions: args.inductions,
+          distillations: args.distillations ?? [],
+          inductions: args.inductions ?? [],
         });
         await this.agent.dreamTracker.recordDream();
 
@@ -160,9 +169,9 @@ export class MemoryConsolidateApplyTool implements BuiltinTool<MemoryConsolidate
         const skipped = result.skipped.length === 0
           ? ''
           : ` Skipped ${result.skipped.length}: ${result.skipped
-              .slice(0, 5)
+              .slice(0, 10)
               .map((entry) => `${entry.id} (${entry.reason})`)
-              .join('; ')}${result.skipped.length > 5 ? '; …' : ''}`;
+              .join('; ')}${result.skipped.length > 10 ? '; …' : ''}`;
         const mergedIds = result.merged.map((entry) => entry.mergeId).join(', ');
         return {
           isError: false,

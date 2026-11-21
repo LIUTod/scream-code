@@ -1299,13 +1299,17 @@ export class MemoryMemoStore {
       await this.init();
       if (this.db === undefined) return;
 
-      // Collect memos that still need embeddings.
+      // Collect memos that still need embeddings. A row written from an older
+      // text shape counts as missing: the backfill queues those ids on purpose,
+      // and skipping them here (any row at all was treated as done) is why a
+      // distilled rule never reached the vector of an existing memo.
       const pending: Array<{ id: string; text: string }> = [];
+      const readVersion = this.db.prepare(
+        'SELECT text_version AS version FROM memory_embeddings WHERE memory_id = ?',
+      );
       for (const id of ids) {
-        const row = this.db
-          .prepare('SELECT 1 FROM memory_embeddings WHERE memory_id = ?')
-          .get(id);
-        if (row !== undefined) continue; // Already has embedding
+        const row = readVersion.get(id) as { version: number | null } | undefined;
+        if (row !== undefined && (row.version ?? 1) >= EMBEDDING_TEXT_VERSION) continue;
 
         const memo = await this.get(id);
         if (memo !== undefined) {

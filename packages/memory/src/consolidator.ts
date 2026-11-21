@@ -146,9 +146,17 @@ const MAX_CLUSTER_MEMOS = 4;
 
 /** Character caps for the plan's summaries. The plan is handed to a model and
  * echoed back through a tool call, so its size is a correctness concern. */
+/** Serialized-plan ceiling. The loop truncates tool results above 5000 tokens
+ * and the cut lands mid-JSON — the model then cannot parse the plan at all
+ * (observed: "the output got truncated", followed by nine steps of poking the
+ * sqlite file by hand). ~2.6 characters per token on a CJK library, so 11.5k
+ * characters stays clear of the cap. */
+const PLAN_CHAR_BUDGET = 11_500;
 const CAP_NEED = 140;
 const CAP_LEAN_NEED = 90;
 const CAP_APPROACH = 130;
+/** Merge drafts keep most of the text; see trimToBudget. */
+const CAP_DRAFT_APPROACH = 1_200;
 const CAP_OUTCOME = 80;
 const CAP_RULE = 200;
 
@@ -252,7 +260,7 @@ export async function buildConsolidationPlan(
   const distillCandidates = findDistillCandidates(candidates);
   const inductionClusters = findInductionClusters(candidates, duplicateGroups);
 
-  return {
+  const plan: ConsolidationPlan = {
     version: 2,
     duplicateGroups,
     nearMisses,
@@ -268,6 +276,52 @@ export async function buildConsolidationPlan(
       distilledCount: all.filter(isDistilledRule).length,
     },
   };
+  return trimToBudget(plan);
+}
+
+/** Shrink the plan until it fits one tool result. Order of sacrifice: the
+ * weakest signal first (near misses, then induction clusters, then the tail of
+ * the distillation queue, then whole duplicate groups), so what survives is what
+ * the model can act on. */
+function trimToBudget(plan: ConsolidationPlan): ConsolidationPlan {
+  const size = (): number => Buffer.byteLength(JSON.stringify(plan), 'utf8');
+  const trim = (): boolean => {
+    if (plan.nearMisses.length > 0) {
+      plan.nearMisses = plan.nearMisses.slice(0, Math.max(0, plan.nearMisses.length - 4));
+      return true;
+    }
+    if (plan.inductionClusters.length > 1) {
+      plan.inductionClusters = plan.inductionClusters.slice(0, plan.inductionClusters.length - 1);
+      return true;
+    }
+    if (plan.distillCandidates.length > 1) {
+      plan.distillCandidates = plan.distillCandidates.slice(0, Math.ceil(plan.distillCandidates.length / 2));
+      return true;
+    }
+    if (plan.duplicateGroups.length > 1) {
+      plan.duplicateGroups = plan.duplicateGroups.slice(0, plan.duplicateGroups.length - 1);
+      return true;
+    }
+    if (plan.duplicateGroups.length === 1 && plan.duplicateGroups[0]!.memos.length > 2) {
+      const [group] = plan.duplicateGroups;
+      plan.duplicateGroups = [{ ...group!, memos: group!.memos.slice(0, -1) }];
+      return true;
+    }
+    return false;
+  };
+  let guard = 0;
+  while (size() > PLAN_CHAR_BUDGET && guard < 64) {
+    if (!trim()) break;
+    guard += 1;
+  }
+  plan.summary = {
+    ...plan.summary,
+    nearMisses: plan.nearMisses.length,
+    distillCandidates: plan.distillCandidates.length,
+    inductionClusters: plan.inductionClusters.length,
+    duplicateGroups: plan.duplicateGroups.length,
+  };
+  return plan;
 }
 
 /** Single-link clustering over stored vectors. Groups never mix in a memo that
@@ -529,7 +583,10 @@ function draftMerge(members: MemoryMemo[]): DuplicateGroup['merged'] {
   for (const memo of members) for (const tag of memo.tags ?? []) tags.add(tag);
   return {
     userNeed: clip(newest.userNeed, CAP_NEED),
-    approach: newest.approach,
+    // Long on purpose — this is what the model rewrites, and a tight clip sends
+    // it back to the database to re-read the memo. Bounded so a single huge memo
+    // cannot exceed the plan budget by itself.
+    approach: clip(newest.approach, CAP_DRAFT_APPROACH),
     outcome: newest.outcome,
     whatFailed: members.map((memo) => memo.whatFailed).find((text) => text.trim() !== 'none') ?? 'none',
     whatWorked: newest.whatWorked,
@@ -538,19 +595,19 @@ function draftMerge(members: MemoryMemo[]): DuplicateGroup['merged'] {
   };
 }
 
-/** Chinese and English both need a trigger or an action to read as a rule
- * rather than a restatement of the need. */
-const RULE_SHAPE = /当|遇到|在.+时|先|再|不要|避免|优先|用.+而|if |when |before |after |prefer |avoid |use /iu;
-
 export interface RuleCheck {
   ok: boolean;
   reason?: string;
 }
 
 /**
- * A rule has to be usable next time: short, self-contained, and phrased as
- * "in this situation, do that". A summary of what happened is not a rule, and
- * a rule nobody can act on is worse than no rule.
+ * Mechanical checks only: a rule must be short enough to embed and must not be
+ * bookkeeping about the pass itself.
+ *
+ * Deliberately *not* checked: phrasing. An earlier version demanded a trigger
+ * marker (当/在…时/先/再) and rejected 11 of 17 rules from a real pass — all of
+ * them usable, each costing a full extra tool round. Whether a sentence is a
+ * good rule is the skill's job; a regex that guesses wrong is worse than none.
  */
 export function checkRuleSentence(text: string): RuleCheck {
   const flat = text.replaceAll(/\s+/gu, ' ').trim();
@@ -559,9 +616,6 @@ export function checkRuleSentence(text: string): RuleCheck {
   if (flat.length < 8) return { ok: false, reason: 'too short to carry a condition and an action' };
   if (/合并\s*\d+\s*条|综上|合并了|\d+\s*条相关记录/iu.test(flat)) {
     return { ok: false, reason: 'contains bookkeeping wording instead of a rule' };
-  }
-  if (!RULE_SHAPE.test(flat)) {
-    return { ok: false, reason: 'does not name a trigger or an action (当…/遇到…/先…/避免…)' };
   }
   return { ok: true };
 }
@@ -740,14 +794,11 @@ export async function applyConsolidation(
     result.induced.push(induced.id);
   }
 
-  // One pass = one look at everything that was pending. Marking the whole
-  // pending set (not just what changed) is what makes the next run incremental:
-  // otherwise the same items would be proposed forever.
-  const pending: string[] = [];
-  for await (const memo of store.read()) {
-    if (memo.dreamedAt === undefined || memo.recordedAt > memo.dreamedAt) pending.push(memo.id);
-  }
-  await store.markDreamed(pending);
+  // Stamp only what this pass actually handled. Marking everything pending
+  // would let an empty or fully-rejected call swallow the whole backlog — the
+  // next runs would propose nothing and /dream would look broken. Anything not
+  // acted on stays pending and comes back next time.
+  await store.markDreamed([...claimed, ...result.distilled, ...result.induced]);
 
   return result;
 }

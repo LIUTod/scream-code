@@ -165,15 +165,50 @@ describe('/dream plan', () => {
     expect(cluster?.memos).toHaveLength(3);
   });
 
-  it('is incremental: a second run has nothing left to look at', async () => {
+  it('is incremental: what a pass handled does not come back', async () => {
     await store.append(makeMemo('x', { recordedAt: Date.now() - 20 * 24 * 60 * 60 * 1000 }));
     const first = await buildConsolidationPlan(store);
     expect(first.distillCandidates).toHaveLength(1);
 
-    await applyConsolidation(store, { merges: [], distillations: [], inductions: [] });
+    await applyConsolidation(store, {
+      merges: [],
+      distillations: [{ memoId: 'x', distilled: '当遇到这类需要时，先用现有工具确认一遍' }],
+      inductions: [],
+    });
     const second = await buildConsolidationPlan(store);
     expect(second.summary.unseen).toBe(0);
     expect(second.distillCandidates).toHaveLength(0);
+  });
+
+  it('does not consume the backlog when a pass applies nothing', async () => {
+    // An accidental empty call (or one where every entry was rejected) must not
+    // stamp the whole library as seen — /dream would then look permanently
+    // empty while nothing had been done.
+    await store.append(makeMemo('pending', { recordedAt: Date.now() - 20 * 24 * 60 * 60 * 1000 }));
+    await applyConsolidation(store, { merges: [], distillations: [], inductions: [] });
+    const again = await buildConsolidationPlan(store);
+    expect(again.summary.unseen).toBe(1);
+    expect(again.distillCandidates).toHaveLength(1);
+  });
+
+  it('stays inside the budget even with long merge drafts', async () => {
+    // A merge draft keeps the newest memo's approach in full (a clipped draft
+    // sends the model back to the database), so the budget has to survive
+    // several large groups, not just trimmed summaries.
+    const vectors = new Map<string, Float32Array>();
+    const engine = makeEngine(new Map());
+    const long = '这是一段刻意写得很长的做法描述，用来模拟真实记忆里动辄几百字的正文。'.repeat(12);
+    for (let g = 0; g < 5; g += 1) {
+      for (let i = 0; i < 4; i += 1) {
+        const id = `g${g}-${i}`;
+        await store.append(makeMemo(id, { userNeed: `第 ${g} 类问题`, approach: long, whatWorked: long }));
+        vectors.set(id, g === 0 ? vec(1, 0, 0) : g === 1 ? vec(0, 1, 0) : g === 2 ? vec(0, 0, 1) : g === 3 ? vec(1, 1, 0) : vec(0, 1, 1));
+      }
+    }
+    const plan = await buildConsolidationPlan(store, { vectors, engine, includeSeen: true });
+    const json = JSON.stringify(plan);
+    expect(json.length).toBeLessThanOrEqual(11_500);
+    expect(() => JSON.parse(json) as unknown).not.toThrow();
   });
 
   it('keeps the plan small enough to be handed back through a tool call', async () => {
@@ -190,11 +225,13 @@ describe('/dream plan', () => {
       );
     }
     const plan = await buildConsolidationPlan(store, { includeSeen: true });
-    const bytes = Buffer.byteLength(JSON.stringify(plan), 'utf8');
-    // The old planner serialized 87 memos to 254 KB (~85k tokens), which no
-    // model could echo back as tool arguments — that was the reported error.
-    // Caps keep this constant as the library grows.
-    expect(bytes).toBeLessThan(16 * 1024);
+    const json = JSON.stringify(plan);
+    // Two separate ceilings: the old planner serialized 87 memos to 254 KB, and
+    // the loop truncates any tool result above 5000 tokens — a cut landing in
+    // the middle of the JSON leaves the model with an unparsable plan.
+    expect(json.length).toBeLessThanOrEqual(11_500);
+    expect(Math.round(json.length / 2.6)).toBeLessThan(5000);
+    expect(() => JSON.parse(json) as unknown).not.toThrow();
   });
 });
 
@@ -330,7 +367,7 @@ describe('/dream apply', () => {
     const result = await applyConsolidation(store, {
       merges: [{ memoIds: ['missing-1', 'missing-2'], merged: {} as never }],
       distillations: [
-        { memoId: 'ok', distilled: '太短' },
+        { memoId: 'ok', distilled: '合并 2 条相关记录' },
         { memoId: 'nope', distilled: '当遇到情况时先做一件事' },
       ],
       inductions: [{ topic: 't', sourceMemoIds: ['a', 'b'], rule: { userNeed: 'n', approach: 'a', distilled: '当 x 时先 y' } }],
@@ -347,15 +384,24 @@ describe('/dream apply', () => {
 });
 
 describe('checkRuleSentence', () => {
-  it('accepts a rule with a trigger and an action', () => {
-    expect(checkRuleSentence('当部署报 404 时先等两分钟再重试').ok).toBe(true);
-    expect(checkRuleSentence('When the build fails, check the lockfile first').ok).toBe(true);
+  it('rejects only empty, oversized, or bookkeeping entries', () => {
+    // Phrasing is the skill's business: a real pass produced 17 usable rules in
+    // styles this validator used to reject, and each rejection cost a round.
+    expect(checkRuleSentence('合并 3 条相关记录。最新方案: 用了工具').ok).toBe(false);
+    expect(checkRuleSentence('3 条相关记录').ok).toBe(false);
+    expect(checkRuleSentence('   ').ok).toBe(false);
+    expect(checkRuleSentence('x'.repeat(300)).ok).toBe(false);
   });
 
-  it('rejects a summary, bookkeeping prose, or a fragment', () => {
-    expect(checkRuleSentence('合并 3 条相关记录。最新方案: 用了工具').ok).toBe(false);
-    expect(checkRuleSentence('太短').ok).toBe(false);
-    expect(checkRuleSentence('这次任务整体还算顺利完成了目标').ok).toBe(false);
-    expect(checkRuleSentence('x'.repeat(300)).ok).toBe(false);
+  it('accepts the shapes real passes produce', () => {
+    expect(checkRuleSentence('写架构分析报告时，每条结论都给出载荷点（文件:行）并逐条亲验').ok).toBe(true);
+    expect(checkRuleSentence('记录中期备选事项时，每条都标注证据出处与现状差距').ok).toBe(true);
+    expect(checkRuleSentence('要给别人看图就用 ReadMediaFile，别直接贴本地路径').ok).toBe(true);
+    expect(checkRuleSentence('When the build fails, check the lockfile first').ok).toBe(true);
+    // Taken verbatim from a real pass: all of these were rejected by the old
+    // phrasing gate, and every rejection cost a full tool round.
+    expect(checkRuleSentence("记录架构演进等中期备选事项时，每条都标注参照侧的证据出处与自己的现状差距，将来才能快速追溯。").ok).toBe(true);
+    expect(checkRuleSentence("交付前给每条验收标准配一条可复现命令与退出码，用统一脚本汇总，总退出码 0 才算通过——别用叙述代替证据。").ok).toBe(true);
+    expect(checkRuleSentence("自查过的并发/边界缺陷往往还在，交给独立 oracle/reviewer 用突变实验与临时探针挖，并立刻固化成可一键复现的脚本。").ok).toBe(true);
   });
 });
