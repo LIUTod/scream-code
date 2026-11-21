@@ -20,6 +20,12 @@ export interface RunResult {
   /** The last turn's answer. */
   readonly text: string;
   readonly timedOut: boolean;
+  /**
+   * Why the last turn did not complete normally — the `turn.ended` reason, or
+   * the token cap — so a run that produced no text can still say what went
+   * wrong instead of recording a silent failure. Absent when it completed.
+   */
+  readonly failedReason?: string | undefined;
 }
 
 export function runPromptToEnd(
@@ -33,6 +39,7 @@ export function runPromptToEnd(
     let running = 0;
     let answer = '';
     let ok = false;
+    let failedReason: string | undefined;
     let finished = false;
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (result: RunResult): void => {
@@ -63,9 +70,21 @@ export function runPromptToEnd(
         running = Math.max(0, running - 1);
         const ended = event as { reason?: string; tokenCapReached?: unknown };
         ok = ended.reason === 'completed' && ended.tokenCapReached === undefined;
+        // Kept for the caller: a run with no answer and no reason is a failure
+        // nobody can act on, and the next run inherits the same silence.
+        failedReason = ok
+          ? undefined
+          : ended.tokenCapReached === undefined
+            ? `the turn ended with reason '${ended.reason ?? 'unknown'}'`
+            : 'the turn ended at the token cap';
         if (running === 0) {
           settleTimer = setTimeout(() => {
-            finish({ ok, text: answer, timedOut: false });
+            finish({
+              ok,
+              text: answer,
+              timedOut: false,
+              ...(failedReason === undefined ? {} : { failedReason }),
+            });
           }, settleMs);
         }
       }

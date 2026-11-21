@@ -296,6 +296,12 @@ export class JobRunner {
       ok = result.ok;
       summary = result.text.trim().slice(-SUMMARY_CHARS);
       if (result.timedOut) summary = `${summary}\n(Stopped: the run went past its time limit.)`.trim();
+      // A run that failed without producing text used to leave `/jobs` with
+      // `ok: false`, an empty summary and no error — a failure the person could
+      // not act on and the next run inherited as an empty note. Name it.
+      if (!ok && summary.length === 0 && !result.timedOut) {
+        summary = `(Run failed without an answer: ${result.failedReason ?? 'no reason reported'})`;
+      }
       if (job.until.kind === 'outcome') {
         outcomeReached = (await session.getGoal().catch(() => ({ goal: null }))).goal?.status === 'complete';
       }

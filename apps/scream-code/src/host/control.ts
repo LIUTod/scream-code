@@ -65,6 +65,13 @@ export interface HostStatus {
   startedAt?: number;
   /** Found through the pidfile of a release that predates the lock. */
   legacy?: boolean;
+  /**
+   * Whether the running host was launched by the resident service
+   * (`SCREAM_CODE_HOST_SERVICE=1`). Absent for hosts that predate the flag.
+   */
+  service?: boolean;
+  /** The build the running host loaded; absent for hosts that predate the flag. */
+  version?: string;
 }
 
 export function getHostDir(): string {
@@ -108,9 +115,15 @@ export async function claimHostLock(
 export async function readHostStatus(): Promise<HostStatus> {
   const query = await queryProcessLock(lockOptions());
   if (query.held) {
+    const info = query.holder?.info;
     return {
       running: true,
       ...(query.holder === undefined ? {} : { pid: query.holder.pid, startedAt: query.holder.startedAt }),
+      // Read back what the host stamped when it claimed the lock: whether the
+      // service launched it, and which build it loaded. Both absent for hosts
+      // older than these flags, which is itself the signal that it is old.
+      ...(info?.['service'] === true ? { service: true } : {}),
+      ...(typeof info?.['version'] === 'string' ? { version: info['version'] } : {}),
     };
   }
   const legacyPid = await readLegacyPid();

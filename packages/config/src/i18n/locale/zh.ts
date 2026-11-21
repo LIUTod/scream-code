@@ -1591,6 +1591,8 @@ export const zh: Record<string, string> = {
   'service.off_detail': '关掉终端后，后台任务和飞书/微信照样继续；但电脑重启后，它们要等你下次打开终端才会恢复。开启常驻后，登录就会自动起来。',
   'service.enable': '开启常驻（{when}；重启后自动接着干）',
   'service.state_running': '● 运行中 · {when} · 已运行 {uptime}',
+  'service.stale_build': '● 运行中：{running}；已安装 {installed} —— 运行 scream host restart 后生效',
+  'service.build_unstamped': '● 运行中的后台服务无法确认版本；已安装 {installed}',
   'service.state_stopped': '● 已开启 · {when} · 后台服务现在没在运行',
   'service.when_login': '登录后自启',
   'service.when_boot': '开机自启',

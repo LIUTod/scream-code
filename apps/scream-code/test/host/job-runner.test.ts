@@ -273,3 +273,24 @@ describe('results of a job made in a terminal', () => {
     expect(deliver).toHaveBeenCalledWith('line-weixin-me', expect.stringContaining('CI is green.'));
   });
 });
+
+describe('JobRunner — a failure that produced no answer', () => {
+  it('records why, instead of an empty summary', async () => {
+    const dir = home();
+    const job = await addDueJob(dir, 'line-weixin-z');
+    const { harness } = fakeHarness({ reason: 'failed', reply: '' });
+    const deliver = vi.fn(async () => {});
+    const runner = new JobRunner({ harness, useWorktrees: false, screamHomeDir: dir, deliver, messages, now: () => NOW });
+
+    expect(await runner.tick()).toBe(1);
+    await waitIdle(runner);
+
+    const after = new JobStore(dir).get(job.id)!;
+    // `ok: false` with an empty summary was recorded for a real run that failed
+    // after 8½ minutes: nothing to act on, and the next run inherited the void.
+    expect(after.runs[0]).toMatchObject({
+      ok: false,
+      summary: "(Run failed without an answer: the turn ended with reason 'failed')",
+    });
+  });
+});

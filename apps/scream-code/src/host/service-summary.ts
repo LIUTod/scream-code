@@ -10,6 +10,7 @@ import { t } from '@scream-code/config';
 import { listInbox } from '@scream-code/scream-code-sdk';
 
 import { loadLineConfig } from '#/line/config';
+import { getVersion } from '#/cli/version';
 
 import { readHostStatus } from './control';
 import { machineHasBattery } from './keep-awake';
@@ -24,6 +25,13 @@ export interface ServiceSummary {
   readonly status: ServiceStatus;
   readonly running: boolean;
   readonly startedAt?: number | undefined;
+  /**
+   * The build the running host loaded and the build installed on disk. They
+   * differ after an upgrade until the host restarts — the reason an upgrade can
+   * look like it did nothing. Absent when the running host predates the flag.
+   */
+  readonly runningVersion?: string | undefined;
+  readonly installedVersion?: string | undefined;
   readonly channel: 'feishu' | 'weixin' | undefined;
   readonly keepAwake: boolean;
   /**
@@ -54,6 +62,8 @@ export async function readServiceSummary(): Promise<ServiceSummary> {
     status,
     running: host.running,
     startedAt: host.startedAt,
+    ...(host.version === undefined ? {} : { runningVersion: host.version }),
+    installedVersion: getVersion(),
     channel,
     keepAwake: settings.keepAwake,
     ...(hasBattery === undefined ? {} : { hasBattery }),
@@ -76,6 +86,25 @@ export function formatUptime(ms: number): string {
   return t('service.uptime_days', { d: String(Math.floor(hours / 24)), h: String(hours % 24) });
 }
 
+/**
+ * The line that names the running build against the installed one, or
+ * `undefined` when there is nothing to say.
+ *
+ * An unstamped host gets a neutral line rather than a guess: it cannot name a
+ * build from before the stamp existed, and calling it "old" would be wrong
+ * whenever that host is in fact the installed one.
+ */
+export function staleBuildLine(
+  running: { readonly running: boolean; readonly version?: string | undefined },
+  installed: string,
+): string | undefined {
+  if (!running.running) return undefined;
+  if (running.version === installed) return undefined;
+  return running.version === undefined
+    ? t('service.build_unstamped', { installed })
+    : t('service.stale_build', { running: running.version, installed });
+}
+
 /** The status lines, in the order both surfaces show them. */
 export function serviceSummaryLines(summary: ServiceSummary, now: number = Date.now()): string[] {
   const lines: string[] = [];
@@ -96,6 +125,16 @@ export function serviceSummaryLines(summary: ServiceSummary, now: number = Date.
   );
   if (summary.status.manager === 'systemd' && summary.status.linger !== true) {
     lines.push(t('service.linger_hint', { user: userInfo().username }));
+  }
+  // An upgraded package does not restart the resident host: it keeps running the
+  // build it loaded, and nothing said so — the person upgrades, sees no change,
+  // and reports the old bug again.
+  if (summary.running && summary.installedVersion !== undefined) {
+    const drift = staleBuildLine(
+      { running: true, ...(summary.runningVersion === undefined ? {} : { version: summary.runningVersion }) },
+      summary.installedVersion,
+    );
+    if (drift !== undefined) lines.push(drift);
   }
   const channel =
     summary.channel === 'feishu' ? 'Feishu' : summary.channel === 'weixin' ? 'WeChat' : t('service.channel_none');

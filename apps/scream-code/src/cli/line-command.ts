@@ -9,10 +9,12 @@
 
 import { LineConfigError, getLineConfigPath, loadLineConfig } from '#/line/config';
 import { t } from '@scream-code/config';
+import { getVersion } from '#/cli/version';
 import { runHost } from '#/host/run';
 import { getHostLogFile, readHostStatus, startHostDetached, stopHost } from '#/host/control';
 import { pauseAllBackgroundWork } from '#/host/pause-all';
 import { readServiceStatus, restartService } from '#/host/service';
+import { staleBuildLine } from '#/host/service-summary';
 
 export type LineAction = 'run' | 'start' | 'stop' | 'status' | 'restart' | 'pause';
 
@@ -98,6 +100,14 @@ export async function runLineCommand(action: LineAction, surface: 'line' | 'host
         ? t('cli.line.state_running', { pid: String(status.pid) })
         : t('cli.line.state_stopped');
       out(t('cli.line.status', { state }));
+      // An upgrade does not restart the host: it keeps executing the build it
+      // loaded, and nothing used to say so — the person installs a new version,
+      // sees the old behaviour, and reports the bug again.
+      const drift = staleBuildLine(
+        { running: status.running, ...(status.version === undefined ? {} : { version: status.version }) },
+        getVersion(),
+      );
+      if (drift !== undefined) out(drift);
       const configured = (on: unknown): string =>
         on ? t('cli.line.configured') : t('cli.line.unconfigured');
       out(t('cli.line.platforms', { feishu: configured(feishu), weixin: configured(weixin) }));

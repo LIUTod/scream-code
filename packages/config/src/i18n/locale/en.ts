@@ -1599,6 +1599,9 @@ export const en: Record<string, string> = {
   'service.off_detail': 'Background jobs and the Feishu/WeChat channel keep going after you close the terminal, but after a restart they wait until you next open a terminal. With the resident service on, they come back at login.',
   'service.enable': 'Turn it on ({when}; work continues after a restart)',
   'service.state_running': '● Running · {when} · up {uptime}',
+  'service.stale_build':
+    '● Running {running}, but {installed} is installed — run scream host restart to apply it',
+  'service.build_unstamped': '● The running host cannot name its build; {installed} is installed',
   'service.state_stopped': '● On · {when} · the host is not running right now',
   'service.when_login': 'starts at login',
   'service.when_boot': 'starts at boot',

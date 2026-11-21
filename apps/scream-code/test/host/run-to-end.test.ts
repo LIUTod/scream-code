@@ -52,3 +52,38 @@ describe('runPromptToEnd', () => {
     await expect(runPromptToEnd(value, 'go', { settleMs: 10 })).resolves.toMatchObject({ text: 'main answer' });
   });
 });
+
+describe('runPromptToEnd — why a run failed', () => {
+  it('carries the turn reason so an answerless failure can name itself', async () => {
+    const { value } = session((emit) => {
+      emit({ type: 'turn.started', agentId: 'main' });
+      emit({ type: 'turn.ended', agentId: 'main', reason: 'failed' });
+    });
+    // No answer text at all: without the reason this is indistinguishable from
+    // a run that quietly produced nothing.
+    await expect(runPromptToEnd(value, 'go', { settleMs: 10 })).resolves.toEqual({
+      ok: false,
+      text: '',
+      timedOut: false,
+      failedReason: "the turn ended with reason 'failed'",
+    });
+  });
+
+  it('names the token cap, and says nothing when the turn completed', async () => {
+    const capped = session((emit) => {
+      emit({ type: 'turn.started', agentId: 'main' });
+      emit({ type: 'turn.ended', agentId: 'main', reason: 'completed', tokenCapReached: true });
+    });
+    await expect(runPromptToEnd(capped.value, 'go', { settleMs: 10 })).resolves.toMatchObject({
+      ok: false,
+      failedReason: 'the turn ended at the token cap',
+    });
+
+    const done = session((emit) => {
+      emit({ type: 'turn.started', agentId: 'main' });
+      emit({ type: 'turn.ended', agentId: 'main', reason: 'completed' });
+    });
+    const result = await runPromptToEnd(done.value, 'go', { settleMs: 10 });
+    expect(result).not.toHaveProperty('failedReason');
+  });
+});

@@ -37,7 +37,7 @@ import {
   type ToolCallResponse,
 } from '@scream-code/scream-code-sdk';
 
-import { createScreamCodeHostIdentity } from '#/cli/version';
+import { createScreamCodeHostIdentity, getVersion } from '#/cli/version';
 import { createChannelDriver, startChannel, type PlatformHandle } from '#/line/channel';
 import { assertSinglePlatformConfig, loadLineConfig, type LineConfig } from '#/line/config';
 import type { LineSessionDriver } from '#/line/session-driver';
@@ -100,11 +100,26 @@ export async function runHost(): Promise<void> {
 
   // One host per Scream home: the lock is held by this process for as long as
   // it lives and released by the OS however it exits.
-  const lock = await claimHostLock({ kind: 'host' });
+  const serviceLaunched = process.env['SCREAM_CODE_HOST_SERVICE'] === '1';
+  const lock = await claimHostLock({ kind: 'host', service: serviceLaunched, version: getVersion() });
   if (!lock.held) {
     const pid = lock.holder?.pid;
-    err(t('cli.line.already_running', { pid: pid === undefined ? '?' : String(pid) }));
-    process.exitCode = 1;
+    // "Another host is running" is the steady state, not a failure — and the
+    // exit code is what the resident service reads. Its launchd job runs with
+    // KeepAlive.SuccessfulExit=false, so a non-zero exit here restarts this
+    // launcher every ThrottleInterval, forever: one log line and one Node boot
+    // per ten seconds for as long as another host lives (4908 lines and 5168
+    // spawns over two days, observed). Exit 0 when the *service's own* host
+    // holds the lock — there is nothing left to do — and keep the retry (exit
+    // 1) only while a terminal's host holds it, so the service still takes over
+    // when that one leaves.
+    process.exitCode = lock.holder?.info?.['service'] === true ? 0 : 1;
+    // A person running `scream host run` by hand still deserves to be told; the
+    // service loop says nothing, because it is expected and it is what spammed
+    // the log.
+    if (!serviceLaunched) {
+      err(t('cli.line.already_running', { pid: pid === undefined ? '?' : String(pid) }));
+    }
     return;
   }
   let resumer: WorkResumer | undefined;

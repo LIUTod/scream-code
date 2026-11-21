@@ -37,3 +37,35 @@ describe('serviceSummaryLines — lid caveat', () => {
     expect(t('service.keep_awake_note')).not.toMatch(/macbook|imac|mac mini|mac studio|thinkpad|surface|苹果/iu);
   });
 });
+
+describe('serviceSummaryLines — build drift', () => {
+  const restartHint = 'scream host restart';
+
+  it('names both builds when the running host is older than the install', () => {
+    const lines = serviceSummaryLines(
+      summary({ runningVersion: '0.21.1', installedVersion: '0.21.2' }),
+      0,
+    );
+    expect(lines).toContain(
+      t('service.stale_build', { running: '0.21.1', installed: '0.21.2' }),
+    );
+    expect(lines.join('\n')).toContain(restartHint);
+  });
+
+  it('says plainly when the running host cannot name its build', () => {
+    // A host started before the version stamp existed: it may well be the
+    // installed build, so name what is unknown instead of guessing "old".
+    const lines = serviceSummaryLines(summary({ installedVersion: '0.21.2' }), 0);
+    expect(lines).toContain(t('service.build_unstamped', { installed: '0.21.2' }));
+  });
+
+  it('stays quiet when the builds match or nothing runs', () => {
+    for (const value of [
+      summary({ runningVersion: '0.21.2', installedVersion: '0.21.2' }),
+      summary({ running: false, installedVersion: '0.21.2' }),
+      summary({}),
+    ]) {
+      expect(serviceSummaryLines(value, 0).join('\n')).not.toContain(restartHint);
+    }
+  });
+});

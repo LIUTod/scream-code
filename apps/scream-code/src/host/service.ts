@@ -24,7 +24,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import { realpathSync, existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -184,9 +184,28 @@ async function writeLauncher(paths: ServicePaths): Promise<boolean> {
 export async function refreshServiceLauncher(): Promise<void> {
   const paths = servicePaths();
   if (paths === undefined) return;
-  const installed = await readFile(paths.launcher, 'utf8').catch(() => undefined);
-  if (installed === undefined) return;
+  // "Is a service installed?" is answered from the artifact each platform keeps
+  // on disk — never by querying the supervisor: this runs on every start, and
+  // `launchctl print` / `systemctl is-enabled` / `schtasks /Query` each cost a
+  // subprocess (schtasks alone takes hundreds of milliseconds on Windows).
+  //
+  // The launcher's own presence used to be that answer, which inverted the one
+  // case worth handling: a launcher deleted from `<home>/bin` (a pruned
+  // directory, a home copied to another machine) made the check conclude "no
+  // service here" and skip the repair forever, while the definition went on
+  // executing a file that did not exist.
+  if (!(await serviceDefinitionInstalled(paths))) return;
   await writeLauncher(paths).catch(() => {});
+}
+
+/**
+ * Whether a service is installed, from the artifact the platform keeps on disk:
+ * the plist / unit file where there is one, and the launcher itself on Windows,
+ * which keeps the task in the scheduler rather than in a file beside it.
+ */
+async function serviceDefinitionInstalled(paths: ServicePaths): Promise<boolean> {
+  if (paths.definition !== undefined) return existsSync(paths.definition);
+  return (await readFile(paths.launcher, 'utf8').catch(() => undefined)) !== undefined;
 }
 
 // ─── Definitions ─────────────────────────────────────────────────────────
@@ -196,8 +215,11 @@ function xmlEscape(value: string): string {
 }
 
 export function renderLaunchAgent(label: string, launcher: string): string {
-  // KeepAlive.SuccessfulExit=false: restarted after a crash, left stopped
-  // after a clean `scream host stop` (exit 0) until the next login.
+  // KeepAlive.SuccessfulExit=false: restarted after a crash, left stopped after
+  // a clean `scream host stop` (exit 0) until the next login. So `scream host`
+  // must exit 0 once *any* host it was meant to be is running — including "the
+  // service's own host already holds the lock" — and only keep exiting non-zero
+  // while a terminal's host owns it, which is the one case worth retrying.
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
