@@ -95,7 +95,7 @@ describe('HarnessAPI session skills', () => {
 
     expect(listed).toMatchObject({
       name: 'dream',
-      description: expect.stringContaining('整理记忆库'),
+      description: expect.stringContaining('整合、提炼、归纳'),
       source: 'builtin',
     });
     expect(listed?.path).toBe('builtin://dream');
@@ -384,7 +384,7 @@ describe('HarnessAPI session skills', () => {
       },
     });
     const promptInput = (prompt as { input?: ReadonlyArray<{ text?: string }> } | undefined)?.input;
-    expect(promptInput?.[0]?.text).toContain('Dream');
+    expect(promptInput?.[0]?.text).toContain('让记忆沉淀成规则');
     expect(promptInput?.[0]?.text).toContain('AskUserQuestion');
   });
 

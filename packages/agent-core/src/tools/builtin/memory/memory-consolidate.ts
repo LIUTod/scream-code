@@ -1,9 +1,4 @@
-import {
-  applyConsolidation,
-  buildConsolidationPlan,
-  type ConsolidationPlan,
-  type MemoryMemoSummary,
-} from '@scream-code/memory';
+import { applyConsolidation, buildConsolidationPlan } from '@scream-code/memory';
 import { z } from 'zod';
 
 import type { Agent } from '#/agent';
@@ -11,115 +6,87 @@ import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
 
-const MemoryMemoSummarySchema = z.object({
-  id: z.string(),
-  sourceSessionId: z.string(),
-  sourceSessionTitle: z.string().optional(),
-  userNeed: z.string(),
-  approach: z.string(),
-  outcome: z.string(),
-  whatFailed: z.string(),
-  whatWorked: z.string(),
-  distilled: z.string().optional(),
-  origin: z.enum(['session', 'dream', 'user']).optional(),
-  distilledAt: z.number().nullish(),
-  distilledFrom: z
-    .array(z.object({ id: z.string(), title: z.string(), at: z.number() }))
-    .optional(),
-  note: z.string().optional(),
-  extractionSource: z.string(),
-  recordedAt: z.number(),
-  projectDir: z.string(),
-  tags: z.array(z.string()).optional(),
-});
-
-const DuplicateGroupSchema = z.object({
-  memos: z.array(MemoryMemoSummarySchema),
-  merged: z.object({
-    userNeed: z.string(),
-    approach: z.string(),
-    outcome: z.string(),
-    whatFailed: z.string(),
-    whatWorked: z.string(),
-    distilled: z.string(),
-    tags: z.array(z.string()).optional(),
-  }),
-  reason: z.string(),
-});
-
-const RelatedGroupSchema = z.object({
-  memos: z.array(MemoryMemoSummarySchema),
-  topic: z.string(),
-  reason: z.string(),
-});
-
-const ConsolidationPlanSchema = z.object({
-  duplicateGroups: z.array(DuplicateGroupSchema),
-  relatedGroups: z.array(RelatedGroupSchema),
-  resolved: z.array(MemoryMemoSummarySchema),
-  stale: z.array(MemoryMemoSummarySchema),
-  summary: z.object({
-    totalMemos: z.number(),
-    duplicatesFound: z.number(),
-    relatedGroupsFound: z.number(),
-    resolvedFound: z.number(),
-    staleFound: z.number(),
-    memosAfterConsolidation: z.number(),
-  }),
-});
-
-export type MemoryConsolidateApplyInput = z.infer<typeof ConsolidationPlanSchema>;
-
 /**
- * The model may echo `distilledAt: null` back from a plan JSON (the schema
- * accepts null so a missing value round-trips), while the store models it as
- * `undefined`. Normalize before handing the plan to the consolidator.
+ * The apply payload is deliberately id-based. The first version asked the model
+ * to echo the whole plan back; on a real library that is ~85k tokens of tool
+ * arguments, which no model can emit — the call arrives truncated and fails
+ * validation. Sending ids plus the new text keeps it a few kilobytes.
  */
-function normalizePlan(input: MemoryConsolidateApplyInput): ConsolidationPlan {
-  const normalizeMemo = (
-    memo: MemoryConsolidateApplyInput['resolved'][number],
-  ): MemoryMemoSummary => ({ ...memo, distilledAt: memo.distilledAt ?? undefined });
-  return {
-    duplicateGroups: input.duplicateGroups.map((group) => ({
-      ...group,
-      memos: group.memos.map(normalizeMemo),
-    })),
-    relatedGroups: input.relatedGroups.map((group) => ({
-      ...group,
-      memos: group.memos.map(normalizeMemo),
-    })),
-    resolved: input.resolved.map(normalizeMemo),
-    stale: input.stale.map(normalizeMemo),
-    summary: input.summary,
-  };
-}
+const MergeSchema = z.object({
+  memoIds: z.array(z.string()).min(2).max(5).describe('Memories to replace, oldest to newest is fine.'),
+  merged: z.object({
+    userNeed: z.string().min(1).max(400),
+    approach: z.string().min(1).max(800),
+    outcome: z.string().min(1).max(200),
+    whatFailed: z.string().max(800),
+    whatWorked: z.string().max(800),
+    tags: z.array(z.string()).max(8).optional(),
+    distilled: z
+      .string()
+      .min(1)
+      .max(200)
+      .describe('One-sentence rule: the situation, the action, and what to expect.'),
+  }),
+  allowSupersede: z
+    .boolean()
+    .optional()
+    .describe('Required to replace a memo that already carries a rule. Leave unset otherwise.'),
+});
+
+const DistillationSchema = z.object({
+  memoId: z.string(),
+  distilled: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe('One-sentence rule distilled from this memo. The memo itself is kept.'),
+});
+
+const InductionSchema = z.object({
+  topic: z.string().min(1).max(120),
+  sourceMemoIds: z.array(z.string()).min(3).max(6).describe('Evidence memos. They are never modified.'),
+  rule: z.object({
+    userNeed: z.string().min(1).max(400),
+    approach: z.string().min(1).max(800),
+    distilled: z.string().min(1).max(200),
+    tags: z.array(z.string()).max(8).optional(),
+  }),
+});
+
+const ConsolidationApplySchema = z.object({
+  merges: z.array(MergeSchema).max(8).describe('Near-duplicate groups to fold into one memory each.'),
+  distillations: z.array(DistillationSchema).max(15).describe('Existing memories that gain a rule.'),
+  inductions: z
+    .array(InductionSchema)
+    .max(4)
+    .describe('New rules induced from several related memories; sources stay untouched.'),
+});
+
+export type MemoryConsolidateApplyInput = z.infer<typeof ConsolidationApplySchema>;
 
 /**
- * Produces a consolidation plan for the global memory memo store: near-duplicate
- * groups, resolved entries, and stale entries. The model should present this plan
- * to the user and ask for confirmation before applying it.
+ * Analyzes the memory memo store and proposes work for /dream: near-duplicate
+ * groups to merge, memories that deserve a one-line rule, and themes that
+ * suggest a new rule. Nothing in the plan is a deletion.
  */
 export class MemoryConsolidatePlanTool implements BuiltinTool<Record<string, never>> {
   readonly name = 'MemoryConsolidatePlan' as const;
   readonly description =
-    'Analyze the global memory memo store and produce a consolidation plan. ' +
-    'The plan includes groups of near-duplicate memos to merge, related memo ' +
-    'groups that share a topic but should stay separate, resolved (completed) ' +
-    'memos to remove, and stale memos to prune. Each duplicate group carries a ' +
-    'merged draft whose fields the model should rewrite, including a one-sentence ' +
-    'distilled conclusion per merge group (the tool leaves it empty). Only call this ' +
-    'when the user has invoked /dream. Present the returned plan to the user and ask ' +
-    'for confirmation before calling MemoryConsolidateApply; related groups are for ' +
-    'information only and are not deleted or merged. Applying a plan records each ' +
-    'merged memo\'s source snapshots and conclusion time, and permanently deletes the ' +
-    'original memos.';
+    'Analyze the memory store and propose a dream pass. Returns duplicateGroups ' +
+    '(memories that are the same experience written more than once — candidate merges), ' +
+    'nearMisses (close but distinct, for judgement), distillCandidates (memories that ' +
+    'should gain a one-sentence rule) and inductionClusters (memories sharing a theme ' +
+    'that may hide one reusable rule). Nothing here is a deletion: the pass only merges ' +
+    'duplicates you confirm, adds rules to existing memories, and adds new rule memories. ' +
+    'It is incremental — a second run right after the first has almost nothing left. ' +
+    'Only call this when the user has invoked /dream.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(z.object({}));
 
   constructor(private readonly agent: Agent) {}
 
   resolveExecution(): ToolExecution {
     return {
-      description: 'Building memory consolidation plan',
+      description: 'Building dream plan',
       approvalRule: this.name,
       execute: async () => {
         const store = this.agent.memoStore;
@@ -129,44 +96,44 @@ export class MemoryConsolidatePlanTool implements BuiltinTool<Record<string, nev
 
         const plan = await buildConsolidationPlan(store);
         if (plan.summary.totalMemos === 0) {
+          return { isError: false, output: 'The memory store is empty; nothing to dream about.' };
+        }
+        if (plan.summary.unseen === 0) {
           return {
             isError: false,
-            output: 'The memory memo store is empty; nothing to consolidate.',
+            output:
+              'Every memory has already been through a dream pass; there is nothing new to integrate. ' +
+              'That is a normal, complete result — report it and stop.',
           };
         }
 
-        return {
-          isError: false,
-          output: JSON.stringify(plan),
-        };
+        return { isError: false, output: JSON.stringify(plan) };
       },
     };
   }
 }
 
 /**
- * Applies a consolidation plan produced by MemoryConsolidatePlan. Deletes the
- * original memos in duplicate groups and appends merged replacements, deletes
- * resolved and stale memos, and returns the count of deleted/created entries.
+ * Applies one dream pass. Only an explicitly listed merge replaces anything, and
+ * a merge is recorded so it can be undone; every other memory keeps its place.
  */
 export class MemoryConsolidateApplyTool implements BuiltinTool<MemoryConsolidateApplyInput> {
   readonly name = 'MemoryConsolidateApply' as const;
   readonly description =
-    'Apply a memory consolidation plan produced by MemoryConsolidatePlan. ' +
-    'This deletes the original memos in duplicate groups and appends merged ' +
-    'replacements, storing each group\'s distilled conclusion as the merged memo\'s ' +
-    'latest distillation (最新归纳); it also deletes resolved and stale memos and ' +
-    'returns the count of deleted and created entries. Merged memos record the ' +
-    'source snapshots and the time the conclusion was formed on the replacement memo. ' +
-    'Original memos are deleted and cannot be restored. Only call this after the user ' +
-    'has explicitly confirmed the plan shown from MemoryConsolidatePlan.';
-  readonly parameters: Record<string, unknown> = toInputJsonSchema(ConsolidationPlanSchema);
+    'Apply one dream pass. merges: fold each listed near-duplicate group into one memory ' +
+    '(the sources are replaced, and the merge is recorded so it can be undone). ' +
+    'distillations: add a one-sentence rule to an existing memory; the memory and its ' +
+    'origin are kept. inductions: add a new rule memory distilled from several related ' +
+    'memories; those sources are not modified. Nothing else is touched — memories are ' +
+    'never removed for being old. Entries that fail validation are reported back instead ' +
+    'of failing the pass. Only call this after the user has confirmed what will change.';
+  readonly parameters: Record<string, unknown> = toInputJsonSchema(ConsolidationApplySchema);
 
   constructor(private readonly agent: Agent) {}
 
   resolveExecution(args: MemoryConsolidateApplyInput): ToolExecution {
     return {
-      description: 'Applying memory consolidation plan',
+      description: 'Applying dream pass',
       approvalRule: this.name,
       execute: async () => {
         const store = this.agent.memoStore;
@@ -174,15 +141,35 @@ export class MemoryConsolidateApplyTool implements BuiltinTool<MemoryConsolidate
           return { isError: true, output: 'Memory memo store is not available.' };
         }
 
-        const plan: ConsolidationPlan = normalizePlan(args);
-        const result = await applyConsolidation(store, plan);
+        const result = await applyConsolidation(store, {
+          merges: args.merges.map((merge) => ({
+            memoIds: merge.memoIds,
+            merged: merge.merged,
+            ...(merge.allowSupersede === true ? { allowSupersede: true } : {}),
+          })),
+          distillations: args.distillations,
+          inductions: args.inductions,
+        });
         await this.agent.dreamTracker.recordDream();
-        const skippedNote = result.skipped > 0
-          ? ` Skipped ${result.skipped} group(s) without a distilled conclusion; their originals were kept.`
-          : '';
+
+        const parts = [
+          `merged ${result.merged.length} group(s)`,
+          `distilled ${result.distilled.length} memory(ies)`,
+          `induced ${result.induced.length} new rule(s)`,
+        ];
+        const skipped = result.skipped.length === 0
+          ? ''
+          : ` Skipped ${result.skipped.length}: ${result.skipped
+              .slice(0, 5)
+              .map((entry) => `${entry.id} (${entry.reason})`)
+              .join('; ')}${result.skipped.length > 5 ? '; …' : ''}`;
+        const mergedIds = result.merged.map((entry) => entry.mergeId).join(', ');
         return {
           isError: false,
-          output: `Consolidation complete. Deleted ${result.deleted} memo(s) and created ${result.created} merged memo(s).${skippedNote}`,
+          output:
+            `Dream pass complete: ${parts.join(', ')}.${skipped}` +
+            (mergedIds === '' ? '' : ` Merge id(s) for undo: ${mergedIds}.`) +
+            ' Report this to the user in their language; do not describe it as cleanup.',
         };
       },
     };
