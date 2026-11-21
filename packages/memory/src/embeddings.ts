@@ -6,11 +6,35 @@ import { extract as untar } from 'tar';
 import type { MemoryMemo } from './models.js';
 
 /**
+ * Version of the text that gets embedded. Bump it whenever
+ * `buildEmbeddingText` changes shape — `backfillMissingEmbeddings` re-embeds
+ * every row stamped with an older version, so an existing library picks up the
+ * new text without a manual rebuild.
+ *
+ * v2: the distilled rule leads the text (and whatFailed joins it).
+ */
+export const EMBEDDING_TEXT_VERSION = 2;
+
+/**
  * Text used to generate embeddings for a memo.
- * Combines the most semantically meaningful fields.
+ *
+ * Order is priority, not style: the embedding model truncates at its token
+ * limit, so a distilled rule placed last would be cut off on a long memo — and
+ * the rule is the part that makes the memory reusable. Keep it first.
  */
 export function buildEmbeddingText(memo: MemoryMemo): string {
-  return `${memo.userNeed} ${memo.approach} ${memo.whatWorked}`;
+  const failed = memo.whatFailed?.trim() ?? '';
+  return [
+    memo.distilled?.trim() ?? '',
+    memo.userNeed,
+    memo.approach,
+    memo.whatWorked,
+    // A lesson about what did not work is exactly what should come back when a
+    // similar approach is attempted again; 'none' carries no signal.
+    failed === 'none' ? '' : failed,
+  ]
+    .filter((part) => part.length > 0)
+    .join(' ');
 }
 
 /** Where a load attempt currently is: bytes coming down, archive being checked,

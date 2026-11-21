@@ -172,13 +172,40 @@ afterAll(() => {
 // ─── buildEmbeddingText ────────────────────────────────────────────
 
 describe('buildEmbeddingText', () => {
-  it('拼接 userNeed/approach/whatWorked 三个语义字段', () => {
+  it('把 distilled 规则放在最前，再是 userNeed/approach/whatWorked', () => {
+    // Order is priority: the model truncates the text at its token limit, so the
+    // distilled rule — the part that makes a memory reusable — must lead.
+    const memo = {
+      distilled: '当 A 时先做 B',
+      userNeed: '需要 A',
+      approach: '做法 B',
+      whatWorked: '有效 C',
+      outcome: '不应参与',
+      whatFailed: 'none',
+    } as MemoryMemo;
+    expect(buildEmbeddingText(memo)).toBe('当 A 时先做 B 需要 A 做法 B 有效 C');
+  });
+
+  it('失败教训参与，outcome 不参与', () => {
+    // A lesson about what did not work is exactly what should resurface when a
+    // similar approach is tried again.
     const memo = {
       userNeed: '需要 A',
       approach: '做法 B',
       whatWorked: '有效 C',
       outcome: '不应参与',
-      whatFailed: '也不应参与',
+      whatFailed: '用 D 会失败',
+    } as MemoryMemo;
+    expect(buildEmbeddingText(memo)).toBe('需要 A 做法 B 有效 C 用 D 会失败');
+  });
+
+  it('没有 distilled / whatFailed 时不留空段', () => {
+    const memo = {
+      userNeed: '需要 A',
+      approach: '做法 B',
+      whatWorked: '有效 C',
+      outcome: '完成',
+      whatFailed: '  ',
     } as MemoryMemo;
     expect(buildEmbeddingText(memo)).toBe('需要 A 做法 B 有效 C');
   });

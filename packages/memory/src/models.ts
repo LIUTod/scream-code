@@ -57,6 +57,10 @@ export interface MemoryMemo {
   recallCount?: number;
   /** Bookkeeping like `recallCount`: epoch ms of the latest recall. */
   lastRecalledAt?: number;
+  /** Bookkeeping: epoch ms when /dream last considered this memo. NULL/undefined
+   * means never considered, so the next run picks it up. Written by
+   * `markDreamed()` only. */
+  dreamedAt?: number;
 }
 
 /** JSONL envelope — one line in entries.jsonl. */

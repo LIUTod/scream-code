@@ -13,9 +13,18 @@ export { normalizeTags, generateTags } from './tags.js';
 export {
   buildConsolidationPlan,
   applyConsolidation,
+  checkRuleSentence,
   type DuplicateGroup,
-  type RelatedGroup,
+  type NearMiss,
+  type DistillCandidate,
+  type InductionCluster,
   type ConsolidationPlan,
+  type ConsolidationApplyInput,
+  type ConsolidationApplyResult,
+  type ConsolidationMerge,
+  type ConsolidationDistillation,
+  type ConsolidationInduction,
+  type RuleCheck,
 } from './consolidator.js';
 export { DreamTracker, type DreamState } from './dream.js';
 export { EMBEDDING_MODEL_NAME, buildEmbeddingText, createEmbeddingEngine, createFastEmbedEngine, clearEmbeddingModelCache, hasEmbeddingModelCache, classifyEmbeddingFailure, probeLocalEmbeddingSupport, type EmbeddingEngine, type EmbeddingFailureKind, type EmbeddingLoadProgress, type EmbeddingProgressListener } from './embeddings.js';

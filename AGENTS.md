@@ -1122,38 +1122,53 @@ Key file: `packages/agent-core/src/agent/session-memory.ts`.
 #### Dream Consolidation (`/dream`)
 
 Memory is one store with one entity: **memos** in `memos.sqlite` (`/memory` browses
-them). `/dream` clusters near-duplicate memos, the model writes a one-sentence
-distilled conclusion per merge group, and apply appends one replacement memo
-carrying that `distilled` value (UI label 最新归纳), its provenance
-(`origin='dream'`, `distilledAt`, `distilledFrom`) before deleting the originals.
-Resolved (completed, >7 days old) and stale (>30 days, unfinished) entries are
-pruned, but only session-origin experiences: a distilled rule is never
-age-pruned. A merged record inherits the union of tags from its originals.
+them). `/dream` exists to make memories **more reusable, not fewer**: it merges
+what is genuinely duplicated, distils existing memories into a one-sentence rule,
+and induces new rules from repeated themes. **It never removes a memory for being
+old** — "the task is finished" is a memo's normal outcome, not a reason to drop it.
+The one destructive move is an explicitly listed merge, and it is undoable.
 
-1. **Plan** — `MemoryConsolidatePlan` runs `buildConsolidationPlan`: keyword
-   similarity clusters near-duplicate memos, and topic anchors surface related
-   groups that should stay separate. Each duplicate group ships a `merged` draft
-   with `distilled: ''` for the model to fill, plus the resolved/stale lists and
-   counts. Planning is read-only.
-2. **Confirm** — the model presents the plan (one line per group, including the
-   conclusion it wrote, the group's source composition, and — when the group
-   contains an existing `origin='dream'|'user'` memo — that memo's previous
-   `distilled`, stating whether the new conclusion inherits, corrects or replaces
-   it) and asks the user before writing anything. The preview states that merging
-   deletes the originals permanently.
-3. **Write** — for every duplicate group the model rewrites `merged` and writes
-   `distilled`: one reusable rule, ≤60 characters, not a restatement of the task.
-   A group it cannot distil reliably is left untouched, and an existing rule is
-   never overwritten without showing it first.
-4. **Apply** — `applyConsolidation` appends one replacement memo per group
-   (carrying `distilled`, the union of the originals' tags, `origin: 'dream'`,
-   `distilledAt: Date.now()` and `distilledFrom`: the group's memos plus each
-   source's own lineage, deduped by id, oldest-first, capped at 100), then deletes
-   the originals; resolved and stale memos are deleted too. Deletion is
-   irreversible — there is no grace window or undo. An empty `distilled` is
-   stored as undefined; when a group contains an existing rule and the plan
-   carries no new conclusion, the whole group is skipped and its originals are
-   kept (the tool reports the skipped count).
+Three moves, three different shapes — do not conflate them:
+
+| Move | Input | Output | Sources |
+|---|---|---|---|
+| merge | 2–5 near-identical memos | one fuller memo | replaced (recorded in `memory_merges`, undoable) |
+| distil | one memo | the same memo + `distilled` | untouched (origin preserved) |
+| induce | 3–6 related memos | a NEW rule memo (`origin='dream'`) | untouched |
+
+1. **Plan** — `MemoryConsolidatePlan` runs `buildConsolidationPlan`. Duplicates
+   are found with **cosine similarity over the stored vectors** (the measure
+   recall uses), threshold `MERGE_SIMILARITY = 0.86`; each group ships a `merged`
+   draft with `distilled: ''`. `nearMisses` (0.80–0.86) give the model judgement
+   material, `distillCandidates` list memories that should gain a rule,
+   `inductionClusters` group memos by shared tag. Every list is capped, and the
+   summaries are clipped, so the plan stays ~13 KB on a 113-memo library — it used
+   to serialize to 254 KB (~85k tokens), which no model can echo back through a
+   tool call. Planning is read-only.
+2. **Incremental** — each pass stamps `dreamed_at` on every memo it considered
+   (`store.markDreamed`), so a second `/dream` right after the first finds nothing.
+   That emptiness is the correctness signal, and it is what keeps the work set
+   bounded as the library grows.
+3. **Apply** — `MemoryConsolidateApply` takes **ids plus the new text**, never the
+   whole plan: `merges[]` (`memoIds` 2–5 + `merged`), `distillations[]`
+   (`memoId` + `distilled`), `inductions[]` (`sourceMemoIds` 3–6 + `rule`). A merge
+   snapshots its sources into `memory_merges` and `store.revertMerge(mergeId)`
+   restores them. Induction is additive by construction.
+4. **Rule quality** — `checkRuleSentence` rejects an empty/oversized rule, a bare
+   fragment, bookkeeping prose ("合并 N 条…") and anything without a trigger or an
+   action (`当…/遇到…/先…/避免…`, `when/if/before/prefer/avoid`). A rejected entry
+   lands in `skipped` with a reason and the rest of the pass still applies.
+5. **Protection** — a memo that already carries a rule is never overwritten
+   without `allowSupersede`. Merges never mix in a ruled memo.
+
+**Recall depends on this.** `buildEmbeddingText` (`packages/memory/src/embeddings.ts`)
+leads with `distilled`, then `userNeed`, `approach`, `whatWorked`, and
+`whatFailed` (unless `'none'`); `recall.ts` skips an in-progress memo that has no
+rule, so distilling is what makes such a memory reachable at all. Order is
+priority — the embedding model truncates, and a rule placed last would be cut off.
+`EMBEDDING_TEXT_VERSION` bumps whenever that text shape changes;
+`backfillMissingEmbeddings` re-embeds rows stamped with an older version, so an
+existing library picks the change up without a manual rebuild.
 
 Includes automatic reminders: when >= 24 hours and >= 5 sessions have passed since
 the last dream, a suggestion is injected on the first step of the turn.

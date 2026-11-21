@@ -5,7 +5,7 @@ import { dirname, join } from 'pathe';
 
 import type { DistilledSource, MemoryMemo, MemoryMemoListResult, MemoOrigin } from './models.js';
 import { toSummary } from './models.js';
-import { buildEmbeddingText, EMBEDDING_MODEL_NAME, type EmbeddingEngine } from './embeddings.js';
+import { buildEmbeddingText, EMBEDDING_MODEL_NAME, EMBEDDING_TEXT_VERSION, type EmbeddingEngine } from './embeddings.js';
 
 const FILE_NAME = 'entries.jsonl';
 const MIGRATION_MARKER = '.migrated';
@@ -471,7 +471,8 @@ export class MemoryMemoStore {
         distilled_from TEXT,
         distilled_at INTEGER,
         recall_count INTEGER NOT NULL DEFAULT 0,
-        last_recalled_at INTEGER
+        last_recalled_at INTEGER,
+        dreamed_at INTEGER
       );
 
       CREATE INDEX IF NOT EXISTS idx_memos_project_dir ON memos(project_dir);
@@ -489,10 +490,18 @@ export class MemoryMemoStore {
         memory_id TEXT PRIMARY KEY REFERENCES memos(id) ON DELETE CASCADE,
         embedding_json TEXT NOT NULL,
         model TEXT NOT NULL DEFAULT '${EMBEDDING_MODEL_NAME}',
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        text_version INTEGER NOT NULL DEFAULT 1
       );
 
       CREATE INDEX IF NOT EXISTS idx_memory_embeddings_created_at ON memory_embeddings(created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS memory_merges (
+        id TEXT PRIMARY KEY,
+        merged_id TEXT NOT NULL,
+        sources_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
     `);
     this.migrateSchema();
   }
@@ -542,6 +551,19 @@ export class MemoryMemoStore {
     }
     if (!info.some((col) => col.name === 'last_recalled_at')) {
       this.db.exec('ALTER TABLE memos ADD COLUMN last_recalled_at INTEGER');
+    }
+    if (!info.some((col) => col.name === 'dreamed_at')) {
+      // Last time /dream looked at this memo. NULL means "never considered", so
+      // an existing library is processed once and then stays incremental.
+      this.db.exec('ALTER TABLE memos ADD COLUMN dreamed_at INTEGER');
+    }
+    const embeddingInfo = this.db.prepare('PRAGMA table_info(memory_embeddings)').all() as Array<{
+      name: string;
+    }>;
+    if (!embeddingInfo.some((col) => col.name === 'text_version')) {
+      // Existing rows were built from an older `buildEmbeddingText` shape and
+      // default to version 1, which the backfill treats as stale and re-embeds.
+      this.db.exec('ALTER TABLE memory_embeddings ADD COLUMN text_version INTEGER NOT NULL DEFAULT 1');
     }
     // Ensure indexes exist even for databases created before these indexes were added.
     this.db.exec(`
@@ -830,6 +852,85 @@ export class MemoryMemoStore {
   /** Set the embedding engine. Call once after construction, before any writes. */
   setEmbeddingEngine(engine: EmbeddingEngine): void {
     this.embeddingEngine = engine;
+  }
+
+  /** Vectors for every memo that has one, keyed by memo id. Used by the
+   * consolidation planner to find near-duplicates with the same similarity
+   * measure recall uses, instead of a keyword heuristic. */
+  async allVectors(): Promise<Map<string, Float32Array>> {
+    await this.init();
+    const vectors = new Map<string, Float32Array>();
+    if (this.db === undefined) return vectors;
+    const rows = this.db
+      .prepare(
+        `SELECT e.memory_id AS id, e.embedding_json AS json
+         FROM memory_embeddings e
+         JOIN memos m ON m.id = e.memory_id`,
+      )
+      .all() as Array<{ id: string; json: string }>;
+    for (const row of rows) {
+      try {
+        const parsed: unknown = JSON.parse(row.json);
+        if (Array.isArray(parsed)) vectors.set(row.id, Float32Array.from(parsed as number[]));
+      } catch {
+        // A malformed row is simply treated as having no vector.
+      }
+    }
+    return vectors;
+  }
+
+  /** Stamp memos as looked at by /dream. Called once per run for every memo it
+   * considered, whether or not the memo changed — that is what keeps the next
+   * run incremental instead of re-proposing the same items forever. */
+  async markDreamed(ids: readonly string[], at: number = Date.now()): Promise<void> {
+    if (ids.length === 0) return;
+    await this.init();
+    if (this.db === undefined) return;
+    const statement = this.db.prepare('UPDATE memos SET dreamed_at = ? WHERE id = ?');
+    this.db.exec('BEGIN TRANSACTION');
+    try {
+      for (const id of ids) statement.run(at, id);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /** Record how a merge was produced so `revertMerge` can undo it later. The
+   * snapshot is the full memo, not just ids — a deleted memo cannot be looked up
+   * afterwards. */
+  async recordMerge(mergedId: string, sources: readonly MemoryMemo[]): Promise<void> {
+    await this.init();
+    if (this.db === undefined) return;
+    this.db
+      .prepare('INSERT OR REPLACE INTO memory_merges (id, merged_id, sources_json, created_at) VALUES (?, ?, ?, ?)')
+      .run(mergedId, mergedId, JSON.stringify(sources), Date.now());
+  }
+
+  /** Undo a merge: restore the source memos from the snapshot and drop the
+   * merged result. Returns false when the merge id is unknown. */
+  async revertMerge(mergeId: string): Promise<boolean> {
+    await this.init();
+    if (this.db === undefined) return false;
+    const row = this.db
+      .prepare('SELECT merged_id AS mergedId, sources_json AS sources FROM memory_merges WHERE id = ?')
+      .get(mergeId) as { mergedId: string; sources: string } | undefined;
+    if (row === undefined) return false;
+    let sources: MemoryMemo[];
+    try {
+      const parsed: unknown = JSON.parse(row.sources);
+      if (!Array.isArray(parsed)) return false;
+      sources = parsed as MemoryMemo[];
+    } catch {
+      return false;
+    }
+    for (const memo of sources) {
+      if ((await this.get(memo.id)) === undefined) await this.append(memo);
+    }
+    await this.delete(row.mergedId);
+    this.db.prepare('DELETE FROM memory_merges WHERE id = ?').run(mergeId);
+    return true;
   }
 
   /** Check whether the store has any vector embeddings. */
@@ -1123,10 +1224,14 @@ export class MemoryMemoStore {
       .prepare(
         `SELECT m.id AS id FROM memos m
          WHERE NOT EXISTS (SELECT 1 FROM memory_embeddings e WHERE e.memory_id = m.id)
+            OR EXISTS (
+              SELECT 1 FROM memory_embeddings e
+              WHERE e.memory_id = m.id AND e.text_version < ?
+            )
          ORDER BY m.recorded_at DESC
          LIMIT ?`,
       )
-      .all(limit) as Array<{ id: string }>;
+      .all(EMBEDDING_TEXT_VERSION, limit) as Array<{ id: string }>;
     for (const row of rows) this.embeddingQueue.add(row.id);
     if (rows.length > 0) this.armEmbeddingFlush();
     return rows.length;
@@ -1236,7 +1341,7 @@ export class MemoryMemoStore {
         this.clearEmbeddingFailure();
 
         const insert = db.prepare(
-          'INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding_json, model, created_at) VALUES (?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding_json, model, created_at, text_version) VALUES (?, ?, ?, ?, ?)',
         );
         const now = Date.now();
         db.exec('BEGIN TRANSACTION');
@@ -1247,6 +1352,7 @@ export class MemoryMemoStore {
               JSON.stringify([...vectors[index]!]),
               EMBEDDING_MODEL_NAME,
               now,
+              EMBEDDING_TEXT_VERSION,
             );
           }
           db.exec('COMMIT');
@@ -1399,6 +1505,10 @@ function rowToMemo(row: Record<string, unknown>): MemoryMemo {
     recallCount: typeof recallCount === 'number' && recallCount > 0 ? recallCount : undefined,
     lastRecalledAt:
       typeof lastRecalledAt === 'number' && Number.isFinite(lastRecalledAt) ? lastRecalledAt : undefined,
+    dreamedAt:
+      typeof row['dreamed_at'] === 'number' && Number.isFinite(row['dreamed_at'])
+        ? row['dreamed_at']
+        : undefined,
   };
 }
 

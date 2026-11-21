@@ -69,6 +69,10 @@ export class DreamTracker {
   }
 
   /** Load persisted state (call once at startup). */
+  /** True once a real state was loaded from disk (or migrated). Without it,
+   * `state` is only the constructor default and must not be shown as history. */
+  private persisted = false;
+
   async init(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
@@ -78,6 +82,7 @@ export class DreamTracker {
       const parsed = JSON.parse(raw) as DreamLockFile;
       if (parsed.version === 1 && parsed.state) {
         this.state = parsed.state;
+        this.persisted = true;
         return;
       }
     } catch {
@@ -85,6 +90,21 @@ export class DreamTracker {
     }
 
     await this.migrateLegacyLockFiles();
+  }
+
+  /** Snapshot of the in-memory state (whatever the tracker has loaded so far). */
+  getState(): DreamState {
+    return { ...this.state };
+  }
+
+  /** Persisted state, loading the lock file on first use. Display code uses this
+   * rather than `getState()`: before any write, the in-memory value is just the
+   * constructor default. */
+  async readState(): Promise<DreamState | undefined> {
+    if (!this.initialized) await this.init();
+    // Nothing on disk means /dream has never run here; the caller shows
+    // "never dreamt" instead of a fake timestamp.
+    return this.persisted ? { ...this.state } : undefined;
   }
 
   /** Record that a dream completed successfully. */
@@ -128,8 +148,8 @@ export class DreamTracker {
     return (
       `It has been ${days} ${days === 1 ? 'day' : 'days'} and ${sessions} ` +
       `${sessions === 1 ? 'session' : 'sessions'} since the last memory consolidation. ` +
-      'Consider suggesting that the user run /dream to merge duplicate memories, ' +
-      'clear stale entries and resolve contradictions.'
+      'Consider suggesting that the user run /dream to fold repeated memories into one, ' +
+      'and distil the memories that never became a reusable rule into one-sentence rules.'
     );
   }
 
@@ -190,6 +210,7 @@ export class DreamTracker {
 
     if (bestState !== undefined) {
       this.state = bestState;
+      this.persisted = true;
       await this.persist();
     }
 
