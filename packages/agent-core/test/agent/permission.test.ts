@@ -2202,6 +2202,33 @@ describe('Approval cancellation', () => {
     });
   });
 
+  it('lets an unattended ask-mode report run use read-only tools', async () => {
+    // The exact configuration a scheduled report job runs in: ask mode, nobody
+    // attached to answer a prompt. A read must not need an approver that does
+    // not exist — this is the case the daily brief hit, where JobList was
+    // refused and the run had to read the job store by hand.
+    const { manager, requestApproval } = makePermissionManager(
+      async () => ({ decision: 'approved' }),
+      { approvalHandlerAvailable: false },
+    );
+    manager.setMode('ask');
+
+    for (const toolName of ['JobList', 'ReadGroup', 'MemoryLookup', 'KnowledgeLookup']) {
+      await expect(
+        manager.beforeToolCall(hookContext({ id: `call_${toolName}`, toolName, args: {} })),
+      ).resolves.toBeUndefined();
+    }
+    expect(requestApproval).not.toHaveBeenCalled();
+
+    // Read-only approval must not widen the mode: a shell command still loses.
+    await expect(
+      manager.beforeToolCall(
+        hookContext({ id: 'call_bash', toolName: 'Bash', args: { command: 'ls' } }),
+      ),
+    ).resolves.toMatchObject({ block: true });
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
   it('fails closed for fallback ask when no approval handler is available', async () => {
     const { manager, record } = makePermissionManager(async () => ({ decision: 'approved' }), {
       approvalHandlerAvailable: false,
