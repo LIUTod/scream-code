@@ -35,6 +35,7 @@
 |---|---|---|
 | `permissionMode` | `auto` | Permission mode of chat sessions (see below); `auto` by default for IM |
 | `autoStart` | true | Start the daemon when the TUI starts |
+| `reminders` | `away` | Session reminders this chat gets: `away` (sessions the background runs, and a terminal's sessions while you are away from it), `background`, or `off`; set in `/line` → 会话提醒 (see [`host.md`](host.md#session-reminders-line)) |
 | `workDir` | The daemon's start directory | Working directory of chat sessions |
 
 ### Feishu (`feishu`)

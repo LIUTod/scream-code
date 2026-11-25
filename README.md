@@ -68,7 +68,7 @@ On first launch Scream walks you through model setup (`/config`: the shortcut pr
 
 When Scream wants to modify files or run commands, an approval panel pops up: pick a number, press Enter.
 
-To keep it working after you close the terminal, run `/service` once.
+Work you hand over keeps going after you close the terminal; run `/service` once if it should also come back after the computer restarts (an always-on machine, or with Feishu/WeChat set up).
 
 ### What it does for you
 
@@ -77,19 +77,21 @@ Scream is a personal agent you install on your own computer or server. Coding is
 | Scenario | How |
 |---|---|
 | **Coding overnight** | In the evening say "fix the flaky tests until they pass five times in a row" and close the terminal. It works in its own git worktree, never in your checkout; before anything irreversible, such as `git push`, it asks you on your phone. In the morning you read the branch and the result. |
-| **Routine work** | "Check CI every weekday at 9 and tell me if something is wrong." Jobs run on time by themselves, results go to your Feishu or WeChat, and a brief of a few sentences arrives every day at 08:30. |
+| **Routine work** | "Check CI every weekday at 9 and tell me if something is wrong." Jobs run on time by themselves and results go to your Feishu or WeChat; `/brief` in the chat adds a few-sentence brief every morning at 08:30. |
 | **Power loss** | The power goes out or the machine restarts mid-task. After you log in it carries on by itself; you touch nothing. |
-| **Gets better** | Every Monday it reviews itself: which tool calls kept failing this week, which skills nobody used. It proposes improvements, and every change is recorded and can be rolled back. |
+| **Gets better** | Turn on the weekly self-review in `/jobs` and every Monday it reviews itself: which tool calls kept failing this week, which skills nobody used. It proposes improvements, and every change is recorded and can be rolled back. |
 
 ### Resident and background
 
 - **Works without Feishu or WeChat** — with jobs on, opening a terminal starts the background, which keeps running after the terminal closes until the computer restarts. Opening a terminal tells you what happened while you were away, the footer shows `◆ 1 waiting` when something needs you, the sidebar's first panel (Jobs) lists each job's last result and next run, and a system notification pops up when something waits for you, a job fails or handed-over work is done.
-- **Resident service (`/service`)** — makes the background start again after a restart: installs the background host as a per-user service: a LaunchAgent on macOS, a systemd user unit on Linux (install turns on lingering so it starts at boot without a login; where that needs a password it tells you to run `sudo loginctl enable-linger`), a logon task on Windows. No administrator rights; it restarts after a crash and moves to the new version after an update. While work runs on mains power it keeps the computer from idling into sleep (a MacBook still sleeps with its lid closed).
+- **Resident service (`/service`)** — makes the background start again after a restart: installs the background host as a per-user service: a LaunchAgent on macOS, a systemd user unit on Linux (install turns on lingering so it starts at boot without a login; where that needs a password it tells you to run `sudo loginctl enable-linger`), a logon task on Windows. No administrator rights; it restarts after a crash (and stops retrying if it keeps crashing), and moves to the new version by itself once it is idle after an update. Turning it on checks, with the service's own environment, that the background can reach the model (`scream host check`), and says what to do when it cannot — a key kept only in your shell profile is the usual reason. While work runs on mains power it keeps the computer from idling into sleep (a laptop still sleeps with its lid closed).
+- **Session reminders** — with Feishu or WeChat set up, the chat hears when a session needs you: done, waiting for an approval or an answer, or failed. That covers sessions the background runs, and a terminal's sessions once you have been away from that terminal for 3 minutes. Each names the session, its project and what to do next, never the conversation; several at once arrive as one message. `/line` → 会话提醒 chooses which (or off).
+- **Rides out outages** — a goal or a bot run whose model requests fail because the network is down (a laptop that just woke) or the provider is overloaded keeps trying for up to 30 minutes instead of stopping; a background job that hits a timeout runs again 15 minutes later before it counts as failed.
 - **Hand off and take over** — quitting while a goal runs asks whether to hand it to the background; opening a session the background is working on lets you take it over. A session is open in one process at a time, so nothing gets written twice.
 - **Background jobs (`/jobs`)** — a job says four things: what to do, when it starts (once, or on a cron schedule), whether it acts or only reports, and until when (always, a date, or an outcome). Each run gets a fresh session that stays out of `/sessions`; the last run's conclusion is passed to the next as notes. The agent can schedule jobs itself (at most every 15 minutes, 20 enabled at once); ten failures in a row switch a job off and tell you.
 - **Coding in worktrees** — a job that acts works in its own worktree under `~/.scream-code/worktrees/`, on a branch `scream/<job>/<date-time>`, and the host commits its changes there afterwards. Your checkout is never touched; a run that changed nothing leaves no branch.
 - **Waiting for you** — what unattended work could not decide alone (a refused action, a question) is shown at the top of `/jobs` with a system notification, and pushed to your chat when one is set up. It does not wait meanwhile; it carries on with other work. In the chat just reply "同意" (approve), "拒绝" (reject) or "以后都同意" (always); pushes of background-job branches approved once are allowed from then on. An approval lets exactly that action through once, still through every permission check. Items expire after 24 hours and are noted in the brief.
-- **Daily brief and report** — with Feishu or WeChat set up, every day at 08:30, a few sentences on what background work did, what failed and what waits for you. Anytime, `scream report --since 24h` shows the same from local data, without calling a model.
+- **Daily brief and report** — turn it on with `/brief` in the chat: every day at 08:30, a few sentences on what background work did, what failed and what waits for you; a morning with nothing to report sends nothing. Anytime, `scream report --since 24h` shows the same from local data, without calling a model.
 - **Daily token limit** — set a daily token limit on unattended work in `/service`; once reached, work waits for the next day.
 - **Stop everything** — `/jobs stop` in the terminal, `/stop all` in the chat, `scream host pause` from the shell.
 
@@ -111,7 +113,7 @@ Scream is a personal agent you install on your own computer or server. Coding is
 - **Session Trace `/trace` and Search `/search`** — export a session as an offline, interactive HTML timeline; full-screen keyword search over the conversation.
 - **High Cache Hit Rate** — per-session HitR in the status bar, tuned across compatible protocols to maximize cache hits without lowering quality.
 - **MCP / Skills / 130+ providers** — all DIY-configurable; ships with browser automation and macOS desktop automation; when a language server is missing, it names the command that installs it.
-- **Feishu and WeChat** — the native `/line` channel: text, images, files and voice both ways. From the chat: `/status`, `/model`, `/compact`, `/stop`, `/new`, plus `/jobs`, `/brief` (daily brief), `/project` (switch this chat's project), `/inbox`, `/approve` and `/stop all`.
+- **Feishu and WeChat** — the native `/line` channel: text, images, files and voice both ways. From the chat: `/status`, `/model`, `/compact`, `/stop`, `/new`, plus `/jobs`, `/brief` (daily brief), `/project` (switch this chat's project), `/inbox`, `/approve` and `/stop all`; and session reminders come to the chat.
 
 ### Slash Commands
 
@@ -201,8 +203,8 @@ Skills work as commands too: `/skill:<name>`. For example, after image setup, `/
 scream [options]                    terminal UI; -p runs one prompt and exits, -C continues, -S picks a session
 scream service [install|uninstall|status|restart|logs]
                                     resident service: start the background host at login
-scream host [start|stop|status|restart|pause|run]
-                                    the background host itself; pause stops all background work
+scream host [start|stop|status|restart|pause|run|check]
+                                    the background host itself; pause stops all background work; check: can it reach the model
 scream report [--since 24h]         what background work did: job runs, what waits for you, tokens today
 scream line [start|stop|status|restart]
                                     Feishu/WeChat channel (the same process as scream host)
