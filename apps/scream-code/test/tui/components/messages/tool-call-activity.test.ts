@@ -1,3 +1,4 @@
+import { t } from '@scream-code/config';
 import { describe, expect, it } from 'vitest';
 import { computeLatestActivity } from '#/tui/components/messages/tool-call';
 
@@ -20,13 +21,13 @@ describe('computeLatestActivity (P2/P3)', () => {
       'some text',
       '/wd',
     );
-    expect(out).toContain('Using Read');
+    expect(out).toContain(`${t('toolcall.in_use')} Read`);
     expect(out).toContain('src/index.ts');
   });
 
   it('falls back to finished tool when nothing ongoing (P2)', () => {
     const out = computeLatestActivity(new Map(), finished('Glob'), '', '/wd');
-    expect(out).toContain('Used Glob');
+    expect(out).toContain(`${t('toolcall.used')} Glob`);
   });
 
   it('falls back to last non-empty text line (existing behavior)', () => {
@@ -36,7 +37,7 @@ describe('computeLatestActivity (P2/P3)', () => {
 
   it('returns the waiting label when idle heuristic is set (P3)', () => {
     const out = computeLatestActivity(new Map(), [], '', '/wd', true);
-    expect(out).toBe('Waiting for subagent…');
+    expect(out).toBe(t('toolcall.waiting_subagent'));
   });
 
   it('returns undefined when idle heuristic is unset (no false label)', () => {

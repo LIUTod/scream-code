@@ -854,6 +854,7 @@ export const en: Record<string, string> = {
   'toolcall.used': 'Used',
   'toolcall.truncated': 'Truncated',
   'toolcall.in_use': 'Using',
+  'toolcall.waiting_subagent': 'Waiting for subagent…',
   'toolcall.sub_agent_named': 'Sub agent {name} ({id})',
   'toolcall.sub_agent': 'Sub agent ({id})',
   'toolcall.more_tools': '{count} more tool calls...',

@@ -15,7 +15,6 @@ import { t } from '@scream-code/config';
 import { ScreamTUI, type ScreamTUIStartupInput, type TUIState } from '#/tui/scream-tui';
 import type { SessionEventHandler } from '#/tui/controllers/session-event-handler';
 import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
-import { AgentGroupComponent } from '#/tui/components/messages/agent-group';
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
 import { ToolCallComponent } from '#/tui/components/messages/tool-call';
 
@@ -227,7 +226,7 @@ function backgroundTask(
 }
 
 describe('ScreamTUI resume message replay', () => {
-  it('groups replayed Agent calls from one assistant message using live grouping', async () => {
+  it('files replayed Agent calls from one assistant message as rows of the block, as live does', async () => {
     const replay: AgentReplayRecord[] = [
       message('user', [{ type: 'text', text: 'run two agents' }]),
       message('assistant', [], {
@@ -251,13 +250,12 @@ describe('ScreamTUI resume message replay', () => {
     ];
 
     const driver = await replayIntoDriver(replay);
-    const group = driver.state.transcriptContainer.children.find(
-      (child) => child instanceof AgentGroupComponent,
+    const block = driver.state.transcriptContainer.children.find(
+      (child): child is ActivityGroupComponent => child instanceof ActivityGroupComponent,
     );
 
-    expect(group).toBeInstanceOf(AgentGroupComponent);
-    expect((group as AgentGroupComponent).size()).toBe(2);
-    expect(driver.streamingUI.hasPendingAgentGroup()).toBe(false);
+    expect(block).toBeDefined();
+    expect(block?.getToolComponents().map((card) => card.toolCallView.id)).toEqual(['call_agent_1', 'call_agent_2']);
     expect(driver.streamingUI.getToolComponent('call_agent_1')).toBeUndefined();
     expect(driver.streamingUI.getToolComponent('call_agent_2')).toBeUndefined();
   });
@@ -814,7 +812,7 @@ describe('replayed background-agent identity', () => {
 describe('replayed block sealing at agent cards and delivered requests', () => {
   const stripAnsi = (line: string): string => line.replaceAll(/\u001B\[[0-9;]*m/g, '');
 
-  it('seals the block above a replayed Agent card, so the next work starts below it', async () => {
+  it('keeps a replayed Agent call as a row of the block, as the live session does', async () => {
     const driver = await replayIntoDriver([
       message('user', [{ type: 'text', text: 'run one agent' }]),
       message('assistant', [], { toolCalls: [toolCall('call_bash', 'Bash', { command: 'ls' })] }),
@@ -833,29 +831,23 @@ describe('replayed block sealing at agent cards and delivered requests', () => {
     const blocks = children.filter(
       (child): child is ActivityGroupComponent => child instanceof ActivityGroupComponent,
     );
-    const card = children.find((child) => child instanceof ToolCallComponent);
-
-    // The same shape the live session builds: the first Agent card cuts the
-    // stretch of work in two, so the read after it opens a block below the card.
-    expect(blocks).toHaveLength(2);
-    expect(card).toBeInstanceOf(ToolCallComponent);
-    expect(children.indexOf(blocks[0] as ActivityGroupComponent)).toBeLessThan(
-      children.indexOf(card as ToolCallComponent),
-    );
-    expect(children.indexOf(card as ToolCallComponent)).toBeLessThan(
-      children.indexOf(blocks[1] as ActivityGroupComponent),
-    );
-    expect(stripAnsi((blocks[0] as ActivityGroupComponent).render(120).join('\n'))).not.toContain('a.ts');
-    expect(stripAnsi((blocks[1] as ActivityGroupComponent).render(120).join('\n'))).toContain('a.ts');
-    expect(children.map((child) => child.render(120).join('\n')).join('\n')).toContain(
-      'inspect storage',
-    );
+    expect(blocks).toHaveLength(1);
+    expect(children.some((child) => child instanceof ToolCallComponent)).toBe(false);
+    const rendered = stripAnsi((blocks[0] as ActivityGroupComponent).render(120).join('\n'));
+    expect(rendered.indexOf('ls')).toBeLessThan(rendered.indexOf('inspect storage'));
+    expect(rendered.indexOf('inspect storage')).toBeLessThan(rendered.indexOf('a.ts'));
   });
 
 });
 
 describe('replayed foreground→background handoff', () => {
   const stripAnsi = (line: string): string => line.replaceAll(/\u001B\[[0-9;]*m/g, '');
+  /** The Agent card, which the block borrows as one of its rows. */
+  const agentCardOf = (driver: Awaited<ReturnType<typeof replayIntoDriver>>): ToolCallComponent | undefined =>
+    driver.state.transcriptContainer.children
+      .filter((child): child is ActivityGroupComponent => child instanceof ActivityGroupComponent)
+      .flatMap((block) => block.getToolComponents())
+      .find((card) => card.toolCallView.name === 'Agent');
 
   it('keeps a handed-off agent card on 后台运行 instead of an ordinary finish', async () => {
     const driver = await replayIntoDriver([
@@ -882,9 +874,7 @@ describe('replayed foreground→background handoff', () => {
       ),
     ]);
 
-    const card = driver.state.transcriptContainer.children.find(
-      (child) => child instanceof ToolCallComponent,
-    );
+    const card = agentCardOf(driver);
     expect(card).toBeInstanceOf(ToolCallComponent);
     const out = (card as ToolCallComponent)
       .render(120)
@@ -892,6 +882,13 @@ describe('replayed foreground→background handoff', () => {
       .join('\n');
     expect(out).toContain('后台运行');
     expect(out).not.toContain('已完成');
+    // The block's row follows the subagent: still working, so no success mark.
+    const block = driver.state.transcriptContainer.children.find(
+      (child): child is ActivityGroupComponent => child instanceof ActivityGroupComponent,
+    );
+    const row = stripAnsi(block?.render(120).join('\n') ?? '');
+    expect(row).toContain('后台运行');
+    expect(row).not.toMatch(/✓ .*inspect storage/);
   });
 
   it('keeps the register-failure handoff on 后台运行: the result line is the only signal', async () => {
@@ -920,9 +917,7 @@ describe('replayed foreground→background handoff', () => {
       ),
     ]);
 
-    const card = driver.state.transcriptContainer.children.find(
-      (child) => child instanceof ToolCallComponent,
-    );
+    const card = agentCardOf(driver);
     expect(card).toBeInstanceOf(ToolCallComponent);
     expect((card as ToolCallComponent).getSubagentSnapshot().phase).toBe('backgrounded');
     const out = (card as ToolCallComponent)
@@ -959,9 +954,7 @@ describe('replayed foreground→background handoff', () => {
       ),
     ]);
 
-    const card = driver.state.transcriptContainer.children.find(
-      (child) => child instanceof ToolCallComponent,
-    );
+    const card = agentCardOf(driver);
     expect(card).toBeInstanceOf(ToolCallComponent);
     expect((card as ToolCallComponent).getSubagentSnapshot().phase).toBe('done');
     const out = (card as ToolCallComponent)

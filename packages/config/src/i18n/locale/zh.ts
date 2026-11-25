@@ -853,6 +853,7 @@ export const zh: Record<string, string> = {
   'toolcall.used': '已使用',
   'toolcall.truncated': '已截断',
   'toolcall.in_use': '正在使用',
+  'toolcall.waiting_subagent': '等待子代理…',
   'toolcall.sub_agent_named': '子 agent {name} ({id})',
   'toolcall.sub_agent': '子 agent ({id})',
   'toolcall.more_tools': '还有 {count} 个 tool call...',

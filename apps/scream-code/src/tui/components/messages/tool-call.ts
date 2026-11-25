@@ -71,9 +71,10 @@ interface SubToolActivity {
 }
 
 /**
- * Immutable subagent state snapshot. `AgentGroupComponent` reads one-time
- * views via `ToolCallComponent.getSubagentSnapshot()` and renders its own
- * branch lines; `onSnapshotChange` notifies it when state changes.
+ * Immutable subagent state snapshot. The activity block reads one-time views
+ * via `ToolCallComponent.getSubagentSnapshot()` for a subagent's row (its
+ * status and what it is doing); `onSnapshotChange` notifies it when state
+ * changes.
  *
  * `latestActivity` priority, used only while running:
  *   1. latest ongoing sub-tool (`Using {name} ({keyArg})`)
@@ -555,7 +556,7 @@ export class ToolCallComponent extends CachedContainer {
   private static readonly WRITE_STREAM_TAIL_RAW_CHARS = 4096;
 
   /**
-   * Registered by a group container (`AgentGroupComponent`, the activity block)
+   * Registered by a group container (the activity block)
    * when this component is borrowed as a hidden state container. Any state
    * change (subagent meta, phase, sub-tool, result, etc.) triggers a throttled
    * group re-render. `undefined` means no group is subscribed and standalone
@@ -2170,13 +2171,13 @@ export function computeLatestActivity(
   if (ongoing.size > 0) {
     const lastOngoing = [...ongoing.values()].at(-1);
     if (lastOngoing !== undefined) {
-      return formatActivityLine('Using', lastOngoing.name, lastOngoing.args, workspaceDir);
+      return formatActivityLine(t('toolcall.in_use'), lastOngoing.name, lastOngoing.args, workspaceDir);
     }
   }
   if (finished.length > 0) {
     const last = finished.at(-1);
     if (last !== undefined) {
-      return formatActivityLine('Used', last.name, last.args, workspaceDir);
+      return formatActivityLine(t('toolcall.used'), last.name, last.args, workspaceDir);
     }
   }
   if (text.length > 0) {
@@ -2188,7 +2189,7 @@ export function computeLatestActivity(
   }
   // Running but idle: waiting for a grandchild subagent (thinking) or for the
   // model — surface it instead of a false "running".
-  if (isWaitingHeuristic === true) return 'Waiting for subagent…';
+  if (isWaitingHeuristic === true) return t('toolcall.waiting_subagent');
   return undefined;
 }
 

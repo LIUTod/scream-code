@@ -1641,8 +1641,8 @@ export class SessionEventHandler {
     const { streamingUI } = this.host;
 
     // WolfPack spawns N subagents from a single tool call. To render each as
-    // an independent tree entry (AgentGroupComponent groups 2+ Agent cards),
-    // each subagent gets its own ToolCallComponent keyed by subagentId (not
+    // its own row of the activity block, each subagent gets its own
+    // ToolCallComponent keyed by subagentId (not
     // parentToolCallId, which would overwrite). Route subsequent events to
     // the per-subagent card by storing subagentId as the routing key.
     const parentToolCall = streamingUI.getActiveToolCall(event.parentToolCallId);

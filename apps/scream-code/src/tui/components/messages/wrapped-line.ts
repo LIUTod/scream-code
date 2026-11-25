@@ -5,7 +5,7 @@
  *
  * This is the single shared component for tree-branch and indented
  * sub-content rendering, replacing the old `PrefixedWrappedLine`
- * (tool-call.ts) and the duplicate `BranchText` (agent-group.ts):
+ * (tool-call.ts) and the duplicate `BranchText` of the former agent group:
  * - default mode wraps like the old components (hanging indent, Text's
  *   word wrapping, rows padded to content width);
  * - `truncate: true` renders exactly one row clipped to the available

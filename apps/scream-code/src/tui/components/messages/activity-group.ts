@@ -10,7 +10,7 @@
  * to the tools it produced, so the block reads as a timeline instead of one
  * merged reasoning summary appended below every tool call.
  *
- * Design (mirrors AgentGroupComponent):
+ * Design:
  * - Borrowed ToolCallComponents keep all of their state; the group never mounts
  *   them as children and only renders their own header row plus a short preview
  *   of their own rendered body. Group rows therefore always match the
@@ -367,6 +367,13 @@ export class ActivityGroupComponent extends Container {
     return this.expanded;
   }
 
+  /** The borrowed cards, in timeline order (lookups by subagent id walk them). */
+  getToolComponents(): ToolCallComponent[] {
+    const cards: ToolCallComponent[] = [];
+    for (const segment of this.segments) if (segment.kind === 'tool') cards.push(segment.tc);
+    return cards;
+  }
+
   /**
    * Borrows a tool card as a hidden state container. Re-attaching the same
    * card is a no-op. `callId` is what later lets an approval be filed under the
@@ -680,7 +687,13 @@ export class ActivityGroupComponent extends Container {
   private buildCollapsedRows(width: number): void {
     const { collapsed, editPreview } = getActivityLines();
     let rowsLeft = Math.max(1, collapsed - 1);
-    const picked: { segment: BlockSegment; preview: FileChange | undefined; previewRows: number }[] = [];
+    const picked: {
+      segment: BlockSegment;
+      preview: FileChange | undefined;
+      previewRows: number;
+      /** What a running subagent is doing, one row under its own. */
+      live: string | undefined;
+    }[] = [];
     let previewGiven = false;
     for (let index = this.segments.length - 1; index >= 0 && rowsLeft > 0; index -= 1) {
       const segment = this.segments[index] as BlockSegment;
@@ -706,10 +719,15 @@ export class ActivityGroupComponent extends Container {
           }
         }
       }
-      picked.push({ segment, preview, previewRows });
+      let live: string | undefined;
+      if (segment.kind === 'tool' && rowsLeft > 0) {
+        live = this.agentActivity(segment.tc);
+        if (live !== undefined) rowsLeft -= 1;
+      }
+      picked.push({ segment, preview, previewRows, live });
     }
     picked.reverse();
-    picked.forEach(({ segment, preview, previewRows }, index) => {
+    picked.forEach(({ segment, preview, previewRows, live }, index) => {
       const isLast = index === picked.length - 1;
       if (segment.kind === 'tool') {
         const row = this.toolRow(segment.tc, width, ACTIVITY_GROUP_TOOL_PREVIEW_LINES, !this.running);
@@ -717,6 +735,10 @@ export class ActivityGroupComponent extends Container {
           preview === undefined
             ? []
             : renderFileChange(preview, 'folded', previewRows, width - BRANCH_PIPE.length, this.colors);
+        if (live !== undefined) {
+          const textWidth = Math.max(1, width - BRANCH_PIPE.length - BODY_TEXT_INDENT.length);
+          lines.push(`${BODY_TEXT_INDENT}${chalk.hex(this.colors.textDim)(truncateToWidth(live, textWidth, '…'))}`);
+        }
         // A last row with a preview keeps the tree open (├─ / │) and closes it
         // on the preview's last line, so the changed lines sit inside the frame.
         this.bodyContainer.addChild(
@@ -1068,6 +1090,10 @@ export class ActivityGroupComponent extends Container {
       if (body.length >= maxLines) break;
     }
     const result = tc.resultView;
+    // A subagent's row follows the subagent, not its tool call: a run handed
+    // to the background has its result already, yet is still working.
+    const phase = tc.toolCallView.name === 'Agent' ? tc.getSubagentSnapshot().phase : undefined;
+    const agentRunning = phase === 'spawning' || phase === 'running' || phase === 'backgrounded';
     return {
       header: condenseRowLabel(
         stripCardMarker(rawHeader),
@@ -1081,10 +1107,19 @@ export class ActivityGroupComponent extends Container {
       // was lost) must settle with the block instead of spinning forever.
       // Live blocks keep the honest running state for parallel batches; a late
       // real result still lands via onToolCallEnd and overwrites success/✗.
-      done: result !== undefined || settled,
-      failed: result?.is_error === true || cardMarkerChar(rawHeader) === '✗',
+      done: !agentRunning && (result !== undefined || settled),
+      failed: phase === 'failed' || result?.is_error === true || cardMarkerChar(rawHeader) === '✗',
       aborted: cardMarkerChar(rawHeader) === '⊙',
     };
+  }
+
+  /** What a running subagent is doing now, for the line under its row; undefined otherwise. */
+  private agentActivity(tc: ToolCallComponent): string | undefined {
+    if (tc.toolCallView.name !== 'Agent') return undefined;
+    const snapshot = tc.getSubagentSnapshot();
+    if (snapshot.phase !== 'spawning' && snapshot.phase !== 'running' && snapshot.phase !== 'backgrounded') return undefined;
+    const activity = snapshot.latestActivity?.replaceAll(/\s+/g, ' ').trim();
+    return activity === undefined || activity.length === 0 ? undefined : activity;
   }
 
   /** Mirrors a tool row's status prefix so reasoning and tool rows line up: a
@@ -1154,6 +1189,7 @@ export class ActivityGroupComponent extends Container {
       if (segment.kind === 'thinking' && segment.live) return true;
       if (segment.kind === 'notice' && segment.data.phase === 'started') return true;
       if (segment.kind === 'tool' && segment.tc.resultView === undefined) return true;
+      if (segment.kind === 'tool' && this.agentActivity(segment.tc) !== undefined) return true;
     }
     return false;
   }

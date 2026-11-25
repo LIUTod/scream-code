@@ -2,7 +2,6 @@ import type { Session } from '@scream-code/scream-code-sdk';
 
 import { t } from '@scream-code/config';
 
-import { AgentGroupComponent } from '../components/messages/agent-group';
 import { ActivityGroupComponent, type BlockNoteTone } from '../components/messages/activity-group';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { CompactionComponent } from '../components/dialogs/compaction';
@@ -100,12 +99,6 @@ export class StreamingUIController {
     { name?: string; argumentsText: string; startedAtMs: number }
   >();
   private _pendingToolComponents = new Map<string, ToolCallComponent>();
-  private _pendingAgentGroup: {
-    readonly turnId: string | undefined;
-    readonly step: number;
-    solo?: ToolCallComponent;
-    group?: AgentGroupComponent;
-  } | null = null;
   private _activityGroup: ActivityGroupComponent | undefined;
   /**
    * Approval outcomes answered before their tool call was dispatched, waiting
@@ -120,18 +113,16 @@ export class StreamingUIController {
   /**
    * Tools that keep their own transcript card instead of joining the turn's
    * activity block:
-   * - `Agent` is owned by the agent group machinery (and by `/revoke`, which
-   *   walks those groups);
    * - `AskUserQuestion` returns early above and mounts its finished card;
    * - `ExitPlanMode` owns the plan box, which Ctrl+E expands by walking the
    *   transcript container's direct children.
    *
    * Every other tool is a row inside the block, so a turn reads as one
-   * timeline instead of a mix of cards and groups — an image read included:
-   * one row while folded, its thumbnail under the row once expanded.
+   * timeline instead of a mix of cards and groups — an image read (one row
+   * while folded, its thumbnail under the row once expanded) and a subagent
+   * (its row says what it is doing while it runs) included.
    */
   private static readonly STANDALONE_TOOL_NAMES: ReadonlySet<string> = new Set([
-    'Agent',
     'AskUserQuestion',
     'ExitPlanMode',
   ]);
@@ -243,10 +234,6 @@ export class StreamingUIController {
     this._pendingToolComponents.delete(id);
   }
 
-  hasPendingAgentGroup(): boolean {
-    return this._pendingAgentGroup !== null;
-  }
-
   removeToolComponentIfInactive(toolCallId: string): void {
     if (!this._activeToolCalls.has(toolCallId)) {
       this._pendingToolComponents.delete(toolCallId);
@@ -281,9 +268,8 @@ export class StreamingUIController {
    * disk records pre-date `agent_id` persistence.
    *
    * Search scope includes both in-flight components and already-mounted
-   * cards (some live in `transcriptContainer` standalone, others are
-   * borrowed by an `AgentGroupComponent` and reachable only via
-   * `getToolComponents()`).
+   * cards (an Agent card is a row of a turn's activity block, borrowed by it
+   * and reachable only via `getToolComponents()`).
    *
    * Returns true iff a component was found and updated.
    */
@@ -325,7 +311,7 @@ export class StreamingUIController {
       for (const child of this.host.state.transcriptContainer.children) {
         if (child instanceof ToolCallComponent) {
           visit(child);
-        } else if (child instanceof AgentGroupComponent) {
+        } else if (child instanceof ActivityGroupComponent) {
           for (const tc of child.getToolComponents()) {
             visit(tc);
             if (agentIdMatch !== undefined) break;
@@ -378,7 +364,7 @@ export class StreamingUIController {
     for (const child of this.host.state.transcriptContainer.children) {
       if (child instanceof ToolCallComponent) {
         if (child.getSubagentAgentId() === agentId) return child;
-      } else if (child instanceof AgentGroupComponent) {
+      } else if (child instanceof ActivityGroupComponent) {
         for (const tc of child.getToolComponents()) {
           if (tc.getSubagentAgentId() === agentId) return tc;
         }
@@ -509,7 +495,6 @@ export class StreamingUIController {
     for (const toolCallId of completedToolCallIds) {
       this._pendingToolComponents.delete(toolCallId);
     }
-    this._pendingAgentGroup = null;
     this._currentTurnId = undefined;
     this._currentStep = 0;
     this._streamingToolCallArguments.clear();
@@ -935,7 +920,6 @@ export class StreamingUIController {
     this.clearFlushTimerIfIdle();
     this._streamingToolCallArguments.clear();
     this.disposeAndClearPendingToolComponents();
-    this._pendingAgentGroup = null;
     // A reset belongs to a boundary (step start, retry, interrupt, turn end, a
     // session switch): an outcome whose call never produced a row would wait
     // forever, so it is settled here as a notice instead of being dropped — the
@@ -1024,7 +1008,6 @@ export class StreamingUIController {
 
   onStreamingTextStart(): void {
     const { state } = this.host;
-    this._pendingAgentGroup = null;
     const entry = {
       id: nextTranscriptId(),
       kind: 'assistant' as const,
@@ -1077,7 +1060,6 @@ export class StreamingUIController {
     if (fullText.length === 0 && this._activeThinkingComponent === undefined) return;
     const { state } = this.host;
     if (this._activeThinkingComponent === undefined) {
-      this._pendingAgentGroup = null;
       const component = new ThinkingComponent(
         fullText,
         state.theme.colors,
@@ -1160,33 +1142,28 @@ export class StreamingUIController {
 
     if (state.planExpanded) tc.setPlanExpanded(true);
 
-    if (toolCall.name !== 'Agent') this._pendingAgentGroup = null;
-
-    const handled = this.tryAttachAgentToolCall(toolCall, tc);
-    if (!handled) {
-      if (StreamingUIController.STANDALONE_TOOL_NAMES.has(toolCall.name)) {
-        // A plan is a message in its own right, so it ends the stretch of work
-        // that led to it: without this seal the block stays open *above* the plan
-        // and everything that follows keeps writing rows where nobody looks while
-        // reading the plan. Every revision seals again, which is what keeps the
-        // running block below the newest plan.
-        if (toolCall.name === 'ExitPlanMode') this.endActivityGroup();
-        // A card outside the block never adopts an outcome: this call's own
-        // outcome waits for the step to settle, so an outcome belonging to some
-        // other call is not dragged out of its place here.
-        tc.setExpanded(state.toolOutputExpanded);
-        state.transcriptContainer.addChild(tc);
-        state.ui.requestRender();
-      } else {
-        const group = this.ensureActivityGroup();
-        this.registerActivityGroupEntry(group, entry);
-        this._groupByToolCard.set(tc, group);
-        group.attachTool(tc, toolCall.step ?? this._currentStep, toolCall.id);
-        // The outcome waited for its own call: it goes under this row, which is
-        // also the order a replayed block shows.
-        this.adoptPendingApproval(group, toolCall.id);
-        state.ui.requestRender();
-      }
+    if (StreamingUIController.STANDALONE_TOOL_NAMES.has(toolCall.name)) {
+      // A plan is a message in its own right, so it ends the stretch of work
+      // that led to it: without this seal the block stays open *above* the plan
+      // and everything that follows keeps writing rows where nobody looks while
+      // reading the plan. Every revision seals again, which is what keeps the
+      // running block below the newest plan.
+      if (toolCall.name === 'ExitPlanMode') this.endActivityGroup();
+      // A card outside the block never adopts an outcome: this call's own
+      // outcome waits for the step to settle, so an outcome belonging to some
+      // other call is not dragged out of its place here.
+      tc.setExpanded(state.toolOutputExpanded);
+      state.transcriptContainer.addChild(tc);
+      state.ui.requestRender();
+    } else {
+      const group = this.ensureActivityGroup();
+      this.registerActivityGroupEntry(group, entry);
+      this._groupByToolCard.set(tc, group);
+      group.attachTool(tc, toolCall.step ?? this._currentStep, toolCall.id);
+      // The outcome waited for its own call: it goes under this row, which is
+      // also the order a replayed block shows.
+      this.adoptPendingApproval(group, toolCall.id);
+      state.ui.requestRender();
     }
 
     if (toolCall.name === 'ExitPlanMode' && typeof toolCall.args['plan'] !== 'string') {
@@ -1371,74 +1348,5 @@ export class StreamingUIController {
     } else if (toolCall.name !== 'Agent') {
       this.onToolCallStart(toolCall);
     }
-  }
-
-  private tryAttachAgentToolCall(toolCall: ToolCallBlockData, tc: ToolCallComponent): boolean {
-    const { state } = this.host;
-    if (toolCall.name !== 'Agent') {
-      this._pendingAgentGroup = null;
-      return false;
-    }
-
-    const step = toolCall.step ?? this._currentStep;
-    const turnId = toolCall.turnId ?? this._currentTurnId;
-    const pending = this._pendingAgentGroup;
-
-    if (pending !== null && (pending.step !== step || pending.turnId !== turnId)) {
-      this._pendingAgentGroup = null;
-    }
-
-    const cur = this._pendingAgentGroup;
-    if (cur === null) {
-      // A first agent card opens a row of its own: it cuts the running stretch
-      // in two, like a plan card does, so the card lands below the settled
-      // block and the following work opens a fresh block under the card. A
-      // later card of the same step joins this row (below) and must not seal
-      // again — there is nothing new on screen for it to cut around.
-      this.endActivityGroup();
-      this._pendingAgentGroup = { step, turnId, solo: tc };
-      tc.setExpanded(state.toolOutputExpanded);
-      state.transcriptContainer.addChild(tc);
-      state.ui.requestRender();
-      return true;
-    }
-
-    if (cur.group !== undefined) {
-      cur.group.attach(toolCall.id, tc);
-      return true;
-    }
-
-    const solo = cur.solo;
-    if (solo === undefined) {
-      this._pendingAgentGroup = { step, turnId, solo: tc };
-      state.transcriptContainer.addChild(tc);
-      state.ui.requestRender();
-      return true;
-    }
-    const group = this.upgradeSoloAgentToGroup(solo);
-    group.attach(toolCall.id, tc);
-    this._pendingAgentGroup = { step, turnId, group };
-    state.ui.requestRender();
-    return true;
-  }
-
-  private upgradeSoloAgentToGroup(solo: ToolCallComponent): AgentGroupComponent {
-    const { state, transcriptController } = this.host;
-    const group = new AgentGroupComponent(state.theme.colors, state.ui);
-    const children = state.transcriptContainer.children;
-    const idx = children.indexOf(solo);
-    if (idx >= 0) {
-      children[idx] = group;
-      state.transcriptContainer.invalidate();
-    } else {
-      state.transcriptContainer.addChild(group);
-    }
-    group.attach(solo.toolCallView.id, solo);
-    const entry = transcriptController.findEntryForComponent(solo);
-    if (entry !== undefined) {
-      transcriptController.registerLiveComponent(group, entry);
-      transcriptController.unmarkPending(solo);
-    }
-    return group;
   }
 }

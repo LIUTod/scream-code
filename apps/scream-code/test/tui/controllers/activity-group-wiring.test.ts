@@ -3,7 +3,6 @@ import type { Event } from '@scream-code/scream-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
-import { AgentGroupComponent } from '#/tui/components/messages/agent-group';
 import { NoticeMessageComponent } from '#/tui/components/messages/status-message';
 import { ThinkingComponent } from '#/tui/components/messages/thinking';
 import { ToolCallComponent } from '#/tui/components/messages/tool-call';
@@ -170,9 +169,8 @@ describe('activity block wiring', () => {
   it('stops flipping at the previous turn and skips components without a collapse state', () => {
     const { state, transcript } = createFixture();
     const earlier = new ActivityGroupComponent(darkColors, undefined);
-    const agentGroup = new AgentGroupComponent(darkColors, undefined);
     state.transcriptContainer.addChild(earlier);
-    state.transcriptContainer.addChild(agentGroup);
+    state.transcriptContainer.addChild(new Text('no collapse state', 0, 0));
     state.transcriptContainer.addChild(new UserMessageComponent('next prompt', darkColors));
     const current = new ActivityGroupComponent(darkColors, undefined);
     state.transcriptContainer.addChild(current);
@@ -181,7 +179,7 @@ describe('activity block wiring', () => {
 
     expect(state.toolOutputExpanded).toBe(true);
     expect(current.isExpanded()).toBe(true);
-    // The agent group has no collapse state of its own and the earlier turn is
+    // The plain row has no collapse state of its own and the earlier turn is
     // above the boundary, so neither follows the press.
     expect(earlier.isExpanded()).toBe(false);
   });
@@ -677,7 +675,7 @@ describe('activity block wiring — plan cards seal the running block', () => {
   });
 });
 
-describe('activity block wiring — agent cards and delivered requests seal the running block', () => {
+describe('activity block wiring — subagent rows and delivered requests', () => {
   /**
    * The delivered-request signal arrives as a session event, so this fixture
    * pairs the real streaming controller with a handler whose transcript writes
@@ -740,67 +738,50 @@ describe('activity block wiring — agent cards and delivered requests seal the 
       .replaceAll(/\u001B\[[0-9;]*m/g, '');
   }
 
-  it('seals the running block when a first agent card mounts, and the next work starts below the card', () => {
+  it('files a subagent as a row of the running block, so the block stays the newest thing on screen', () => {
     const { state, controller } = createFixture();
     state.appState.streamingPhase = 'thinking';
 
     controller.onToolCallStart(makeToolCall('t1', 'Bash', 1, { command: 'ls -la' }));
-    const first = findGroup(state.transcriptContainer) as ActivityGroupComponent;
-    const slot = state.transcriptContainer.children.indexOf(first);
-    expect(first.render(90).join('\n')).toContain('工具执行中');
-
+    const seal = vi.spyOn(controller, 'endActivityGroup');
     controller.onToolCallStart(
       makeToolCall('a1', 'Agent', 1, { description: 'inspect storage', subagent_type: 'explore' }),
     );
-
-    // Sealed in place: the block keeps its slot and its header claims completion.
-    expect(state.transcriptContainer.children.indexOf(first)).toBe(slot);
-    expect(first.render(90).join('\n')).toContain('工具执行完成');
-    expect(first.render(90).join('\n')).not.toContain('工具执行中');
-
-    const card = state.transcriptContainer.children.find(
-      (child): child is ToolCallComponent => child instanceof ToolCallComponent,
-    );
-    expect(card).toBeDefined();
-    expect(state.transcriptContainer.children.indexOf(card as ToolCallComponent)).toBeGreaterThan(
-      slot,
-    );
-
-    // The next stretch of work opens a fresh block below the card.
     controller.onToolCallStart(makeToolCall('t2', 'Edit', 2, { file_path: 'a.ts' }));
 
+    expect(seal).not.toHaveBeenCalled();
     const blocks = findGroups(state.transcriptContainer);
-    expect(blocks).toHaveLength(2);
-    expect(blocks[0]).toBe(first);
+    expect(blocks).toHaveLength(1);
+    expect(state.transcriptContainer.children.at(-1)).toBe(blocks[0]);
+    expect(
+      state.transcriptContainer.children.some((child) => child instanceof ToolCallComponent),
+    ).toBe(false);
     const rendered = renderAll(state);
+    expect(rendered).toContain('工具执行中');
     expect(rendered.indexOf('Bash')).toBeLessThan(rendered.indexOf('inspect storage'));
     expect(rendered.indexOf('inspect storage')).toBeLessThan(rendered.indexOf('Edit'));
   });
 
-  it('seals once for a step: later cards of the same step join the row without a second seal', () => {
+  it('gives each of a step’s parallel subagents its own row, and says what a running one is doing', () => {
     const { state, controller } = createFixture();
     state.appState.streamingPhase = 'thinking';
 
-    controller.onToolCallStart(makeToolCall('t1', 'Bash', 1));
-    const seal = vi.spyOn(controller, 'endActivityGroup');
-
     controller.onToolCallStart(makeToolCall('a1', 'Agent', 1, { description: 'first child' }));
-    expect(seal).toHaveBeenCalledTimes(1);
-
     controller.onToolCallStart(makeToolCall('a2', 'Agent', 1, { description: 'second child' }));
-    // The second card attaches to the row that already exists: no new cut, no
-    // empty block, and the seal above is not repeated.
-    expect(seal).toHaveBeenCalledTimes(1);
+    const second = controller.getToolComponent('a2') as ToolCallComponent;
+    second.onSubagentSpawned({ agentId: 'ag2', agentName: 'explore', runInBackground: false });
+    second.onSubagentStarted({ agentId: 'ag2', agentName: 'explore', runInBackground: false });
+    second.appendSubToolCall({ id: 's1', name: 'Grep', args: { pattern: 'loadConfig' } });
 
-    expect(
-      state.transcriptContainer.children.filter((child) => child instanceof AgentGroupComponent),
-    ).toHaveLength(1);
-    expect(
-      state.transcriptContainer.children.filter((child) => child instanceof ToolCallComponent),
-    ).toHaveLength(0);
     const blocks = findGroups(state.transcriptContainer);
     expect(blocks).toHaveLength(1);
-    expect(blocks[0]?.render(90).join('\n')).toContain('工具执行完成');
+    const rows = (blocks[0]?.render(90) ?? []).map((row) => row.replaceAll(/\u001B\[[0-9;]*m/g, '').trimEnd());
+    const firstRow = rows.findIndex((row) => row.includes('first child'));
+    const secondRow = rows.findIndex((row) => row.includes('second child'));
+    expect(firstRow).toBeGreaterThan(0);
+    expect(secondRow).toBeGreaterThan(firstRow);
+    // The running subagent's row is followed by what it is doing, inside the tree.
+    expect(rows[secondRow + 1]).toMatch(/^ {2}└ {4}.*Grep.*loadConfig/);
   });
 
   it('leaves the running block alone when a delivered child request arrives', () => {
@@ -829,14 +810,12 @@ describe('activity block wiring — agent cards and delivered requests seal the 
     expect(renderAll(state)).not.toContain('▸');
   });
 
-  it('keeps both signals as no-ops when no block is open', () => {
-    const { state, controller, handler, collab } = createSignalFixture();
+  it('keeps a delivered request a no-op when no block is open', () => {
+    const { state, handler, collab } = createSignalFixture();
 
-    controller.onToolCallStart(makeToolCall('a1', 'Agent', 1, { description: 'no block yet' }));
     deliverChildRequest(handler);
 
-    // Neither signal mints an empty block, and the request stays out of the
-    // transcript — only the agent card row appears.
+    // The request mints no empty block and stays out of the transcript.
     expect(findGroups(state.transcriptContainer)).toHaveLength(0);
     expect(
       state.transcriptContainer.children.some((child) => child instanceof NoticeMessageComponent),

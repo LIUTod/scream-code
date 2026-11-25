@@ -977,7 +977,7 @@ describe('ToolCallComponent', () => {
       component.setBackgroundTaskTerminalStatus('lost');
       const snap = component.getSubagentSnapshot();
       expect(snap.phase).toBe('failed');
-      // The agent-group renderer uses snap.errorText for the "Error:" line.
+      // Readers of the snapshot use snap.errorText for the failure line.
       // The spawn-success ToolResult must NOT leak as the failure message.
       expect(snap.errorText).toContain('丢失');
       expect(snap.errorText).not.toContain('task_id:');
@@ -1027,9 +1027,8 @@ describe('ToolCallComponent', () => {
       expect(component.getSubagentSnapshot().phase).toBe('failed');
     });
 
-    // Standalone render path — when only ONE Agent tool call lands in a
-    // step, the card is never upgraded into an `AgentGroupComponent` and is
-    // mounted on its own. The standalone header derives its label from
+    // The card's own render path — the header the activity block's row is
+    // built from. The header derives its label from
     // `getDerivedSubagentPhase()` (separate from `getSubagentSnapshot`).
     // Without the override threading into that path AND a header rebuild,
     // a lost bg agent keeps the green "✓ Completed" label.
