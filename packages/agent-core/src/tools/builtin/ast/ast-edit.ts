@@ -10,7 +10,8 @@ import { toInputJsonSchema } from '../../support/input-schema';
 import { diffLineRuns, physicalLinesOf } from '../../support/line-diff';
 import type { WorkspaceConfig } from '../../support/workspace';
 import type { EditRecoveryQueue } from '../../support/edit-recovery-queue';
-import { materializeModelText, toModelTextView } from '../file/line-endings';
+import type { EditSnapshotStore } from '../../support/edit-snapshot-store';
+import { computeAnchor, materializeModelText, toModelTextView } from '../file/line-endings';
 import {
   fetchDiagnostics,
   formatDiagnosticsHint,
@@ -73,6 +74,11 @@ export class AstEditTool implements BuiltinTool<AstEditInput> {
      * the fix bypasses Edit, so Edit's own observation never runs.
      */
     private readonly editRecovery?: EditRecoveryQueue,
+    /**
+     * Session snapshot store: an apply is the agent's own change, recorded so
+     * the outside-change check does not report it back as someone else's.
+     */
+    private readonly editSnapshots?: EditSnapshotStore,
   ) {}
 
   async resolveExecution(args: AstEditInput): Promise<ToolExecution> {
@@ -231,6 +237,11 @@ export class AstEditTool implements BuiltinTool<AstEditInput> {
       }
       const written = materializeModelText(fresh.nextText, fresh.style);
       await this.jian.writeText(safePath, written);
+      this.editSnapshots?.remember(safePath, {
+        content: fresh.nextText,
+        anchor: computeAnchor(fresh.nextText),
+        recordedAt: 'edit',
+      });
       return { ok: true as const, matchCount: fresh.matchCount };
     });
 

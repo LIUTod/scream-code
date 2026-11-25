@@ -1474,7 +1474,7 @@ export class ToolManager {
         new b.GrepTool(jian, workspace, this.agent.repetitionGuard),
         new b.GlobTool(jian, workspace),
         new b.AstGrepTool(jian, workspace),
-        new b.AstEditTool(jian, workspace, this.lspRegistry, this.agent.editRecoveryQueue),
+        new b.AstEditTool(jian, workspace, this.lspRegistry, this.agent.editRecoveryQueue, this.agent.editSnapshots),
         new b.BashTool(jian, cwd, background, {
           allowBackground,
           availableTools: this.enabledTools,
