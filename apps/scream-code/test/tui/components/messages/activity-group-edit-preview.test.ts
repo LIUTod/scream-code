@@ -107,4 +107,50 @@ describe('ActivityGroupComponent — inline edit previews while folded', () => {
     const body = (row: string): string => row.slice(5);
     expect(folded.filter((row) => / 42 [+-] /.test(row)).map(body)).toEqual(rows.slice(at + 1, at + 3).map(body));
   });
+
+  it('keeps the newest four steps before giving rows to previews, and labels a change by its own counts', () => {
+    refreshActivityLines();
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.appendThinking('Look at the loader first.', false);
+    group.endThinking();
+    group.attachTool(
+      new ToolCallComponent({ id: 'b1', name: 'Bash', args: { command: 'pnpm test' } }, { tool_call_id: 'b1', output: 'ok', is_error: false }, darkColors),
+      1,
+    );
+    group.attachTool(edit('e1', 'loader.ts', 42), 2);
+    group.attachTool(
+      new ToolCallComponent(
+        { id: 'w1', name: 'Write', args: { file_path: '/workspace/new.ts', content: 'export const x = 1;\nexport const y = 2;\n' } },
+        {
+          tool_call_id: 'w1',
+          output: 'Wrote 40 bytes',
+          is_error: false,
+          display: {
+            kind: 'file_diff',
+            added: 2,
+            removed: 5,
+            preview: [
+              ...[1, 2, 3, 4, 5].map((line) => ({ kind: 'delete' as const, line })),
+              { kind: 'add' as const, line: 1, text: 'export const x = 1;' },
+              { kind: 'add' as const, line: 2, text: 'export const y = 2;' },
+            ],
+            previewTotal: 7,
+          },
+        },
+        darkColors,
+      ),
+      3,
+    );
+    group.setRunning(false);
+    const rows = group.render(WIDTH).map(strip).filter((row) => row.trim().length > 0);
+
+    expect(rows.length).toBeLessThanOrEqual(10);
+    // The reasoning that opened the stretch is still there.
+    expect(rows.some((row) => row.includes('Look at the loader first.'))).toBe(true);
+    // A Write's row reads its real change, the same numbers the header sums.
+    expect(rows.find((row) => row.includes('Write'))).toContain('+2 -5');
+    expect(rows.some((row) => row.includes('2 lines'))).toBe(false);
+    // A settled block reports no reasoning rate.
+    expect(rows[0]).not.toContain('toks/s');
+  });
 });

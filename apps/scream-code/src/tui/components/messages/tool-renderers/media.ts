@@ -130,15 +130,24 @@ function metaSegments(summary: ReadMediaSummary): string[] {
   return segs;
 }
 
+/**
+ * `png · 1280×720 · 312.0 KB`: the format, the size and the weight, short
+ * enough for a row of the activity block. A video keeps its kind in front,
+ * since its path says less than an image's.
+ */
 export const readMediaChip: ChipProvider = (_toolCall, result) => {
   if (result.is_error) return '';
   const summary = parseReadMediaOutput(result.output);
   if (summary === null) return '';
-  const meta = metaSegments(summary);
-  if (meta.length === 0) {
+  const parts: string[] = [];
+  if (summary.kind === 'video') parts.push('video');
+  if (summary.mimeType !== undefined) parts.push(summary.mimeType.replace(/^(?:image|video)\//, ''));
+  if (summary.originalSize !== undefined) parts.push(summary.originalSize.replace(/px$/, '').replace('x', '×'));
+  if (summary.bytes !== undefined) parts.push(formatBytes(summary.bytes));
+  if (parts.length === 0 || (summary.kind === 'video' && parts.length === 1)) {
     return summary.url !== undefined ? `${summary.kind} · uploaded` : summary.kind;
   }
-  return `${summary.kind} (${meta.join(', ')})`;
+  return parts.join(' · ');
 };
 
 export const readMediaSummary: ResultRenderer = (toolCall, result, ctx) => {

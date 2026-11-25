@@ -5,6 +5,7 @@
  * formatted text lines instead of React elements.
  */
 
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 import { diffWords } from 'diff';
 
@@ -341,11 +342,7 @@ export function renderDiffLines(
 
   const hidden = changedLines.length - shown.length;
   if (hidden > 0) {
-    output.push(
-      s.meta(
-        `     … ${String(hidden)} more change${hidden > 1 ? 's' : ''} hidden (ctrl+o to expand)`,
-      ),
-    );
+    output.push(s.meta(`     ${t('diffpreview.more_hidden', { count: String(hidden), key: 'ctrl+o' })}`));
   }
 
   return output;
@@ -485,7 +482,7 @@ export function renderDiffLinesClustered(
           truncated = true;
           break;
         }
-        output.push(s.meta(`     … ${String(gap)} unchanged line${gap > 1 ? 's' : ''} …`));
+        output.push(s.meta(`     ${t('diffpreview.unchanged', { count: String(gap) })}`));
         body++;
       }
     }
@@ -529,11 +526,7 @@ export function renderDiffLinesClustered(
     const hidden = changedCount - shownChanges;
     if (hidden > 0) {
       const hint = opts.expandKeyHint ?? 'ctrl+o';
-      output.push(
-        s.meta(
-          `     … ${String(hidden)} more change${hidden > 1 ? 's' : ''} hidden (${hint} to expand)`,
-        ),
-      );
+      output.push(s.meta(`     ${t('diffpreview.more_hidden', { count: String(hidden), key: hint })}`));
     }
   }
 

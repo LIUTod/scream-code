@@ -75,13 +75,27 @@ export function formatWriteChip(stats: WriteStats): string {
   return pluralize(stats.lines, 'line');
 }
 
-const editChip: ChipProvider = (toolCall) => {
+/**
+ * The tool's own `+added -removed` when it reported them (every live call
+ * and every session saved since): the same numbers the block header sums,
+ * so a row never says "2 lines" over a change that also removed five.
+ */
+function reportedChip(result: Parameters<ChipProvider>[1]): string | undefined {
+  const display = result.display;
+  if (display?.kind !== 'file_diff') return undefined;
+  return formatEditChip({ added: display.added, removed: display.removed });
+}
+
+const editChip: ChipProvider = (toolCall, result) => {
+  const reported = reportedChip(result);
+  if (reported !== undefined) return reported;
   const stats = computeEditStats(toolCall.args);
   if (stats.added === 0 && stats.removed === 0) return '';
   return formatEditChip(stats);
 };
 
-const writeChip: ChipProvider = (toolCall) => formatWriteChip(computeWriteStats(toolCall.args));
+const writeChip: ChipProvider = (toolCall, result) =>
+  reportedChip(result) ?? formatWriteChip(computeWriteStats(toolCall.args));
 
 const readChip: ChipProvider = (_toolCall, result) =>
   pluralize(countNonEmptyLines(result.output), 'line');

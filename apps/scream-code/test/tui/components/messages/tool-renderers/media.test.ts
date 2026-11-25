@@ -91,11 +91,10 @@ describe('parseReadMediaOutput', () => {
 });
 
 describe('readMediaChip', () => {
-  it('returns a compact summary for an image', () => {
+  it('returns a compact summary for an image: format, size, weight', () => {
     const text = strip(readMediaChip(call('ReadMediaFile'), result(imageOutput('/tmp/a.png'))));
-    expect(text).toMatch(/image/);
-    expect(text).toContain('image/png');
-    expect(text).toMatch(/B|KB|MB/);
+    // Short enough for a block row: "png · 1×1 · 68 B".
+    expect(text).toMatch(/^png · \d+×\d+ · \d+(?:\.\d)? (?:B|KB|MB)$/);
   });
 
   it('returns empty string on error so the truncated body shows the error', () => {
@@ -128,7 +127,7 @@ describe('readMediaSummary renderer', () => {
       ctx,
     );
     const renders = components.map((c) => c.render(100).join('\n'));
-    const hasImage = renders.some((r) => r.includes('\x1b_G'));
+    const hasImage = renders.some((r) => r.includes('\x1B_G'));
     expect(hasImage).toBe(true);
     // Path/meta text is suppressed when collapsed (chip carries it)
     expect(renders.join('\n')).not.toContain('/tmp/a.png');
@@ -159,7 +158,7 @@ describe('readMediaSummary renderer', () => {
     // the inline image. The base64 travels inside the escape, which is
     // correct: it is image data, not human-readable text.
     const renders = components.map((c) => c.render(100).join('\n'));
-    const hasImage = renders.some((r) => r.includes('\x1b_G'));
+    const hasImage = renders.some((r) => r.includes('\x1B_G'));
     expect(hasImage).toBe(true);
     // The data-URL prefix must never leak as readable text.
     expect(renders.join('\n')).not.toContain(PNG_DATA_URL);
@@ -174,7 +173,7 @@ describe('readMediaSummary renderer', () => {
     );
     const out = strip(joinRender(components));
     // No kitty graphics escape emitted.
-    expect(out).not.toContain('\x1b_G');
+    expect(out).not.toContain('\x1B_G');
     // A readable image label is shown instead.
     expect(out).toContain('image/png');
   });

@@ -1679,6 +1679,8 @@ export const zh: Record<string, string> = {
   'activitygroup.edit_more': '…还有 {count} 行',
   'activitygroup.edit_removed': '删除 {count} 行',
   'activitygroup.edit_gap': '… 中间 {count} 行没变 …',
+  'diffpreview.more_hidden': '… 还有 {count} 处改动未显示（{key} 展开）',
+  'diffpreview.unchanged': '… 中间 {count} 行没变 …',
   'blockrows.current': '当前: {value}',
   'blockrows.saved': '{label} → {value} 行',
   'registry.codebg_desc': '开关代码块的背景色面板（关闭后代码靠自身颜色与缩进区分），选择后立即生效并持久保存',

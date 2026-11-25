@@ -9,6 +9,9 @@ import {
 } from '#/tui/components/media/diff-preview';
 import { getColorPalette } from '#/tui/theme/colors';
 
+/** The localized "N more changes hidden" row, in either language. */
+const MORE_HIDDEN = /还有 \d+ 处改动未显示（ctrl\+o 展开）|\d+ more changes hidden \(ctrl\+o to expand\)/;
+
 // Force chalk to emit ANSI codes even under vitest's non-TTY stdout so the
 // intra-line inverse highlight can be detected by its escape sequence.
 chalk.level = 1;
@@ -185,7 +188,7 @@ describe('renderDiffLinesClustered', () => {
     );
     expect(text).toContain('L2X');
     expect(text).toContain('L29X');
-    expect(text).toMatch(/… \d+ unchanged lines? …/);
+    expect(text).toMatch(/… (?:中间 )?\d+ (?:行没变|unchanged lines) …/);
     // Middle untouched lines (e.g. L15) should not appear.
     expect(text).not.toContain('L15');
   });
@@ -200,7 +203,7 @@ describe('renderDiffLinesClustered', () => {
       contextLines: 2,
     }).join('\n');
     const text = stripAnsi(out);
-    expect(text).not.toMatch(/unchanged lines? …/);
+    expect(text).not.toMatch(/行没变|unchanged lines/);
     expect(text).toContain('L3X');
     expect(text).toContain('L6X');
   });
@@ -231,7 +234,7 @@ describe('renderDiffLinesClustered', () => {
     expect(text).toContain('+100');
     expect(text).toContain('-100');
     expect(text).toMatch(/old\d+|new\d+/);
-    expect(text).toContain('ctrl+o to expand');
+    expect(text).toMatch(MORE_HIDDEN);
   });
 
   it('truncates at cluster boundary and appends the ctrl+o footer when maxLines is set', () => {
@@ -248,8 +251,7 @@ describe('renderDiffLinesClustered', () => {
       }).join('\n'),
     );
     expect(text).toContain('L2X');
-    expect(text).toMatch(/more change/);
-    expect(text).toContain('ctrl+o to expand');
+    expect(text).toMatch(MORE_HIDDEN);
     expect(text).not.toContain('L41X');
   });
 });

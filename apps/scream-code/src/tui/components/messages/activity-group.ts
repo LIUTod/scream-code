@@ -72,6 +72,8 @@ const TREE_PIPE_ROW = '  │';
  * instead of sitting three cells to its left.
  */
 const BODY_TEXT_INDENT = '   ';
+/** Newest steps whose own rows a folded block keeps before giving room to previews. */
+const FOLDED_KEPT_STEPS = 4;
 /** Result lines (warnings, diagnostics) kept under an expanded change. */
 const CHANGE_NOTE_LINES = 3;
 /** Cells of a background task notice bullet (`⠋ ` / `✓ ` / `✗ `). */
@@ -634,24 +636,25 @@ export class ActivityGroupComponent extends Container {
     // Aggregate diff of the group's successful file mutations (Edit/Write).
     // Failed attempts changed nothing and count zero; a read-only group omits
     // the segment entirely.
+    // A side that is zero is left out (`+5`, not `+5 -0`).
     const diff = this.diffTotals();
-    const diffPart = diff
-      ? SEPARATOR +
-        (diff.removed === undefined
-          ? t('activitygroup.diffAddedOnly', {
-              added: chalk.hex(colors.diffAdded)(`+${diff.added}`),
-            })
-          : t('activitygroup.diff', {
-              added: chalk.hex(colors.diffAdded)(`+${diff.added}`),
-              removed: chalk.hex(colors.diffRemoved)(`-${diff.removed}`),
-            }))
-      : '';
+    const added = chalk.hex(colors.diffAdded)(`+${diff?.added ?? 0}`);
+    const removed = chalk.hex(colors.diffRemoved)(`-${diff?.removed ?? 0}`);
+    let diffPart = '';
+    if (diff !== undefined) {
+      const hasRemoved = diff.removed !== undefined && diff.removed > 0;
+      if (diff.added > 0 && hasRemoved) diffPart = SEPARATOR + t('activitygroup.diff', { added, removed });
+      else if (hasRemoved) diffPart = SEPARATOR + removed;
+      else diffPart = SEPARATOR + t('activitygroup.diffAddedOnly', { added });
+    }
 
-    // The rate slot is always present: a dash keeps the header width stable and
-    // tells the user the meter is idle rather than missing.
+    // While the turn runs the rate slot is always present: a dash keeps the
+    // header width stable and says the meter is idle rather than missing. A
+    // settled block has no rate to report, so the slot goes.
     const speed = this.liveThinking() ? getSharedSpeedTracker().getSpeed() : 0;
-    const rate =
-      speed > MIN_RATE
+    const rate = !this.running
+      ? ''
+      : speed > MIN_RATE
         ? chalk.hex(
             lerpHex(colors.textDim, colors.primary, easeSpeedRatio(speed / SPEED_MAX)),
           )(t('activitygroup.rate', { rate: speed.toFixed(1) }))
@@ -687,6 +690,10 @@ export class ActivityGroupComponent extends Container {
   private buildCollapsedRows(width: number): void {
     const { collapsed, editPreview } = getActivityLines();
     let rowsLeft = Math.max(1, collapsed - 1);
+    // The newest steps come first: their own rows are kept before any change
+    // preview or live line is given room, so a block full of edits still
+    // shows what led to them.
+    const keptSteps = Math.min(FOLDED_KEPT_STEPS, this.segments.length);
     const picked: {
       segment: BlockSegment;
       preview: FileChange | undefined;
@@ -698,21 +705,26 @@ export class ActivityGroupComponent extends Container {
     for (let index = this.segments.length - 1; index >= 0 && rowsLeft > 0; index -= 1) {
       const segment = this.segments[index] as BlockSegment;
       rowsLeft -= 1;
+      // Rows still owed to the older steps this block keeps.
+      const owed = Math.max(0, keptSteps - (picked.length + 1));
+      let spare = Math.max(0, rowsLeft - owed);
       let preview: FileChange | undefined;
       let previewRows = 0;
-      if (segment.kind === 'tool' && editPreview > 0 && rowsLeft > 0) {
+      if (segment.kind === 'tool' && editPreview > 0 && spare > 0) {
         preview = fileChangeOf(segment.tc.toolCallView, segment.tc.resultView);
         if (preview !== undefined) {
           const wanted = changeRowCount(preview, 'folded', editPreview);
-          if (wanted <= rowsLeft) {
+          if (wanted <= spare) {
             previewRows = editPreview;
-          } else if (!previewGiven || rowsLeft >= 2) {
+          } else if (!previewGiven || spare >= 2) {
             // Cut to what is left, one row kept for the "… N more" count; the
             // newest edit keeps a preview even when only one row is left.
-            previewRows = Math.max(1, rowsLeft - 1);
+            previewRows = Math.max(1, spare - 1);
           }
           if (previewRows > 0) {
-            rowsLeft -= Math.min(rowsLeft, changeRowCount(preview, 'folded', previewRows));
+            const used = Math.min(spare, changeRowCount(preview, 'folded', previewRows));
+            rowsLeft -= used;
+            spare -= used;
             previewGiven = true;
           } else {
             preview = undefined;
@@ -720,7 +732,7 @@ export class ActivityGroupComponent extends Container {
         }
       }
       let live: string | undefined;
-      if (segment.kind === 'tool' && rowsLeft > 0) {
+      if (segment.kind === 'tool' && spare > 0) {
         live = this.agentActivity(segment.tc);
         if (live !== undefined) rowsLeft -= 1;
       }

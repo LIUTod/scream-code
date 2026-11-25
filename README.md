@@ -182,7 +182,7 @@ Type `/` in the input to browse all 59 commands:
 | `/trace` | View the session working trajectory |
 | `/sidebar` (`/sb`) | Open/close the sidebar (`Ctrl+X`) |
 | `/hl` (`/highlight`) | Toggle the user-message highlight block |
-| `/blockrows` (`/rows`) | Adjust activity block rows (collapsed height / tool-result rows / reasoning rows) |
+| `/blockrows` (`/rows`) | Adjust activity block rows (collapsed height / changed lines per edit / tool-result rows / reasoning rows) |
 | `/codebg` (`/codeblock`) | Toggle the background behind code blocks |
 | `/mermaid` (`/diagram`) | How mermaid blocks render: box-drawing frames / ASCII frames / source |
 | `/snaptimer` (`/timer`) | Toggle the per-turn elapsed timer |
