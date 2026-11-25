@@ -879,5 +879,22 @@ describe('activity block wiring — subagent rows and delivered requests', () =>
       expect(state.transcriptContainer.children).toHaveLength(1);
       expect(findGroup(state.transcriptContainer)?.render(90).join('\n')).toContain('Skill activated: release-notes');
     });
+
+    it('keeps a skill the person started as its own row: it opens a turn', () => {
+      const { state, controller, transcript } = createFixture();
+      controller.onToolCallStart(makeToolCall('t1', 'Bash'));
+
+      transcript.appendEntry({
+        id: 'sk2',
+        kind: 'skill_activation',
+        renderMode: 'plain',
+        content: 'Skill activated: review',
+        skillName: 'review',
+        skillTrigger: 'user-slash',
+      } as TranscriptEntry);
+
+      expect(state.transcriptContainer.children).toHaveLength(2);
+      expect(findGroup(state.transcriptContainer)?.render(90).join('\n')).not.toContain('review');
+    });
   });
 });

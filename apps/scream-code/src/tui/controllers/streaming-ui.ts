@@ -584,10 +584,12 @@ export class StreamingUIController {
 
   /**
    * Takes a transcript entry into the open block when it belongs to the work
-   * (a model-activated skill). False when it does not, or no block is open.
+   * (a skill the model activated). False when it does not, or no block is
+   * open. A skill the person started (`/skill`) is a turn of its own — the
+   * row `/revoke` and Ctrl+O stop at — so it never becomes a step.
    */
   absorbEntry(entry: TranscriptEntry): boolean {
-    if (entry.kind !== 'skill_activation') return false;
+    if (entry.kind !== 'skill_activation' || entry.skillTrigger === 'user-slash') return false;
     return this.attachNote(entry.content, 'info');
   }
 
