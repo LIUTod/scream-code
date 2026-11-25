@@ -3,7 +3,7 @@ import type { Session } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 
 import { AgentGroupComponent } from '../components/messages/agent-group';
-import { ActivityGroupComponent } from '../components/messages/activity-group';
+import { ActivityGroupComponent, type BlockNoteTone } from '../components/messages/activity-group';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { CompactionComponent } from '../components/dialogs/compaction';
 import { ThinkingComponent } from '../components/messages/thinking';
@@ -127,15 +127,13 @@ export class StreamingUIController {
    *   transcript container's direct children.
    *
    * Every other tool is a row inside the block, so a turn reads as one
-   * timeline instead of a mix of cards and groups.
+   * timeline instead of a mix of cards and groups — an image read included:
+   * one row while folded, its thumbnail under the row once expanded.
    */
   private static readonly STANDALONE_TOOL_NAMES: ReadonlySet<string> = new Set([
     'Agent',
     'AskUserQuestion',
     'ExitPlanMode',
-    // Media cards render images / media placeholders that the block's row model
-    // cannot show, so they keep their own card.
-    'ReadMediaFile',
   ]);
 
   constructor(private readonly host: StreamingUIHost) {}
@@ -588,6 +586,39 @@ export class StreamingUIController {
   }
 
   /**
+   * Files a notice the running work raised (a background command finished, a
+   * skill was activated, the reply hit the output limit) as a step of the open
+   * block. False when no block is open, so the caller mounts it as before.
+   */
+  attachNote(text: string, tone: BlockNoteTone): boolean {
+    const group = this._activityGroup;
+    if (group === undefined) return false;
+    group.attachNote(text, tone);
+    return true;
+  }
+
+  /**
+   * Takes a transcript entry into the open block when it belongs to the work
+   * (a model-activated skill). False when it does not, or no block is open.
+   */
+  absorbEntry(entry: TranscriptEntry): boolean {
+    if (entry.kind !== 'skill_activation') return false;
+    return this.attachNote(entry.content, 'info');
+  }
+
+  /**
+   * The rule that keeps the running block the newest thing on screen:
+   * anything else about to be mounted below it (a message, a question, a
+   * cron prompt, a hook result, compaction) first closes it, and the work
+   * that follows opens a fresh block below that. Notices never get here:
+   * they become rows of the block (`attachNote`, `attachNotice`,
+   * `absorbEntry`, approvals, and every status or notice line).
+   */
+  sealBeforeInsert(): void {
+    if (this._activityGroup !== undefined) this.endActivityGroup();
+  }
+
+  /**
    * Files an approval outcome with the call it allowed.
    *
    * The prompt is answered before its tool call is dispatched, so the row it
@@ -645,7 +676,14 @@ export class StreamingUIController {
    * straight away, and the fallback for anything no block ever claims.
    */
   private mountApprovalNotices(approvals: readonly ParkedApproval[]): void {
+    const group = this._activityGroup;
     for (const approval of approvals) {
+      // A subagent's call has no row in the block, but its outcome is still
+      // part of this stretch of work: a step at the end of the open block.
+      if (group !== undefined) {
+        group.appendApproval(approval.label, approval.detail, approval.tone);
+        continue;
+      }
       this.host.transcriptController.appendEntry({
         id: nextTranscriptId(),
         kind: 'status',
@@ -1225,6 +1263,9 @@ export class StreamingUIController {
       };
       this.host.pushTranscriptEntry(entry);
       this.host.transcriptController.registerLiveComponent(completed, entry);
+      // A question and its answer are part of the conversation: the block
+      // above settles, and the work after the answer opens one below.
+      this.sealBeforeInsert();
       state.transcriptContainer.addChild(completed);
       state.ui.requestRender();
     }
@@ -1262,6 +1303,7 @@ export class StreamingUIController {
     this.host.pushTranscriptEntry(entry);
     this.host.transcriptController.registerLiveComponent(block, entry);
     this.host.transcriptController.markPending(block);
+    this.sealBeforeInsert();
     state.transcriptContainer.addChild(block);
     state.ui.requestRender();
   }

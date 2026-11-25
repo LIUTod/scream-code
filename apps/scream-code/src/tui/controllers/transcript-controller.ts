@@ -407,13 +407,20 @@ export class TranscriptController {
           }
         }
       }
-      if (status !== undefined && this.host.streamingUI.attachNotice(status)) {
+      const streamingUI = this.host.streamingUI;
+      if (
+        (status !== undefined && streamingUI.attachNotice(status)) ||
+        streamingUI.absorbEntry(boundedEntry)
+      ) {
         // The block owns the row: the component is never mounted anywhere, so
         // drop its bookkeeping and its timer instead of retaining an unreachable
         // twin that keeps repainting in the background.
         this.releaseLiveComponent(component);
         this.dropLiveComponent(component);
       } else {
+        // Anything else lands below the running block, so the block settles
+        // first and the work after it opens a fresh one under this entry.
+        streamingUI.sealBeforeInsert();
         this.host.state.transcriptContainer.addChild(component);
       }
       this.host.state.ui.requestRender();
@@ -567,14 +574,24 @@ export class TranscriptController {
     this.host.forceUpdateStatusBar();
   }
 
+  /**
+   * A one-line status. While a turn's block is open it becomes a row of the
+   * block instead (in the status's tone), so a status raised mid-turn never
+   * lands below the block and pushes it up.
+   */
   showStatus(message: string, color?: string): void {
+    const colors = this.host.state.theme.colors;
+    const tone = color === colors.error ? 'error' : color === colors.warning ? 'warning' : 'info';
+    if (this.host.streamingUI.attachNote(message, tone)) return;
     this.host.state.transcriptContainer.addChild(
       new StatusMessageComponent(message, this.host.state.theme.colors, color),
     );
     this.host.state.ui.requestRender();
   }
 
+  /** A notice with an optional detail line; a row of the open block, like `showStatus`. */
   showNotice(title: string, detail?: string): void {
+    if (this.host.streamingUI.attachNote(detail === undefined ? title : `${title} · ${detail}`, 'info')) return;
     this.host.state.transcriptContainer.addChild(
       new NoticeMessageComponent(title, detail, this.host.state.theme.colors),
     );

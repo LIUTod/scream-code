@@ -24,7 +24,7 @@
 
 import { changeRowCount, fileChangeOf, renderFileChange, type FileChange } from './file-change';
 import type { Component, TUI } from '@liutod-scream/pi-tui';
-import { Container, Spacer, Text, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
+import { Container, getCapabilities, getImageDimensions, Spacer, Text, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
@@ -49,8 +49,10 @@ import {
   SPEED_MAX,
 } from '#/tui/utils/speed-tracker';
 
+import { createImageComponent } from '#/tui/components/media/image-thumbnail';
 import type { ToolCallComponent } from './tool-call';
 import { replaceTabs, sanitizeShellOutput } from '#/tui/utils/sanitize';
+import { parseReadMediaOutput } from './tool-renderers/media';
 import { strArg } from './tool-renderers/types';
 import { WrappedLine } from './wrapped-line';
 
@@ -110,7 +112,29 @@ type BlockSegment =
       readonly label: string;
       readonly detail: string;
       readonly tone: ApprovalNoticeTone;
-    };
+    }
+  // A notice the work raised while it ran (a background command finished, a
+  // skill was activated, the reply was cut at the output limit): one row of
+  // the timeline, so it never lands below the block and pushes it up.
+  | { readonly kind: 'note'; readonly text: string; readonly tone: BlockNoteTone };
+
+/** How a note row reads: quiet, a warning, or a failure. */
+export type BlockNoteTone = 'info' | 'warning' | 'error';
+
+/** One pre-rendered line that must reach the terminal as is (an image escape). */
+class RawLine implements Component {
+  constructor(private readonly line: string) {}
+  render(): string[] {
+    return [this.line];
+  }
+  invalidate(): void {}
+}
+
+const KITTY_IMAGE = '\u001B_G';
+const ITERM_IMAGE = '\u001B]1337;File=';
+function isImageLine(line: string): boolean {
+  return line.includes(KITTY_IMAGE) || line.includes(ITERM_IMAGE);
+}
 
 /** Segment render rows plus how many block rows they consume. */
 interface SegmentRows {
@@ -316,6 +340,8 @@ export class ActivityGroupComponent extends Container {
   private renderedWidth: number | undefined;
   /** Reasoning text already shown when a notice interrupted the newest run. */
   private interruptedThinking: { text: string; length: number } | undefined;
+  /** Thumbnails of image reads, made once: an image is costly to encode on every repaint. */
+  private readonly thumbnails = new WeakMap<ToolCallComponent, Component | null>();
 
   constructor(
     private readonly colors: ColorPalette,
@@ -383,6 +409,24 @@ export class ActivityGroupComponent extends Container {
     this.segments.splice(index + 1, 0, { kind: 'approval', label, detail, tone });
     this.flushNow();
     return true;
+  }
+
+  /** Adds a note as the newest step of the timeline. */
+  attachNote(text: string, tone: BlockNoteTone): void {
+    this.splitLiveThinking();
+    this.segments.push({ kind: 'note', text, tone });
+    this.flushNow();
+  }
+
+  /**
+   * Adds an approval outcome as the newest step, for a call that has no row
+   * here (a subagent's call): the outcome still belongs to this stretch of
+   * work, so it is a step of it rather than a row below the block.
+   */
+  appendApproval(label: string, detail: string, tone: ApprovalNoticeTone): void {
+    this.splitLiveThinking();
+    this.segments.push({ kind: 'approval', label, detail, tone });
+    this.flushNow();
   }
 
   /**
@@ -696,6 +740,10 @@ export class ActivityGroupComponent extends Container {
         this.bodyContainer.addChild(this.approvalRow(segment, width, isLast));
         return;
       }
+      if (segment.kind === 'note') {
+        this.bodyContainer.addChild(this.noteRow(segment, width, isLast));
+        return;
+      }
       this.bodyContainer.addChild(this.thinkingSummaryRow(segment, width, isLast));
     });
     // Height follows content: no reserved blank rows while the turn runs. The
@@ -798,7 +846,8 @@ export class ActivityGroupComponent extends Container {
       ];
       body.forEach((line, index) => {
         const closing = isLast && index === body.length - 1;
-        components.push(new Text(`${closing ? BRANCH_CORNER : BRANCH_PIPE}${line}`, 0, 0));
+        const text = `${closing ? BRANCH_CORNER : BRANCH_PIPE}${line}`;
+        components.push(isImageLine(text) ? new RawLine(text) : new Text(text, 0, 0));
       });
       return { components, cost: 1 + body.length };
     }
@@ -807,6 +856,9 @@ export class ActivityGroupComponent extends Container {
     }
     if (segment.kind === 'approval') {
       return { components: [this.approvalRow(segment, width, isLast)], cost: 1 };
+    }
+    if (segment.kind === 'note') {
+      return { components: [this.noteRow(segment, width, isLast)], cost: 1 };
     }
     return this.thinkingSegmentRows(segment, width, isLast);
   }
@@ -819,6 +871,17 @@ export class ActivityGroupComponent extends Container {
    * other tool keeps the preview of its own card.
    */
   private expandedToolBody(tc: ToolCallComponent, row: ToolRow, width: number): string[] {
+    if (tc.toolCallView.name === 'ReadMediaFile') {
+      // An image read is one row while folded; expanded, the picture sits
+      // inside the tree under it (on a terminal that can draw images —
+      // elsewhere the row's own chip already names the file).
+      const thumbnail = this.thumbnailOf(tc);
+      if (thumbnail === null) return [];
+      if (thumbnail !== undefined) {
+        const inner = Math.max(1, width - BRANCH_PIPE.length - BODY_TEXT_INDENT.length);
+        return thumbnail.render(inner).map((line) => `${BODY_TEXT_INDENT}${line}`);
+      }
+    }
     const change = fileChangeOf(tc.toolCallView, tc.resultView);
     if (change === undefined) return row.body.map((line) => `${BODY_TEXT_INDENT}${line}`);
     const limit = getActivityLines().expandedTool;
@@ -831,6 +894,42 @@ export class ActivityGroupComponent extends Container {
       ...rows,
       ...notes.map((note) => `${BODY_TEXT_INDENT}${chalk.hex(this.colors.textDim)(truncateToWidth(note, textWidth, '…'))}`),
     ];
+  }
+
+  /**
+   * The thumbnail of a finished image read: null when there is nothing to
+   * draw (the terminal cannot show images), undefined when the result is not
+   * an image (an error, a video) and the card's own preview applies.
+   */
+  private thumbnailOf(tc: ToolCallComponent): Component | null | undefined {
+    const result = tc.resultView;
+    if (result === undefined || result.is_error === true) return undefined;
+    const cached = this.thumbnails.get(tc);
+    if (cached !== undefined) return cached;
+    const summary = parseReadMediaOutput(result.output);
+    if (summary === null || summary.kind !== 'image' || summary.base64 === undefined || summary.mimeType === undefined) {
+      return undefined;
+    }
+    const images = getCapabilities().images;
+    let thumbnail: Component | null = null;
+    if (images === 'kitty' || images === 'iterm2') {
+      const dims = getImageDimensions(summary.base64, summary.mimeType) ?? { widthPx: 800, heightPx: 600 };
+      thumbnail = createImageComponent(
+        { base64: summary.base64, mime: summary.mimeType, width: dims.widthPx, height: dims.heightPx, filename: summary.path },
+        this.colors,
+      );
+    }
+    this.thumbnails.set(tc, thumbnail);
+    return thumbnail;
+  }
+
+  /** One note, kept to a single row in its tone. */
+  private noteRow(segment: Extract<BlockSegment, { kind: 'note' }>, width: number, isLast: boolean): Text {
+    const prefix = isLast ? BRANCH_LAST : BRANCH_FIRST;
+    const tone =
+      segment.tone === 'error' ? this.colors.error : segment.tone === 'warning' ? this.colors.warning : this.colors.textDim;
+    const plain = segment.text.replaceAll(/\s+/g, ' ').trim();
+    return new Text(`${prefix}${chalk.hex(tone)(truncateToWidth(plain, Math.max(1, width - visibleWidth(prefix)), '…'))}`, 0, 0);
   }
 
   /** One background task notice, kept to a single row. */

@@ -202,6 +202,9 @@ export function makeMockStreamingUI(
     hasInFlightToolCalls: vi.fn((): boolean => false),
     // Default: no block is open, so a notice keeps its own transcript row.
     attachNotice: vi.fn((): boolean => false),
+    attachNote: vi.fn((): boolean => false),
+    absorbEntry: vi.fn((): boolean => false),
+    sealBeforeInsert: vi.fn(),
     recordApproval: vi.fn(),
     flushPendingApprovals: vi.fn(),
     ...overrides,

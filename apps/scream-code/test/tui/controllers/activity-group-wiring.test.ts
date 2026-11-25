@@ -60,14 +60,16 @@ interface Fixture {
 
 function createFixture(): Fixture {
   const state = createMockTUIState();
-  const transcript = new TranscriptController({
+  const transcriptHost = {
     state,
     imageStore: {},
-    streamingUI: {},
+    // Set below: the transcript and the streaming controller talk both ways.
+    streamingUI: undefined as unknown,
     showStatus: vi.fn(),
     batchUpdate: <T,>(fn: () => T): T => fn(),
     forceUpdateStatusBar: vi.fn(),
-  } as unknown as TranscriptControllerHost);
+  };
+  const transcript = new TranscriptController(transcriptHost as unknown as TranscriptControllerHost);
   const host = {
     state,
     session: undefined,
@@ -83,7 +85,9 @@ function createFixture(): Fixture {
     onTurnCompleted: vi.fn(),
     transcriptController: transcript,
   } as unknown as StreamingUIHost;
-  return { state, controller: new StreamingUIController(host), transcript };
+  const controller = new StreamingUIController(host);
+  transcriptHost.streamingUI = controller;
+  return { state, controller, transcript };
 }
 
 describe('activity block wiring', () => {
@@ -100,7 +104,7 @@ describe('activity block wiring', () => {
     );
   });
 
-  it('routes Read into the block and keeps media and plan-review cards standalone', () => {
+  it('routes Read and image reads into the block and keeps plan-review cards standalone', () => {
     const { state, controller } = createFixture();
 
     controller.onToolCallStart(makeToolCall('r1', 'Read'));
@@ -110,12 +114,18 @@ describe('activity block wiring', () => {
       state.transcriptContainer.children.some((c) => c instanceof ToolCallComponent),
     ).toBe(false);
 
+    // An image read is a row too: its card no longer lands below the block.
     controller.onToolCallStart(makeToolCall('m1', 'ReadMediaFile'));
-    controller.onToolCallStart(makeToolCall('p1', 'ExitPlanMode'));
+    expect(
+      state.transcriptContainer.children.some((c) => c instanceof ToolCallComponent),
+    ).toBe(false);
+    expect(findGroup(state.transcriptContainer)?.render(90).join('\n')).toContain('ReadMediaFile');
+
+    controller.onToolCallStart(makeToolCall('p1', 'ExitPlanMode', 1, { plan: 'the plan' }));
 
     expect(
       state.transcriptContainer.children.filter((c) => c instanceof ToolCallComponent),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     // Both kinds coexist in call order: block first, standalone cards after.
     expect(state.transcriptContainer.children[0]).toBeInstanceOf(ActivityGroupComponent);
   });
@@ -338,7 +348,7 @@ describe('activity block wiring', () => {
     const { state, controller } = createFixture();
     state.toolOutputExpanded = true;
 
-    controller.onToolCallStart(makeToolCall('m1', 'ReadMediaFile'));
+    controller.onToolCallStart(makeToolCall('p1', 'ExitPlanMode', 1, { plan: 'the plan' }));
 
     const card = state.transcriptContainer.children.find(
       (child): child is ToolCallComponent => child instanceof ToolCallComponent,
@@ -484,19 +494,22 @@ describe('activity block wiring', () => {
     expect(rows).not.toContain('已批准');
     expect(notices(state)).toHaveLength(0);
 
-    // The end of the step settles it as the row it always had.
+    // The end of the step settles it as the last step of the open block: it
+    // belongs to this stretch of work, and a row below would push the block up.
     controller.flushPendingApprovals();
-    const mounted = notices(state);
-    expect(mounted).toHaveLength(1);
-    expect(mounted[0]?.render(90).join('\n')).toContain('已批准: Writing /tmp/cut/vad.py');
+    const settled = (findGroup(state.transcriptContainer)?.render(90) ?? []).filter((row) => row.trim().length > 0);
+    expect(settled.at(-1)).toContain('已批准 · Writing /tmp/cut/vad.py');
+    expect(notices(state)).toHaveLength(0);
   });
 
   it('settles an outcome as a notice when its call stays standalone', () => {
     const { state, controller } = createFixture();
     controller.setTurnId('turn-1');
-    controller.recordApproval('m1', '已批准', 'Reading /tmp/cut/frame.png', 'approved');
+    controller.recordApproval('p1', '已批准', 'Reading /tmp/cut/frame.png', 'approved');
 
-    controller.onToolCallStart(makeToolCall('m1', 'ReadMediaFile'));
+    // A plan card closes the block and stays standalone, so the outcome has
+    // no row to go under and no open block to join.
+    controller.onToolCallStart(makeToolCall('p1', 'ExitPlanMode', 1, { plan: 'the plan' }));
     expect(notices(state)).toHaveLength(0);
 
     controller.flushPendingApprovals();
@@ -829,5 +842,63 @@ describe('activity block wiring — agent cards and delivered requests seal the 
       state.transcriptContainer.children.some((child) => child instanceof NoticeMessageComponent),
     ).toBe(false);
     expect(collab.mock.calls[0]?.[0]).toContain('coder');
+  });
+
+  describe('the running block stays the newest thing on screen', () => {
+    it('closes the block before a message lands below it; the work after opens a new block', () => {
+      const { state, controller, transcript } = createFixture();
+      controller.setTurnId('turn-1');
+      controller.onToolCallStart(makeToolCall('t1', 'Bash'));
+
+      // A steered message, appended at the step boundary.
+      transcript.appendEntry({ id: 'u1', kind: 'user', renderMode: 'plain', content: 'also set the log level' });
+      controller.onToolCallStart(makeToolCall('t2', 'Edit', 2));
+
+      const children = state.transcriptContainer.children;
+      const blocks = findGroups(state.transcriptContainer);
+      expect(blocks).toHaveLength(2);
+      const message = children.findIndex((child) => child instanceof UserMessageComponent);
+      expect(children.indexOf(blocks[0]!)).toBeLessThan(message);
+      expect(children.indexOf(blocks[1]!)).toBeGreaterThan(message);
+      expect(children.at(-1)).toBe(blocks[1]);
+      expect(blocks[0]?.render(90).join('\n')).toContain('Bash');
+      expect(blocks[1]?.render(90).join('\n')).toContain('Edit');
+    });
+
+    it('turns a status raised mid-turn into a row of the block', () => {
+      const { state, controller, transcript } = createFixture();
+      controller.onToolCallStart(makeToolCall('t1', 'Bash'));
+
+      transcript.showStatus('MCP server docs failed', state.theme.colors.error);
+      transcript.showNotice('Background command finished', 'bash-1');
+
+      expect(state.transcriptContainer.children).toHaveLength(1);
+      const rows = findGroup(state.transcriptContainer)?.render(90).join('\n') ?? '';
+      expect(rows).toContain('MCP server docs failed');
+      expect(rows).toContain('Background command finished · bash-1');
+    });
+
+    it('keeps a status on its own row when no block is open', () => {
+      const { state, transcript } = createFixture();
+      transcript.showStatus('saved');
+      expect(findGroup(state.transcriptContainer)).toBeUndefined();
+      expect(state.transcriptContainer.children).toHaveLength(1);
+    });
+
+    it('files a skill the model activated as a step of the block', () => {
+      const { state, controller, transcript } = createFixture();
+      controller.onToolCallStart(makeToolCall('s1', 'Skill'));
+
+      transcript.appendEntry({
+        id: 'sk1',
+        kind: 'skill_activation',
+        renderMode: 'plain',
+        content: 'Skill activated: release-notes',
+        skillName: 'release-notes',
+      } as TranscriptEntry);
+
+      expect(state.transcriptContainer.children).toHaveLength(1);
+      expect(findGroup(state.transcriptContainer)?.render(90).join('\n')).toContain('Skill activated: release-notes');
+    });
   });
 });

@@ -902,6 +902,10 @@ export class SessionEventHandler {
     const detail = this.isAnthropicSessionActive()
       ? t('handler.max_tokens_hint')
       : undefined;
+    // The cut belongs to the step that hit it: a row of the running block when
+    // one is open, so the block is not pushed up by its own warning.
+    const note = detail === undefined ? title : `${title} · ${detail}`;
+    if (this.host.streamingUI.attachNote(note, 'warning')) return;
     this.host.showNotice(title, detail);
   }
 
@@ -1157,13 +1161,12 @@ export class SessionEventHandler {
       const command = typeof data?.command === 'string' ? data.command : '';
       const exitCode = typeof data?.exitCode === 'number' ? data.exitCode : -1;
       const preview = command.length > 60 ? `${command.slice(0, 59)}…` : command;
-      if (exitCode === 0) {
-        this.host.showNotice(t('bash.background_completed', { id, command: preview }));
-      } else {
-        this.host.showNotice(
-          t('bash.background_failed', { id, command: preview, exitCode: String(exitCode) }),
-        );
-      }
+      const text =
+        exitCode === 0
+          ? t('bash.background_completed', { id, command: preview })
+          : t('bash.background_failed', { id, command: preview, exitCode: String(exitCode) });
+      // A step of the running block when one is open; on its own otherwise.
+      if (!this.host.streamingUI.attachNote(text, exitCode === 0 ? 'info' : 'error')) this.host.showNotice(text);
       return;
     }
 
@@ -1488,10 +1491,9 @@ export class SessionEventHandler {
         now: Date.now(),
       });
       if (anomaly !== null) {
-        this.host.showNotice(
-          t('handler.storm_breaker_title'),
-          t('handler.storm_breaker_detail', { detail: anomaly.detail }),
-        );
+        const title = t('handler.storm_breaker_title');
+        const detail = t('handler.storm_breaker_detail', { detail: anomaly.detail });
+        if (!this.host.streamingUI.attachNote(`${title} · ${detail}`, 'warning')) this.host.showNotice(title, detail);
       }
     }
 

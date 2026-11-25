@@ -20,6 +20,8 @@ import {
 
 function createMockHost(): SessionEventHost {
   const streamingUI = {
+    // No block is open: notices keep their own rows.
+    attachNote: vi.fn(() => false),
     setStep: vi.fn(),
     setTurnId: vi.fn(),
     resetLiveText: vi.fn(),
