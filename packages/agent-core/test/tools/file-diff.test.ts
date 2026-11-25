@@ -104,15 +104,54 @@ describe('fileDiffSummary', () => {
 describe('fileDiffDetails', () => {
   it('numbers changed lines in the file and keeps only the first rows of a large change', () => {
     const before = Array.from({ length: 30 }, (_, i) => `line ${String(i + 1)}`).join('\n') + '\n';
-    const after = before.replace('line 5\n', 'line five\n') + Array.from({ length: 20 }, (_, i) => `extra ${String(i)}`).join('\n') + '\n';
+    const extra = Array.from({ length: 50 }, (_, i) => `extra ${String(i)}`);
+    const after = before.replace('line 5\n', 'line five\n') + extra.join('\n') + '\n';
     const details = fileDiffDetails(before, after, { deletedText: true });
-    expect(details?.preview[0]).toEqual({ kind: 'delete', line: 5, text: 'line 5' });
-    expect(details?.preview[1]).toEqual({ kind: 'add', line: 5, text: 'line five' });
-    expect(details?.preview[2]).toEqual({ kind: 'add', line: 31, text: 'extra 0' });
-    expect(details?.preview).toHaveLength(FILE_DIFF_PREVIEW_ROWS);
-    expect(details?.previewTotal).toBe(22);
-    expect(details?.added).toBe(21);
+    const changed = details?.preview.filter((row) => row.kind === 'add' || row.kind === 'delete') ?? [];
+    expect(changed[0]).toEqual({ kind: 'delete', line: 5, text: 'line 5' });
+    expect(changed[1]).toEqual({ kind: 'add', line: 5, text: 'line five' });
+    expect(changed[2]).toEqual({ kind: 'add', line: 31, text: 'extra 0' });
+    expect(changed).toHaveLength(FILE_DIFF_PREVIEW_ROWS);
+    expect(details?.previewTotal).toBe(52);
+    expect(details?.added).toBe(51);
     expect(details?.removed).toBe(1);
+  });
+
+  it('keeps unchanged lines around a change only when the call carried their text', () => {
+    const before = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'].join('\n') + '\n';
+    const after = before.replace('e\n', 'E\n');
+    // The call carried d, E and f (an Edit whose new_string spans them).
+    const details = fileDiffDetails(before, after, { deletedText: true, carried: 'd\nE\nf' });
+    expect(details?.preview).toEqual([
+      { kind: 'context', line: 4, text: 'd' },
+      { kind: 'delete', line: 5, text: 'e' },
+      { kind: 'add', line: 5, text: 'E' },
+      { kind: 'context', line: 6, text: 'f' },
+    ]);
+  });
+
+  it('marks the unchanged lines between two changes as one gap', () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `l${String(i + 1)}`);
+    const before = lines.join('\n') + '\n';
+    const after = before.replace('l2\n', 'L2\n').replace('l18\n', 'L18\n');
+    const details = fileDiffDetails(before, after, { deletedText: true, carried: after });
+    const kinds = details?.preview.map((row) => (row.kind === 'gap' ? `gap ${String(row.count)}` : `${row.kind} ${String(row.line)}`));
+    expect(kinds).toEqual([
+      'context 1',
+      'delete 2',
+      'add 2',
+      'context 3',
+      'context 4',
+      'context 5',
+      'gap 9',
+      'context 15',
+      'context 16',
+      'context 17',
+      'delete 18',
+      'add 18',
+      'context 19',
+      'context 20',
+    ]);
   });
 
   it('drops deleted text unless the call carried it', () => {

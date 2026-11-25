@@ -188,9 +188,10 @@ function withFileDiffDisplay(
   before: string,
   after: string,
   deletedText: boolean,
+  carried: string,
 ): ExecutableToolResult {
   if (result.isError === true) return result;
-  const details = fileDiffDetails(before, after, { deletedText });
+  const details = fileDiffDetails(before, after, { deletedText, carried });
   if (details === undefined) return result;
   const display: ToolResultDisplay = {
     kind: 'file_diff',
@@ -623,7 +624,7 @@ export class EditTool implements BuiltinTool<EditInput> {
         const result: ExecutableToolResult = hasErrors
           ? { isError: true, output, message }
           : { output, message };
-        return withFileDiffDisplay(result, raw, writtenText, true);
+        return withFileDiffDisplay(result, raw, writtenText, true, args.new_string);
       }
 
       const parts = content.split(oldString);
@@ -661,7 +662,7 @@ export class EditTool implements BuiltinTool<EditInput> {
       const result: ExecutableToolResult = hasErrors
         ? { isError: true, output, message }
         : { output, message };
-      return withFileDiffDisplay(result, raw, writtenText, true);
+      return withFileDiffDisplay(result, raw, writtenText, true, args.new_string);
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'EISDIR') {
@@ -949,7 +950,7 @@ export class EditTool implements BuiltinTool<EditInput> {
     const result: ExecutableToolResult = hasErrors
       ? { isError: true, output, message }
       : { output, message };
-    return withFileDiffDisplay(result, raw, writtenText, false);
+    return withFileDiffDisplay(result, raw, writtenText, false, args.new_string);
   }
 
   /**

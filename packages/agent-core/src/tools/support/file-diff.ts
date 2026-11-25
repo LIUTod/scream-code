@@ -7,8 +7,9 @@
  * wrong (a Write overwrite hides every removed line; an Edit with
  * `replace_all` sees only one occurrence), so the tools report them here.
  *
- * Only counts leave this module: file contents must never be embedded in the
- * display payload, which is persisted with the session transcript.
+ * The display payload is persisted with the session (the recorded tool
+ * result), so it carries counts plus only the text the call's own arguments
+ * held — never the rest of the file (see `fileDiffDetails`).
  */
 
 import { diffLines, type Change } from 'diff';
@@ -84,16 +85,30 @@ export function fileDiffSummary(
   return { added, removed };
 }
 
-/** One changed line for the UI's inline preview (a 1-based file line number). */
+/**
+ * One row of the UI's change preview.
+ *
+ * - `add` / `delete`: a changed line with its 1-based file line number (new
+ *   numbering for additions, old numbering for deletions).
+ * - `context`: an unchanged line next to a change (new numbering), shown only
+ *   when the change is expanded.
+ * - `gap`: `count` unchanged lines left out between two shown rows.
+ */
 export interface FileDiffPreviewRow {
-  readonly kind: 'add' | 'delete';
-  readonly line: number;
+  readonly kind: 'add' | 'delete' | 'context' | 'gap';
+  readonly line?: number | undefined;
   /** The line's text; absent for a deletion whose text the call did not carry. */
   readonly text?: string | undefined;
+  /** `gap` only: how many unchanged lines it stands for. */
+  readonly count?: number | undefined;
 }
 
 /** Changed lines kept for the preview; the UI shows fewer and counts the rest. */
-export const FILE_DIFF_PREVIEW_ROWS = 12;
+export const FILE_DIFF_PREVIEW_ROWS = 40;
+/** Rows of every kind kept in all, so many scattered one-line changes stay bounded. */
+export const FILE_DIFF_PREVIEW_MAX_ROWS = 80;
+/** Unchanged lines kept on each side of a change. */
+export const FILE_DIFF_CONTEXT_LINES = 3;
 const FILE_DIFF_PREVIEW_CHARS = 200;
 
 function splitPartLines(value: string): string[] {
@@ -103,20 +118,32 @@ function splitPartLines(value: string): string[] {
   return lines;
 }
 
+export interface FileDiffDetailsOptions {
+  /** The call's own arguments held the replaced text (Edit's old_string). */
+  readonly deletedText: boolean;
+  /**
+   * The text the call's arguments carried (new_string, content). An
+   * unchanged line next to a change keeps its text only when it appears in
+   * here; otherwise it is left out (counted in a `gap`), so nothing the call
+   * did not carry enters the session log.
+   */
+  readonly carried?: string | undefined;
+}
+
 /**
  * `fileDiffSummary` plus the first changed lines with their real line numbers
- * (old numbering for deletions, new numbering for additions), in one diff.
+ * and the unchanged lines around them, in one diff.
  *
  * Text privacy: added lines come from the call's own arguments (new_string /
- * content), so carrying them puts nothing new in the session log. Deleted
- * text is carried only when `deletedText` says the call's arguments held it
- * (Edit's old_string); otherwise a deletion keeps its line number alone, so an
- * overwrite never copies the replaced file into the log.
+ * content). Deleted text is carried only when `deletedText` says the call's
+ * arguments held it (Edit's old_string); otherwise a deletion keeps its line
+ * number alone, so an overwrite never copies the replaced file into the log.
+ * Unchanged lines keep their text only when it appears in `carried`.
  */
 export function fileDiffDetails(
   before: string,
   after: string,
-  options: { readonly deletedText: boolean },
+  options: FileDiffDetailsOptions,
 ):
   | {
       added: number;
@@ -134,28 +161,91 @@ export function fileDiffDetails(
   let oldLine = 1;
   let newLine = 1;
   const preview: FileDiffPreviewRow[] = [];
+  let changedShown = 0;
+  /** Unchanged lines passed since the last row, shown as a `gap` before the next one. */
+  let skipped = 0;
   const clip = (text: string): string =>
     text.length > FILE_DIFF_PREVIEW_CHARS ? `${text.slice(0, FILE_DIFF_PREVIEW_CHARS)}…` : text;
-  for (const part of parts) {
+  const full = (): boolean =>
+    changedShown >= FILE_DIFF_PREVIEW_ROWS || preview.length >= FILE_DIFF_PREVIEW_MAX_ROWS;
+  const push = (row: FileDiffPreviewRow): void => {
+    // A gap only ever sits between two rows: the line numbers already say
+    // where the first row starts.
+    if (skipped > 0 && preview.length > 0) preview.push({ kind: 'gap', count: skipped });
+    skipped = 0;
+    preview.push(row);
+  };
+  const context = (text: string, line: number): void => {
+    if (full()) return;
+    if (options.carried !== undefined && options.carried.includes(text.replace(/\r$/, ''))) push({ kind: 'context', line, text: clip(text) });
+    else skipped += 1;
+  };
+
+  for (const [index, part] of parts.entries()) {
     const lines = splitPartLines(part.value);
     if (part.added) {
       for (const text of lines) {
-        if (preview.length < FILE_DIFF_PREVIEW_ROWS) preview.push({ kind: 'add', line: newLine, text: clip(text) });
+        if (!full()) {
+          push({ kind: 'add', line: newLine, text: clip(text) });
+          changedShown += 1;
+        }
         newLine += 1;
       }
       added += lines.length;
     } else if (part.removed) {
       for (const text of lines) {
-        if (preview.length < FILE_DIFF_PREVIEW_ROWS) {
-          preview.push({ kind: 'delete', line: oldLine, text: options.deletedText ? clip(text) : undefined });
+        if (!full()) {
+          push({ kind: 'delete', line: oldLine, text: options.deletedText ? clip(text) : undefined });
+          changedShown += 1;
         }
         oldLine += 1;
       }
       removed += lines.length;
     } else {
+      // Unchanged: the lines after the previous change and before the next
+      // one are context, the rest of the run is one gap.
+      const afterPrevious = index === 0 ? 0 : Math.min(FILE_DIFF_CONTEXT_LINES, lines.length);
+      const beforeNext =
+        index === parts.length - 1 ? 0 : Math.min(FILE_DIFF_CONTEXT_LINES, lines.length - afterPrevious);
+      for (let at = 0; at < lines.length; at += 1) {
+        if (at < afterPrevious || at >= lines.length - beforeNext) context(lines[at] as string, newLine + at);
+        else skipped += 1;
+      }
       oldLine += lines.length;
       newLine += lines.length;
     }
   }
-  return { added, removed, preview, previewTotal: added + removed };
+  return { added, removed, preview: dropLoneContext(preview), previewTotal: added + removed };
+}
+
+/**
+ * Context only reads as context next to a change: a run of unchanged lines
+ * cut off from every change by a gap (an empty line the call happened to
+ * carry, say) is folded into the gaps around it, and no gap is left at
+ * either end.
+ */
+function dropLoneContext(rows: readonly FileDiffPreviewRow[]): FileDiffPreviewRow[] {
+  const out: FileDiffPreviewRow[] = [];
+  let pendingGap = 0;
+  let run: FileDiffPreviewRow[] = [];
+  const flush = (): void => {
+    if (run.some((row) => row.kind === 'add' || row.kind === 'delete')) {
+      if (pendingGap > 0 && out.length > 0) out.push({ kind: 'gap', count: pendingGap });
+      out.push(...run);
+      pendingGap = 0;
+    } else {
+      pendingGap += run.length;
+    }
+    run = [];
+  };
+  for (const row of rows) {
+    if (row.kind === 'gap') {
+      flush();
+      pendingGap += row.count ?? 0;
+    } else {
+      run.push(row);
+    }
+  }
+  flush();
+  return out;
 }

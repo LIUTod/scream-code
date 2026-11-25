@@ -67,7 +67,8 @@ const LONG_THINKING = Array.from({ length: 14 }, (_, i) => `reasoning line ${i +
  * Row prefix (5 cells) plus the same three-cell gutter that file/diff tool
  * bodies reserve for their line numbers — reasoning rows line up with them.
  */
-const REASONING_ROW_PREFIX = '        ';
+/** A reasoning row inside the tree: pipe (or the closing corner on the last row) plus the body indent. */
+const REASONING_ROW_RE = /^ {2}[│└] {5}reasoning line/;
 
 function makeGroup(): ActivityGroupComponent {
   const group = new ActivityGroupComponent(darkColors, undefined);
@@ -305,9 +306,14 @@ describe('ActivityGroupComponent', () => {
     const previews = lines.filter((line) => line.startsWith('  │  '));
 
     expect(lines[1]?.trimEnd()).toBe('  │');
-    expect(branches).toHaveLength(2);
+    // Every step with a body keeps the tree open on its own row; the tree
+    // closes on the very last row of the block instead.
+    expect(branches).toHaveLength(3);
     expect(branches[0]).toContain('Bash');
     expect(branches[1]).toContain('Edit');
+    expect(branches[2]).toContain(t('activitygroup.thinking_label'));
+    expect(lines.at(-1)).toMatch(/^ {2}└ {4}/);
+    expect(lines.filter((line) => line.startsWith('  └')).length).toBe(1);
     expect(previews.length).toBeLessThanOrEqual(PINNED_TOOL_LINES * 2);
     expect(previews.length).toBeGreaterThan(0);
     // Preview rows continue a branch with the card's own preview (the command
@@ -322,7 +328,7 @@ describe('ActivityGroupComponent', () => {
     group.setExpanded(true);
 
     const lines = render(group);
-    const excerpt = lines.filter((line) => line.startsWith(`${REASONING_ROW_PREFIX}reasoning line`));
+    const excerpt = lines.filter((line) => REASONING_ROW_RE.test(line));
 
     expect(excerpt.length).toBe(ACTIVITY_GROUP_THINKING_EXCERPT_LINES);
     expect(excerpt[0]).toContain('reasoning line 1');
@@ -335,7 +341,7 @@ describe('ActivityGroupComponent', () => {
     group.setExpanded(true);
 
     const lines = render(group);
-    const excerpt = lines.filter((line) => line.startsWith(`${REASONING_ROW_PREFIX}reasoning line`));
+    const excerpt = lines.filter((line) => REASONING_ROW_RE.test(line));
 
     expect(excerpt.length).toBe(ACTIVITY_GROUP_THINKING_EXCERPT_LINES);
     expect(excerpt.at(-1)).toContain('reasoning line 14');
@@ -588,9 +594,10 @@ describe('ActivityGroupComponent', () => {
     expect(lines.some((line) => line.includes('reasoning line 14'))).toBe(true);
     expect(
       lines.some(
-        (line) => line.startsWith('  └─') && line.includes(t('activitygroup.thinking_label')),
+        (line) => line.startsWith('  ├─') && line.includes(t('activitygroup.thinking_label')),
       ),
     ).toBe(true);
+    expect(lines.at(-1)).toMatch(/^ {2}└ /);
     // The oldest steps are folded away, counted in one row at the top of the
     // tree: header, tree stem, count row.
     expect(foldedIndex).toBe(2);
@@ -678,7 +685,7 @@ describe('ActivityGroupComponent', () => {
     group.setExpanded(true);
 
     const lines = render(group, 60);
-    const excerptBody = lines.filter((line) => line.startsWith('     '));
+    const excerptBody = lines.filter((line) => /^ {2}[│└] {5}\S/.test(line));
     expect(excerptBody.length).toBeLessThanOrEqual(ACTIVITY_GROUP_THINKING_EXCERPT_LINES + 1);
     // A single paragraph is clipped rather than line-trimmed, so the truncation
     // has to stay visible.
@@ -966,7 +973,8 @@ describe('ActivityGroupComponent — unified status prefixes', () => {
     const solo = new ActivityGroupComponent(darkColors, undefined);
     solo.appendThinking(THINKING, true);
     solo.setExpanded(true);
-    expect(rowsOf(solo)).toContain('  └─ ⠋ Thinking');
+    expect(rowsOf(solo)).toContain('  ├─ ⠋ Thinking');
+    expect(rowsOf(solo).at(-1)).toMatch(/^ {2}└ {4}/);
 
     // Attaching a notice closes the live reasoning run (pre-existing behaviour),
     // so that row takes the success mark while the notice itself spins.

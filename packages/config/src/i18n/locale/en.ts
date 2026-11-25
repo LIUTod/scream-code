@@ -1686,6 +1686,7 @@ export const en: Record<string, string> = {
   'blockrows.item_edit_preview': 'Changed lines shown per edit while folded (0 = off)',
   'activitygroup.edit_more': '… {count} more lines',
   'activitygroup.edit_removed': '{count} lines removed',
+  'activitygroup.edit_gap': '… {count} unchanged lines …',
   'blockrows.current': 'Current: {value}',
   'blockrows.saved': '{label} → {value} rows',
   'registry.codebg_desc': 'Toggle the background panel behind code blocks (off: code stands out by colour and gutter only); applied immediately and saved',

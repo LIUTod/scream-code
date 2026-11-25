@@ -65,4 +65,46 @@ describe('ActivityGroupComponent — inline edit previews while folded', () => {
     expect(rows.some((row) => row.includes('f4.ts old'))).toBe(false);
     for (const line of raw) if (line.length > 0) expect(visibleWidth(line)).toBeLessThanOrEqual(WIDTH);
   });
+
+  it('expanded, an edit shows the same numbered rows plus the lines around them, and the tree closes on the last row', () => {
+    refreshActivityLines();
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    const tc = new ToolCallComponent(
+      { id: 'e1', name: 'Edit', args: { file_path: '/workspace/a.ts', old_string: 'x', new_string: 'y' } },
+      {
+        tool_call_id: 'e1',
+        output: 'Replaced 1 occurrence in a.ts\n\nEdit applied; the language server reports:\na.ts:43:1 warning: unused',
+        is_error: false,
+        display: {
+          kind: 'file_diff',
+          added: 1,
+          removed: 1,
+          preview: [
+            { kind: 'delete', line: 42, text: 'const a = 1;' },
+            { kind: 'add', line: 42, text: 'const a = 10;' },
+            { kind: 'context', line: 43, text: 'const b = 2;' },
+          ],
+          previewTotal: 2,
+        },
+      },
+      darkColors,
+    );
+    group.attachTool(tc, 1);
+    group.setRunning(false);
+    const folded = group.render(WIDTH).map(strip).filter((row) => row.trim().length > 0);
+    group.setExpanded(true);
+    const rows = group.render(WIDTH).map(strip).filter((row) => row.trim().length > 0);
+
+    const at = rows.findIndex((row) => row.includes('Edit'));
+    expect(rows[at]).toMatch(/^ {2}├─/);
+    expect(rows[at + 1]).toMatch(/^ {2}│ {4}42 - const a = 1;/);
+    expect(rows[at + 2]).toMatch(/^ {2}│ {4}42 \+ const a = 10;/);
+    expect(rows[at + 3]).toMatch(/^ {2}│ {4}43 {3}const b = 2;/);
+    // The result's summary line is the row header already; what it adds is kept.
+    expect(rows.some((row) => row.includes('Replaced 1 occurrence'))).toBe(false);
+    expect(rows.at(-1)).toMatch(/^ {2}└ .*warning: unused/);
+    // Folded, the same changed rows, read the same way.
+    const body = (row: string): string => row.slice(5);
+    expect(folded.filter((row) => / 42 [+-] /.test(row)).map(body)).toEqual(rows.slice(at + 1, at + 3).map(body));
+  });
 });

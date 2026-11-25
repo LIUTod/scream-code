@@ -231,7 +231,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
   ): ToolResultDisplay | undefined {
     if (existing.kind === 'unavailable') return undefined;
     const before = existing.kind === 'missing' ? '' : existing.text;
-    return fileDiffDisplay(before, before + content);
+    return fileDiffDisplay(before, before + content, content);
   }
 
   /**
@@ -248,7 +248,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     existing: ExistingText,
   ): ToolResultDisplay | undefined {
     if (existing.kind === 'unavailable') return undefined;
-    return fileDiffDisplay(existing.kind === 'missing' ? '' : existing.text, content);
+    return fileDiffDisplay(existing.kind === 'missing' ? '' : existing.text, content, content);
   }
 
   /**
@@ -336,8 +336,8 @@ export class WriteTool implements BuiltinTool<WriteInput> {
  * lines. Replaced text is never carried (only `content` is the call's own),
  * so an overwrite's deletions keep their line numbers alone.
  */
-function fileDiffDisplay(before: string, after: string): ToolResultDisplay | undefined {
-  const details = fileDiffDetails(before, after, { deletedText: false });
+function fileDiffDisplay(before: string, after: string, content: string): ToolResultDisplay | undefined {
+  const details = fileDiffDetails(before, after, { deletedText: false, carried: content });
   // A new file too large to diff can only have gained lines: keep the count.
   if (details === undefined) return before === '' ? { kind: 'file_diff', added: countLines(after), removed: 0 } : undefined;
   return {

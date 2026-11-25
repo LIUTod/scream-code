@@ -118,20 +118,23 @@ export const ToolResultDisplaySchema = z.discriminatedUnion('kind', [
     // Exact line-count summary produced by the file-mutating tools (Edit /
     // Write) for the UI's per-group change totals. Distinct from the `diff`
     // variant above, which carries the before/after text for a diff preview:
-    // this one carries counts only, so file contents never reach the session
-    // log.
+    // this one carries counts plus only the text the call's own arguments
+    // held, so the rest of the file never reaches the session log.
     kind: z.literal('file_diff'),
     added: z.number().int().nonnegative(),
     removed: z.number().int().nonnegative(),
-    // The first changed lines with their file line numbers, for the inline
-    // preview under a folded block (see `fileDiffDetails`). Text only where
-    // the call's own arguments carried it; absent on older records.
+    // The first changed lines with their file line numbers, the unchanged
+    // lines around them and gaps between them, for the change preview in the
+    // activity block (see `fileDiffDetails`). Text only where the call's own
+    // arguments carried it; absent on older records, which also have no
+    // `context` / `gap` rows.
     preview: z
       .array(
         z.object({
-          kind: z.enum(['add', 'delete']),
-          line: z.number().int().positive(),
+          kind: z.enum(['add', 'delete', 'context', 'gap']),
+          line: z.number().int().positive().optional(),
           text: z.string().optional(),
+          count: z.number().int().positive().optional(),
         }),
       )
       .optional(),

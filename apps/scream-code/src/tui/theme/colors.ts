@@ -107,6 +107,9 @@ export interface ColorPalette {
   diffAddedBg: string;
   /** Background of a removed line in the inline edit preview. */
   diffRemovedBg: string;
+  /** Deeper bands behind the words a one-line replacement changed. */
+  diffAddedWordBg: string;
+  diffRemovedWordBg: string;
   diffRemoved: string;
   diffAddedStrong: string;
   diffRemovedStrong: string;
@@ -175,6 +178,8 @@ export const darkColors: ColorPalette = {
   diffAdded: dark.yellowGreen,
   diffAddedBg: '#24422a',
   diffRemovedBg: '#4d242b',
+  diffAddedWordBg: '#2f6b38',
+  diffRemovedWordBg: '#7a3340',
   diffRemoved: dark.red,
   diffAddedStrong: dark.yellowGreenLight,
   diffRemovedStrong: dark.redLight,
@@ -240,6 +245,8 @@ export const lightColors: ColorPalette = {
   diffAdded: light.yellowGreen700,
   diffAddedBg: '#d9f2d3',
   diffRemovedBg: '#f9dada',
+  diffAddedWordBg: '#b5e3a9',
+  diffRemovedWordBg: '#f1b4b4',
   diffRemoved: light.red,
   diffAddedStrong: light.yellowGreen700,
   diffRemovedStrong: light.red,

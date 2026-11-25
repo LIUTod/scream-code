@@ -22,7 +22,7 @@
  *   row used to show, sourced from the shared speed tracker.
  */
 
-import { editPreviewOf, previewRowCount, renderEditPreview, type EditPreview } from './edit-preview';
+import { changeRowCount, fileChangeOf, renderFileChange, type FileChange } from './file-change';
 import type { Component, TUI } from '@liutod-scream/pi-tui';
 import { Container, Spacer, Text, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
@@ -50,6 +50,7 @@ import {
 } from '#/tui/utils/speed-tracker';
 
 import type { ToolCallComponent } from './tool-call';
+import { replaceTabs, sanitizeShellOutput } from '#/tui/utils/sanitize';
 import { strArg } from './tool-renderers/types';
 import { WrappedLine } from './wrapped-line';
 
@@ -62,7 +63,6 @@ const BRANCH_LAST = '  └─ ';
 const BRANCH_PIPE = '  │  ';
 const BRANCH_CORNER = '  └  ';
 const TREE_PIPE_ROW = '  │';
-const THINKING_BODY_PREFIX = '     ';
 /**
  * Extra indent shared by every body row of a block. File and diff bodies
  * reserve three cells for their line-number gutter (`   1  /**`), so tool
@@ -70,6 +70,8 @@ const THINKING_BODY_PREFIX = '     ';
  * instead of sitting three cells to its left.
  */
 const BODY_TEXT_INDENT = '   ';
+/** Result lines (warnings, diagnostics) kept under an expanded change. */
+const CHANGE_NOTE_LINES = 3;
 /** Cells of a background task notice bullet (`⠋ ` / `✓ ` / `✗ `). */
 const NOTICE_BULLET_WIDTH = 2;
 const THROTTLE_MS = 200;
@@ -154,6 +156,20 @@ const ANSI_RE = /\u001B\[[0-9;]*m/g;
 
 function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, '');
+}
+
+/**
+ * What an Edit / Write result says beyond its summary line ("Replaced 1
+ * occurrence in …", "Wrote … bytes to …"): the sections after the first,
+ * line by line — a stale-read warning, the language server's report.
+ */
+function changeNotes(output: string): string[] {
+  return output
+    .split(/\r?\n\s*\r?\n/)
+    .slice(1)
+    .flatMap((section) => section.split(/\r?\n/))
+    .map((line) => sanitizeShellOutput(replaceTabs(line)).trimEnd())
+    .filter((line) => line.trim().length > 0);
 }
 
 /** Paths deep enough to be worth shortening to their last two segments. */
@@ -620,17 +636,17 @@ export class ActivityGroupComponent extends Container {
   private buildCollapsedRows(width: number): void {
     const { collapsed, editPreview } = getActivityLines();
     let rowsLeft = Math.max(1, collapsed - 1);
-    const picked: { segment: BlockSegment; preview: EditPreview | undefined; previewRows: number }[] = [];
+    const picked: { segment: BlockSegment; preview: FileChange | undefined; previewRows: number }[] = [];
     let previewGiven = false;
     for (let index = this.segments.length - 1; index >= 0 && rowsLeft > 0; index -= 1) {
       const segment = this.segments[index] as BlockSegment;
       rowsLeft -= 1;
-      let preview: EditPreview | undefined;
+      let preview: FileChange | undefined;
       let previewRows = 0;
       if (segment.kind === 'tool' && editPreview > 0 && rowsLeft > 0) {
-        preview = editPreviewOf(segment.tc.toolCallView, segment.tc.resultView);
+        preview = fileChangeOf(segment.tc.toolCallView, segment.tc.resultView);
         if (preview !== undefined) {
-          const wanted = previewRowCount(preview, editPreview);
+          const wanted = changeRowCount(preview, 'folded', editPreview);
           if (wanted <= rowsLeft) {
             previewRows = editPreview;
           } else if (!previewGiven || rowsLeft >= 2) {
@@ -639,7 +655,7 @@ export class ActivityGroupComponent extends Container {
             previewRows = Math.max(1, rowsLeft - 1);
           }
           if (previewRows > 0) {
-            rowsLeft -= Math.min(rowsLeft, previewRowCount(preview, previewRows));
+            rowsLeft -= Math.min(rowsLeft, changeRowCount(preview, 'folded', previewRows));
             previewGiven = true;
           } else {
             preview = undefined;
@@ -653,7 +669,10 @@ export class ActivityGroupComponent extends Container {
       const isLast = index === picked.length - 1;
       if (segment.kind === 'tool') {
         const row = this.toolRow(segment.tc, width, ACTIVITY_GROUP_TOOL_PREVIEW_LINES, !this.running);
-        const lines = preview === undefined ? [] : renderEditPreview(preview, previewRows, width, this.colors, BRANCH_PIPE);
+        const lines =
+          preview === undefined
+            ? []
+            : renderFileChange(preview, 'folded', previewRows, width - BRANCH_PIPE.length, this.colors);
         // A last row with a preview keeps the tree open (├─ / │) and closes it
         // on the preview's last line, so the changed lines sit inside the frame.
         this.bodyContainer.addChild(
@@ -665,7 +684,7 @@ export class ActivityGroupComponent extends Container {
         );
         lines.forEach((line, lineIndex) => {
           const closing = isLast && lineIndex === lines.length - 1;
-          this.bodyContainer.addChild(new Text(closing ? BRANCH_CORNER + line.slice(BRANCH_PIPE.length) : line, 0, 0));
+          this.bodyContainer.addChild(new Text(`${closing ? BRANCH_CORNER : BRANCH_PIPE}${line}`, 0, 0));
         });
         return;
       }
@@ -722,8 +741,9 @@ export class ActivityGroupComponent extends Container {
       used += rows.cost;
     }
     if (hidden > 0) {
+      // The count is the last row of the tree, so it closes it.
       const summary = t('activitygroup.segments_hidden', { count: String(hidden) });
-      this.bodyContainer.addChild(new Text(`${BRANCH_PIPE}${BODY_TEXT_INDENT}${chalk.dim(summary)}`, 0, 0));
+      this.bodyContainer.addChild(new Text(`${BRANCH_CORNER}${BODY_TEXT_INDENT}${chalk.dim(summary)}`, 0, 0));
     }
   }
 
@@ -764,18 +784,23 @@ export class ActivityGroupComponent extends Container {
     for (const component of visible) this.bodyContainer.addChild(component);
   }
 
-  /** Renders one step of the timeline: its branch row plus its own body rows. */
+  /**
+   * Renders one step of the timeline: its branch row plus its own body rows.
+   * The tree runs down the body of every step and closes on the very last
+   * row of the block (`└`), so the last step's body sits inside the frame.
+   */
   private segmentRows(segment: BlockSegment, width: number, isLast: boolean): SegmentRows {
     if (segment.kind === 'tool') {
       const row = this.toolRow(segment.tc, width, getActivityLines().expandedTool, !this.running);
+      const body = this.expandedToolBody(segment.tc, row, width);
       const components: Component[] = [
-        new Text(`${isLast ? BRANCH_LAST : BRANCH_FIRST}${this.statusGlyph(row)} ${row.header}`, 0, 0),
+        new Text(`${isLast && body.length === 0 ? BRANCH_LAST : BRANCH_FIRST}${this.statusGlyph(row)} ${row.header}`, 0, 0),
       ];
-      const continuation = isLast ? THINKING_BODY_PREFIX : BRANCH_PIPE;
-      for (const line of row.body) {
-        components.push(new Text(`${continuation}${BODY_TEXT_INDENT}${line}`, 0, 0));
-      }
-      return { components, cost: 1 + row.body.length };
+      body.forEach((line, index) => {
+        const closing = isLast && index === body.length - 1;
+        components.push(new Text(`${closing ? BRANCH_CORNER : BRANCH_PIPE}${line}`, 0, 0));
+      });
+      return { components, cost: 1 + body.length };
     }
     if (segment.kind === 'notice') {
       return { components: [this.noticeRow(segment.data, width, isLast)], cost: 1 };
@@ -784,6 +809,28 @@ export class ActivityGroupComponent extends Container {
       return { components: [this.approvalRow(segment, width, isLast)], cost: 1 };
     }
     return this.thinkingSegmentRows(segment, width, isLast);
+  }
+
+  /**
+   * Body rows of an expanded tool step, without the tree prefix. An Edit /
+   * Write shows its change the way the folded block does, only with the
+   * unchanged lines around it and more of it, followed by whatever its result
+   * said beyond the summary line (a stale-read warning, diagnostics). Every
+   * other tool keeps the preview of its own card.
+   */
+  private expandedToolBody(tc: ToolCallComponent, row: ToolRow, width: number): string[] {
+    const change = fileChangeOf(tc.toolCallView, tc.resultView);
+    if (change === undefined) return row.body.map((line) => `${BODY_TEXT_INDENT}${line}`);
+    const limit = getActivityLines().expandedTool;
+    const notes = changeNotes(tc.resultView?.output ?? '').slice(0, CHANGE_NOTE_LINES);
+    // The step's body stays within its budget: the count row and the notes
+    // come out of it too.
+    const rows = renderFileChange(change, 'expanded', Math.max(1, limit - notes.length - 1), width - BRANCH_PIPE.length, this.colors);
+    const textWidth = Math.max(1, width - BRANCH_PIPE.length - BODY_TEXT_INDENT.length);
+    return [
+      ...rows,
+      ...notes.map((note) => `${BODY_TEXT_INDENT}${chalk.hex(this.colors.textDim)(truncateToWidth(note, textWidth, '…'))}`),
+    ];
   }
 
   /** One background task notice, kept to a single row. */
@@ -837,10 +884,11 @@ export class ActivityGroupComponent extends Container {
     const colors = this.colors;
     const lines = thinkingLines(segment.text);
     if (lines.length === 0) return { components: [], cost: 0 };
-    const continuation = isLast ? THINKING_BODY_PREFIX : BRANCH_PIPE;
+    // A run always has body rows, so its own row never closes the tree: the
+    // last body row of the last step does.
     const components: Component[] = [
       new Text(
-        `${isLast ? BRANCH_LAST : BRANCH_FIRST}${this.thinkingGlyph(segment)}${chalk.hex(colors.roleThinking)(t('activitygroup.thinking_label'))}`,
+        `${BRANCH_FIRST}${this.thinkingGlyph(segment)}${chalk.hex(colors.roleThinking)(t('activitygroup.thinking_label'))}`,
         0,
         0,
       ),
@@ -849,7 +897,8 @@ export class ActivityGroupComponent extends Container {
     // Capped by RENDERED lines: a long unbroken paragraph wraps into many rows,
     // and the budget must hold regardless of the source shape.
     const budget = getActivityLines().expandedThinking;
-    const textPrefix = `${continuation}${BODY_TEXT_INDENT}`;
+    const textPrefix = `${BRANCH_PIPE}${BODY_TEXT_INDENT}`;
+    const closingPrefix = `${BRANCH_CORNER}${BODY_TEXT_INDENT}`;
     const inner = Math.max(1, width - visibleWidth(textPrefix));
     const height = (line: string): number =>
       new WrappedLine(textPrefix, textPrefix, line).render(inner).length;
@@ -863,18 +912,19 @@ export class ActivityGroupComponent extends Container {
       // the row budget instead of relying on line-level trimming.
       selected = [truncateToWidth(first, inner * budget, '…')];
     }
-    for (const line of selected) {
+    const hiddenLines = lines.length - selected.length;
+    selected.forEach((line, index) => {
+      const closing = isLast && hiddenLines === 0 && index === selected.length - 1;
       components.push(
-        new WrappedLine(textPrefix, textPrefix, chalk.hex(colors.roleThinking)(line)),
+        new WrappedLine(textPrefix, textPrefix, chalk.hex(colors.roleThinking)(line), closing ? { lastPrefix: closingPrefix } : {}),
       );
       cost += height(line);
-    }
-    const hiddenLines = lines.length - selected.length;
+    });
     if (hiddenLines > 0) {
       const hint = segment.live
         ? t('activitygroup.thinking_earlier', { count: String(hiddenLines) })
         : t('activitygroup.thinking_more', { count: String(hiddenLines) });
-      components.push(new Text(`${textPrefix}${chalk.dim(hint)}`, 0, 0));
+      components.push(new Text(`${isLast ? closingPrefix : textPrefix}${chalk.dim(hint)}`, 0, 0));
       cost += 1;
     }
     return { components, cost };

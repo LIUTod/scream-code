@@ -330,6 +330,9 @@ export class SessionReplayRenderer {
       tool_call_id: toolCallId,
       output: toolResultOutput(message.content),
       is_error: message.isError,
+      // An Edit / Write keeps its change on the result, so the replayed block
+      // draws it with the line numbers it had live.
+      ...(message.display !== undefined ? { display: message.display } : {}),
     };
     call.result = result;
     this.applyStepContext(context);

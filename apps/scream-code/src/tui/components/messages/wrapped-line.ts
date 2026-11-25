@@ -22,6 +22,11 @@ export interface WrappedLineOptions {
    * wrapping. The row count stays constant regardless of text length.
    */
   truncate?: boolean;
+  /**
+   * Prefix of the last rendered row instead of the first / continuation one
+   * (same width): the row that closes a tree (`└`) when the text wraps.
+   */
+  lastPrefix?: string;
 }
 
 export class WrappedLine implements Component {
@@ -58,7 +63,7 @@ export class WrappedLine implements Component {
       } else {
         // Single-line the text first: embedded newlines/tabs would either
         // break the row contract or render as raw control characters.
-        const singleLine = this.text.replaceAll(/\r\n|\r|\n/g, ' ').replaceAll(/\t/g, '   ');
+        const singleLine = this.text.replaceAll(/\r\n|\r|\n/g, ' ').replaceAll('	', '   ');
         const line = this.firstPrefix + truncateToWidth(singleLine, contentWidth);
         const pad = Math.max(0, width - visibleWidth(line));
         lines = [line + ' '.repeat(pad)];
@@ -70,6 +75,14 @@ export class WrappedLine implements Component {
       lines = wrapped.map((line, index) =>
         index === 0 ? `${this.firstPrefix}${line}` : `${this.continuationPrefix}${line}`,
       );
+    }
+
+    const lastPrefix = this.options.lastPrefix;
+    const lastIndex = lines.length - 1;
+    if (lastPrefix !== undefined && lastIndex >= 0) {
+      const used = lastIndex === 0 ? this.firstPrefix : this.continuationPrefix;
+      const last = lines[lastIndex] ?? '';
+      if (last.startsWith(used)) lines[lastIndex] = lastPrefix + last.slice(used.length);
     }
 
     this.cachedText = this.text;

@@ -343,6 +343,57 @@ describe('Agent resume', () => {
       }),
     });
   });
+
+  it('keeps the change preview of an edit on its replayed tool result', async () => {
+    const display = {
+      kind: 'file_diff' as const,
+      added: 1,
+      removed: 1,
+      preview: [
+        { kind: 'delete' as const, line: 42, text: 'const a = 1;' },
+        { kind: 'add' as const, line: 42, text: 'const a = 10;' },
+      ],
+      previewTotal: 2,
+    };
+    const persistence = new RecordingAgentPersistence([
+      {
+        type: 'context.append_loop_event',
+        event: { type: 'step.begin', uuid: 'edit-step', turnId: '0', step: 1 },
+      },
+      {
+        type: 'context.append_loop_event',
+        event: {
+          type: 'tool.call',
+          uuid: 'edit-call',
+          turnId: '0',
+          step: 1,
+          stepUuid: 'edit-step',
+          toolCallId: 'call_edit',
+          name: 'Edit',
+          args: { path: 'a.ts', old_string: 'const a = 1;', new_string: 'const a = 10;' },
+        },
+      },
+      {
+        type: 'context.append_loop_event',
+        event: {
+          type: 'tool.result',
+          parentUuid: 'edit-call',
+          toolCallId: 'call_edit',
+          result: { output: 'Replaced 1 occurrence in a.ts', display },
+        },
+      },
+    ]);
+    const ctx = testAgent({ persistence });
+
+    await ctx.agent.resume();
+
+    expect(ctx.agent.replayBuilder.buildResult()).toContainEqual({
+      type: 'message',
+      message: expect.objectContaining({ role: 'tool', toolCallId: 'call_edit', display }),
+    });
+    // The model never sees it.
+    for (const message of ctx.agent.context.messages) expect(message).not.toHaveProperty('display');
+  });
 });
 
 class RecordingAgentPersistence extends InMemoryAgentRecordPersistence {
