@@ -91,7 +91,7 @@ export class ChangedFilesInjector extends DynamicInjector {
     }
     if (notes.length === 0) return undefined;
     return [
-      'Files you read or edited changed since you last saw them — by the user, a formatter, or a command you ran.',
+      'Files you read or edited changed since you last saw them — by the user, a formatter, a subagent, or a command you ran.',
       'Take the changes into account and do not undo them unless asked. Your next edits should match this text.',
       '',
       ...notes,

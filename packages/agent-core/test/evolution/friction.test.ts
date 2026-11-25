@@ -66,7 +66,10 @@ describe('collectFriction', () => {
       { type: 'tool.call', toolCallId: '2', name: 'Write', args: {} },
       { type: 'tool.result', toolCallId: '2', result: { isError: false, output: 'ok' } },
       { type: 'tool.call', toolCallId: '3', name: 'Bash', args: {} },
-      { type: 'tool.result', toolCallId: '3', result: { isError: false, output: '', display: { kind: 'file_changes', files: [] } } },
+      { type: 'tool.result', toolCallId: '3', result: { isError: false, output: '', display: { kind: 'file_changes', scripted: true, files: [] } } },
+      { type: 'tool.call', toolCallId: '5', name: 'Bash', args: {} },
+      // A formatter changing files is not an edit that should have gone through Edit.
+      { type: 'tool.result', toolCallId: '5', result: { isError: false, output: '', display: { kind: 'file_changes', files: [] } } },
       { type: 'tool.call', toolCallId: '4', name: 'Bash', args: {} },
       { type: 'tool.result', toolCallId: '4', result: { isError: false, output: 'listing' } },
     ]);

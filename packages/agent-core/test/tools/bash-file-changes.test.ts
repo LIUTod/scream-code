@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BashTool } from '../../src/tools/builtin/shell/bash';
 import { computeAnchor } from '../../src/tools/builtin/file/line-endings';
 import { EditSnapshotStore } from '../../src/tools/support/edit-snapshot-store';
+import { looksLikeHandEdit } from '../../src/tools/support/shell-file-changes';
 import { testJian } from '../fixtures/test-jian';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -59,6 +60,23 @@ describe.skipIf(process.platform === 'win32')('BashTool — files a command chan
     expect((result as { display?: unknown }).display).toBeUndefined();
   });
 
+  it('reports a change a project tool made without pointing it back at Edit', async () => {
+    const file = join(dir, 'app.ts');
+    await writeFile(file, 'old\n');
+    await writeFile(join(dir, 'generated.ts'), 'new\n');
+    const store = new EditSnapshotStore();
+    store.remember(file, { content: 'old\n', anchor: computeAnchor('old\n'), recordedAt: 'read' });
+    const tool = new BashTool(testJian, dir, undefined, { editSnapshots: store });
+
+    const result = await run(tool, 'cp generated.ts app.ts');
+
+    expect(textOf(result.output)).toContain('[note] This command changed app.ts');
+    expect(textOf(result.output)).not.toContain('use Edit or Write');
+    const display = (result as { display?: { kind: string; scripted?: boolean } }).display;
+    expect(display?.kind).toBe('file_changes');
+    expect(display?.scripted).toBeUndefined();
+  });
+
   it('says so when commands keep editing files', async () => {
     const file = join(dir, 'a.txt');
     await writeFile(file, 'one\n');
@@ -70,5 +88,27 @@ describe.skipIf(process.platform === 'win32')('BashTool — files a command chan
     const second = await run(tool, 'printf "three\\n" >> a.txt');
 
     expect(textOf(second.output)).toContain('That is 2 commands in this session that edited files.');
+  });
+});
+
+describe('looksLikeHandEdit', () => {
+  it('tells a hand-written edit from a project tool', () => {
+    for (const command of [
+      "sed -i 's/a/b/' x.ts",
+      "sed -E -i '' 's/a/b/' x.ts",
+      "perl -pi -e 's/a/b/' x.ts",
+      'python3 - <<\'EOF\'\nopen("x.ts","w")\nEOF',
+      'python3 -c "import pathlib"',
+      'node -e "require(\'fs\').writeFileSync(\'x.ts\', \'\')"',
+      'cat > x.ts <<EOF\nx\nEOF',
+      'echo "x" > src/x.ts',
+      'printf "y" >> notes.md',
+      'tee -a log.txt',
+    ]) {
+      expect(looksLikeHandEdit(command), command).toBe(true);
+    }
+    for (const command of ['git checkout -- src/x.ts', 'pnpm prettier --write .', 'cargo fmt', 'npx eslint --fix src', 'cp a.ts b.ts', 'echo done', 'ls > /dev/null']) {
+      expect(looksLikeHandEdit(command), command).toBe(false);
+    }
   });
 });

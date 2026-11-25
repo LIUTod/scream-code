@@ -807,7 +807,11 @@ export class EditTool implements BuiltinTool<EditInput> {
     // never cold-starts one) → leave the baseline undefined, which skips the
     // rollback gate entirely (an unmeasured baseline must not read as zero).
     let preApplyErrorCount: number | undefined;
-    if (this.lspRegistry !== undefined) {
+    // The rollback gate guards a remap across someone else's change. Across
+    // the agent's own edits the remap is exact and the apply is an ordinary
+    // line-range edit — one that may leave errors mid-refactor like any other
+    // (reported via leftErrors), not one to undo — so no baseline is taken.
+    if (this.lspRegistry !== undefined && !ownChange) {
       const client = await this.lspRegistry.activeClientFor(safePath, this.workspace.workspaceDir);
       if (client !== undefined) {
         const pre = await fetchDiagnostics(

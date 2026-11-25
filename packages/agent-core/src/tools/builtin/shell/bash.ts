@@ -56,7 +56,12 @@ import { toInputJsonSchema } from '../../support/input-schema';
 import { commandApprovalRule, matchesCommandRule } from '../../support/command-rule';
 import { ToolResultBuilder } from '../../support/result-builder';
 import type { EditSnapshotStore } from '../../support/edit-snapshot-store';
-import { collectShellFileChanges, stampTrackedFiles, type ShellFileChange } from '../../support/shell-file-changes';
+import {
+  collectShellFileChanges,
+  looksLikeHandEdit,
+  stampTrackedFiles,
+  type ShellFileChange,
+} from '../../support/shell-file-changes';
 import bashDescriptionTemplate from './bash.md';
 
 const MS_PER_SECOND = 1000;
@@ -655,7 +660,9 @@ export class BashTool implements BuiltinTool<BashInput> {
       approvalRule: commandApprovalRule(this.name, args.command),
       matchesRule: (ruleArgs) => matchesCommandRule(ruleArgs, args.command),
       execute: (ctx) =>
-        args.run_in_background === true ? this.execution(args, ctx) : this.trackingFileChanges(() => this.execution(args, ctx)),
+        args.run_in_background === true
+          ? this.execution(args, ctx)
+          : this.trackingFileChanges(args.command, () => this.execution(args, ctx)),
     };
   }
 
@@ -666,7 +673,10 @@ export class BashTool implements BuiltinTool<BashInput> {
    * and a note points back at Edit / Write, which would have shown and
    * checked it.
    */
-  private async trackingFileChanges(run: () => Promise<ExecutableToolResult>): Promise<ExecutableToolResult> {
+  private async trackingFileChanges(
+    command: string,
+    run: () => Promise<ExecutableToolResult>,
+  ): Promise<ExecutableToolResult> {
     const store = this.editSnapshots;
     if (store === undefined) return run();
     const before = await stampTrackedFiles(store, this.jian);
@@ -674,15 +684,21 @@ export class BashTool implements BuiltinTool<BashInput> {
     if (before.size === 0) return result;
     const changes = await collectShellFileChanges(before, store, this.jian).catch((): ShellFileChange[] => []);
     if (changes.length === 0) return result;
-    this.fileChangingCommands += 1;
-    const names = changes.map((change) => this.shownPath(change.path)).join(', ');
-    const repeat =
-      this.fileChangingCommands > 1
-        ? ` That is ${String(this.fileChangingCommands)} commands in this session that edited files.`
-        : '';
-    const note =
-      `[note] This command changed ${names}; its new text is now the file's known view.${repeat} ` +
-      'For source edits use Edit or Write: they show the change and check it against the file.';
+    const names = changes.slice(0, 5).map((change) => this.shownPath(change.path));
+    const listed = changes.length > 5 ? `${names.join(', ')} and ${String(changes.length - 5)} more` : names.join(', ');
+    // git, a formatter or a generator changing files is the point of running
+    // it; only a command that hand-edits files gets pointed back at Edit.
+    const scripted = looksLikeHandEdit(command);
+    let advice = '';
+    if (scripted) {
+      this.fileChangingCommands += 1;
+      const repeat =
+        this.fileChangingCommands > 1
+          ? ` That is ${String(this.fileChangingCommands)} commands in this session that edited files.`
+          : '';
+      advice = `${repeat} For source edits use Edit or Write: they show the change and check it against the file.`;
+    }
+    const note = `[note] This command changed ${listed}; their new text is now the files' known view.${advice}`;
     const output = result.output;
     const withNote =
       typeof output === 'string'
@@ -694,6 +710,7 @@ export class BashTool implements BuiltinTool<BashInput> {
       output: withNote,
       display: {
         kind: 'file_changes',
+        ...(scripted ? { scripted: true } : {}),
         files: changes.map((change) => ({ ...change, path: this.shownPath(change.path) })),
       },
     };

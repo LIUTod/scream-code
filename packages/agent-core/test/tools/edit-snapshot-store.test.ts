@@ -118,4 +118,15 @@ describe('EditSnapshotStore', () => {
     expect(store.recall(`/p${String(count - 1)}.ts`)).toBeDefined();
     expect(store.recall('/p0.ts')).toBeUndefined();
   });
+
+  it('keeps a view the model wrote as its own when it is read back', () => {
+    const store = new EditSnapshotStore();
+    store.remember('/a.ts', snapshotOf('read'));
+    store.remember('/a.ts', snapshotOf('mine', 'edit'));
+    // Re-reading the file it just edited: the same view, still the model's own.
+    store.remember('/a.ts', snapshotOf('mine', 'read'));
+
+    expect(store.recall('/a.ts')?.recordedAt).toBe('edit');
+    expect(store.changedOnlyByOwnEdits('/a.ts', 'anchor-read', 'mine')).toBe(true);
+  });
 });

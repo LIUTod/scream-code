@@ -24,6 +24,24 @@ import {
 import { fileDiffDetails, type FileDiffPreviewRow } from './file-diff';
 
 export const SHELL_TRACKED_FILES = 32;
+/** Files whose changed lines are kept; the rest of a large change keeps its counts only. */
+export const SHELL_PREVIEWED_FILES = 6;
+
+/**
+ * Whether a command looks like a hand-written edit — `sed -i`, a Python /
+ * Node one-off, a heredoc or redirect into a file — rather than a project
+ * tool (git, a formatter, a code generator) whose file changes are the
+ * point. Only the former is an edit the agent should have made with Edit.
+ */
+export function looksLikeHandEdit(command: string): boolean {
+  return (
+    /\bsed\s+(?:-[a-zA-Z]*\s+)*-[a-zA-Z]*i/.test(command) ||
+    /\bperl\s+-[a-zA-Z]*i/.test(command) ||
+    /\b(?:python3?|node|ruby|deno|bun|php)\b[^|;&]*(?:<<|\s-c\s|\s-e\s|\s-\s)/.test(command) ||
+    /\bcat\s*>|\btee\s+(?:-a\s+)?[\w./-]|<<\s*['"]?[A-Za-z_]+/.test(command) ||
+    /(?:^|[\s;&|])(?:echo|printf)\b[^|;&]*>{1,2}\s*[\w./-]+\.\w+/.test(command)
+  );
+}
 
 export interface ShellFileChange {
   readonly path: string;
@@ -105,5 +123,10 @@ export async function collectShellFileChanges(
       previewTotal: details.previewTotal,
     });
   }
-  return changes;
+  // A command that rewrote many files (a checkout, a codemod) keeps every
+  // count but only the first files' lines: the preview is saved with the
+  // session, and nobody reads thirty of them in a row.
+  return changes.map((change, index) =>
+    index < SHELL_PREVIEWED_FILES ? change : { path: change.path, added: change.added, removed: change.removed },
+  );
 }

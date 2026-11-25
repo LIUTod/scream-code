@@ -121,10 +121,13 @@ export async function collectFriction(
         }
       } else if (event['type'] === 'tool.result' && typeof event['toolCallId'] === 'string') {
         const tool = toolByCall.get(event['toolCallId']);
-        const result = event['result'] as { isError?: unknown; display?: { kind?: unknown } } | undefined;
+        const result = event['result'] as { isError?: unknown; display?: unknown } | undefined;
         const isError = result?.isError === true;
         if (!isError && (tool === 'Edit' || tool === 'Write')) fileEdits.viaTools += 1;
-        if (result?.display?.kind === 'file_changes') fileEdits.viaShell += 1;
+        // Only commands that hand-edited files count: git or a formatter
+        // changing them is not an edit the agent should have made with Edit.
+        const display = result?.display as { kind?: unknown; scripted?: unknown } | undefined;
+        if (display?.kind === 'file_changes' && display.scripted === true) fileEdits.viaShell += 1;
         if (tool === undefined || !isError) continue;
         const entry = counters.get(tool);
         if (entry === undefined) continue;

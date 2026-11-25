@@ -145,6 +145,8 @@ export const ToolResultDisplaySchema = z.discriminatedUnion('kind', [
     // edited (Bash): each with the same counts and preview rows a file_diff
     // carries, so the UI shows what a script did to the code.
     kind: z.literal('file_changes'),
+    /** The command looked like a hand-written edit (sed -i, a one-off script, a redirect), not a project tool. */
+    scripted: z.boolean().optional(),
     files: z.array(
       z.object({
         path: z.string(),

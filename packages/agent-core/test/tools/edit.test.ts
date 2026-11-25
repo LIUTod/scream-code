@@ -2211,6 +2211,7 @@ describe('EditTool stale-anchor recovery', () => {
     '/tmp/recover-own.txt',
     '/tmp/recover-own-range.txt',
     '/tmp/recover-own-touch.txt',
+    '/tmp/recover-own-lsp.ts',
     '/tmp/recover-anchor.txt',
     '/tmp/recover-rollback.ts',
     '/tmp/recover-stable.ts',
@@ -2279,6 +2280,37 @@ describe('EditTool stale-anchor recovery', () => {
       message: `Error ${String(index)}`,
     }));
   }
+
+  it('does not roll back a line range carried across the model’s own edit when errors rise', async () => {
+    let disk = 'one\ntwo\nthree\n';
+    const store = new EditSnapshotStore();
+    const readAnchor = readSnapshotOf(disk).anchor;
+    store.remember('/tmp/recover-own-lsp.ts', { ...readSnapshotOf(disk), recordedAt: 'read' });
+    const writeText = vi.fn().mockImplementation(async (_path: string, text: string) => {
+      disk = text;
+      return 0;
+    });
+    // Every observation reports more errors than the one before: mid-refactor.
+    const registry = recoveryRegistry([errorDiagnostics(0), errorDiagnostics(1), errorDiagnostics(2), errorDiagnostics(3)]);
+    const tool = new EditTool(
+      createFakeJian({ readText: vi.fn().mockImplementation(() => Promise.resolve(disk)), writeText }),
+      PERMISSIVE_WORKSPACE,
+      registry,
+      undefined,
+      store,
+    );
+
+    await executeTool(tool, context({ path: '/tmp/recover-own-lsp.ts', old_string: 'one', new_string: 'ONE', anchor: readAnchor }));
+    const range = await executeTool(
+      tool,
+      context({ path: '/tmp/recover-own-lsp.ts', new_string: 'THREE', start_line: 3, end_line: 3, anchor: readAnchor }),
+    );
+
+    expect(range.isError).toBeFalsy();
+    expect((range as { leftErrors?: boolean }).leftErrors).toBe(true);
+    expect(disk).toBe('ONE\ntwo\nTHREE\n');
+    expect(range.output).not.toContain('rolled back');
+  });
 
   it('remaps a window across an external insertion above it and applies the shifted range', async () => {
     const read = 'one\ntwo\nthree\nfour\n';

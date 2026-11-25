@@ -87,13 +87,16 @@ export class EditSnapshotStore {
       return;
     }
     // The same view recorded again (a re-read) moves to the end instead of
-    // filling the history twice.
+    // filling the history twice — keeping whose it was: re-reading what the
+    // agent itself wrote does not make it someone else's change.
+    let own = false;
     const history = (this.entries.get(path) ?? []).filter((kept) => {
       if (kept.snapshot.anchor !== snapshot.anchor) return true;
+      if (kept.snapshot.recordedAt === 'edit') own = true;
       this.totalBytes -= kept.bytes;
       return false;
     });
-    history.push({ snapshot, bytes });
+    history.push({ snapshot: own && snapshot.recordedAt === 'read' ? { ...snapshot, recordedAt: 'edit' } : snapshot, bytes });
     this.totalBytes += bytes;
     while (history.length > EDIT_SNAPSHOT_HISTORY) {
       const oldest = history.shift();
