@@ -3094,6 +3094,43 @@ describe('Agent compaction', () => {
       const savings = micro.estimateSavings(history);
       expect(savings).toBeGreaterThan(0);
     });
+
+    it('keeps the newest Read of a file the model edited after it, and names a cleared Read', () => {
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 0,
+        minContentTokens: 0,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+        uselessMarker: '[uneventful]',
+        noMatchesMarker: '[no matches]',
+      });
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 4;
+      const call = (id: string, name: string, args: Record<string, unknown>): ContextMessage => ({
+        role: 'assistant',
+        content: [],
+        toolCalls: [{ type: 'function', id, name, arguments: JSON.stringify(args) }],
+      });
+      const result = (id: string, text: string): ContextMessage =>
+        ({ role: 'tool', toolCallId: id, toolCalls: [], content: [{ type: 'text', text }] }) as ContextMessage;
+      const history: ContextMessage[] = [
+        call('tc_edited', 'Read', { path: '/edited.ts' }),
+        result('tc_edited', 'edited file content'.repeat(20)),
+        call('tc_other', 'Read', { path: '/other.ts' }),
+        result('tc_other', 'other file content'.repeat(20)),
+        call('tc_edit', 'Edit', { path: '/edited.ts', old_string: 'a', new_string: 'b' }),
+        result('tc_edit', 'Replaced 1 occurrence in /edited.ts'),
+      ];
+      const out = micro.compact(history);
+      // The file the model went on to edit keeps its text: its next old_string comes from it.
+      expect(out[1]!.content[0]).toMatchObject({ type: 'text', text: 'edited file content'.repeat(20) });
+      // A read it did not edit is cleared, and the marker says which file to read again.
+      expect(out[3]!.content[0]).toMatchObject({
+        type: 'text',
+        text: '[Old Read of /other.ts cleared: Read it again before editing it]',
+      });
+      expect(micro.estimateSavings(history)).toBeGreaterThan(0);
+    });
   });
 
   describe('iterative summary update', () => {

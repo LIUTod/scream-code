@@ -151,6 +151,20 @@ describe('EditTool', () => {
     expect(result.output).toContain('changed since the Read your anchor came from (not by your edits)');
   });
 
+  it('shows the edited lines as they are now, numbered like Read', async () => {
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue('one\ntwo\nthree\nfour\n'),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(tool, context({ path: '/tmp/a.txt', old_string: 'three', new_string: 'THREE' }));
+
+    expect(result.output).toContain('The lines around it now:\n2\ttwo\n3\tTHREE\n4\tfour');
+  });
+
   it('replaces a unique first occurrence and writes the updated content', async () => {
     const writeText = vi.fn().mockResolvedValue(0);
     const tool = new EditTool(

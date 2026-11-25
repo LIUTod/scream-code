@@ -60,10 +60,18 @@ interface Kept {
   readonly bytes: number;
 }
 
+/** What the file on disk looked like (mtime + size) when its latest view was last confirmed. */
+export interface DiskStamp {
+  readonly mtime: number;
+  readonly size: number;
+}
+
 export class EditSnapshotStore {
   /** Path → history (newest last); Map order doubles as the LRU list. */
   private readonly entries = new Map<string, Kept[]>();
   private totalBytes = 0;
+  /** Path → the disk state the latest view was confirmed against (cleared by every new view). */
+  private readonly stamps = new Map<string, DiskStamp>();
 
   /**
    * Record the latest snapshot for a path. Content over the budget is not
@@ -93,6 +101,7 @@ export class EditSnapshotStore {
     }
     this.entries.delete(path);
     this.entries.set(path, history);
+    this.stamps.delete(path);
     if (this.entries.size > EDIT_SNAPSHOT_MAX_PATHS) {
       const oldest = this.entries.keys().next().value;
       if (oldest !== undefined) this.drop(oldest);
@@ -131,6 +140,31 @@ export class EditSnapshotStore {
     );
   }
 
+  /** Paths with a kept view, most recently used first. */
+  recentPaths(limit = EDIT_SNAPSHOT_MAX_PATHS): string[] {
+    return [...this.entries.keys()].toReversed().slice(0, limit);
+  }
+
+  /** The latest view of a path without touching its recency. */
+  peek(path: string): EditSnapshot | undefined {
+    return this.entries.get(path)?.at(-1)?.snapshot;
+  }
+
+  /** The disk state the latest view of `path` was last confirmed against. */
+  stampOf(path: string): DiskStamp | undefined {
+    return this.stamps.get(path);
+  }
+
+  /** Records that the file on disk, as `stamp`, still holds the latest view. */
+  confirm(path: string, stamp: DiskStamp): void {
+    if (this.entries.has(path)) this.stamps.set(path, stamp);
+  }
+
+  /** Forgets a path entirely (the file is gone). */
+  forget(path: string): void {
+    this.drop(path);
+  }
+
   private touch(path: string): Kept[] | undefined {
     const history = this.entries.get(path);
     if (history === undefined) return undefined;
@@ -145,6 +179,7 @@ export class EditSnapshotStore {
     if (history === undefined) return;
     for (const kept of history) this.totalBytes -= kept.bytes;
     this.entries.delete(path);
+    this.stamps.delete(path);
   }
 
   /** Over the total budget: older views go first, then whole least-recent paths. */

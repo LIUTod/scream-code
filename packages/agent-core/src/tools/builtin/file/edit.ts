@@ -27,6 +27,7 @@ import {
   type EditRecoverySignature,
 } from '../../support/edit-recovery-queue';
 import { fileDiffDetails } from '../../support/file-diff';
+import { editSnippet } from '../../support/file-views';
 import { renameArgAliases } from '../../support/arg-aliases';
 import { toInputJsonSchema } from '../../support/input-schema';
 import {
@@ -209,6 +210,16 @@ function withFileDiffDisplay(
  * blank-line separated; empty sections are omitted. An optional recovery note
  * (stale-anchor remap) travels last so it is read after the diff counts.
  */
+/**
+ * The edited lines as they are now, numbered like Read, after the summary
+ * line: the next edit in the same place can take its old_string from here
+ * instead of an earlier Read that no longer matches (or that compaction has
+ * since cleared).
+ */
+function withSnippet(base: string, snippet: string | undefined): string {
+  return snippet === undefined ? base : `${base}\n\nThe lines around it now:\n${snippet}`;
+}
+
 function assembleEditOutput(
   base: string,
   warning: string | undefined,
@@ -616,6 +627,7 @@ export class EditTool implements BuiltinTool<EditInput> {
         }
 
         const newContent = replaceOnceLiteral(content, oldString, args.new_string);
+        const firstLine = content.slice(0, content.indexOf(oldString)).split('\n').length;
         // The text actually written to disk, in the file's own line-ending
         // style — the diff below is measured against this, not the model view.
         const writtenText = materializeModelText(newContent, modelView.lineEndingStyle);
@@ -631,7 +643,10 @@ export class EditTool implements BuiltinTool<EditInput> {
         // Edit does not work); `leftErrors` lets the turn's completion check
         // ask for the fix.
         const output = assembleEditOutput(
-          `Replaced 1 occurrence in ${args.path}`,
+          withSnippet(
+            `Replaced 1 occurrence in ${args.path}`,
+            editSnippet(newContent, firstLine, firstLine + Math.max(0, args.new_string.split('\n').length - 1)),
+          ),
           staleAnchorNote ?? this.staleReadWarning(args, safePath),
           notice,
         );
@@ -958,9 +973,12 @@ export class EditTool implements BuiltinTool<EditInput> {
     // `message` side channel for the UI. An edit that left errors is still a
     // success; `leftErrors` lets the turn's completion check ask for the fix.
     const output = assembleEditOutput(
-      startLine === endLine
-        ? `Replaced line ${String(startLine)} in ${args.path}`
-        : `Replaced lines ${String(startLine)}-${String(endLine)} in ${args.path}`,
+      withSnippet(
+        startLine === endLine
+          ? `Replaced line ${String(startLine)} in ${args.path}`
+          : `Replaced lines ${String(startLine)}-${String(endLine)} in ${args.path}`,
+        editSnippet(newContent, startLine, startLine + Math.max(0, newLines.length - 1)),
+      ),
       this.staleReadWarning(args, safePath),
       notice,
       recoveryNote,

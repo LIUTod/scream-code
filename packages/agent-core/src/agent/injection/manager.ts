@@ -1,6 +1,7 @@
 import type { Agent } from '..';
 import type { DynamicInjector } from './injector';
 import { EditRecoveryInjector } from './edit-recovery';
+import { ChangedFilesInjector, RestoredFilesInjector } from './file-views';
 import { GoalInjector } from './goal';
 import { LocalDateInjector } from './local-date';
 import { MemoryOverviewInjector } from './memory-overview';
@@ -27,6 +28,8 @@ export class InjectionManager {
       new TodoListReminderInjector(agent),
       new GoalInjector(agent),
       new WorkingSetInjector(agent),
+      new RestoredFilesInjector(agent),
+      new ChangedFilesInjector(agent),
       new EditRecoveryInjector(agent),
       new MemoryOverviewInjector(agent),
       new MemoryRecallInjector(agent),

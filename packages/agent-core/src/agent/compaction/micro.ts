@@ -213,6 +213,53 @@ function findSupersededPaths(
   return superseded;
 }
 
+/** Reads of files still being edited that stay readable past the cutoff. */
+const READS_IN_USE_KEPT = 3;
+/** A Read larger than this is cleared even while its file is being edited. */
+const READ_IN_USE_MAX_TOKENS = 6_000;
+
+/**
+ * Old Read results the model is still working from: the newest Read of a
+ * file that an Edit / Write targeted after it. Clearing those is what sent
+ * long sessions to the shell — the model lost the text its next old_string
+ * had to match — so the newest few (each under a size cap) survive the
+ * cutoff. Paths compare as raw argument strings, like the supersede rule.
+ */
+function findReadsInUse(
+  messages: readonly ContextMessage[],
+  cutoff: number,
+  tokensOf: (message: ContextMessage) => number,
+): Set<string> {
+  const latestRead = new Map<string, { toolCallId: string; index: number }>();
+  const editedAfter = new Map<string, number>();
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg?.role !== 'assistant') continue;
+    for (const tc of msg.toolCalls) {
+      const args = parseToolCallArguments(tc.arguments);
+      if (tc.name === 'Read') {
+        for (const path of extractReadFilePaths(tc.name, args)) latestRead.set(path, { toolCallId: tc.id, index: i });
+      } else if (tc.name === 'Edit' || tc.name === 'Write') {
+        const raw = args?.['path'] ?? args?.['file_path'];
+        if (typeof raw === 'string') editedAfter.set(raw, i);
+      }
+    }
+  }
+  const candidates: { toolCallId: string; index: number }[] = [];
+  for (const [path, read] of latestRead) {
+    const edited = editedAfter.get(path);
+    if (read.index < cutoff && edited !== undefined && edited > read.index) candidates.push(read);
+  }
+  candidates.sort((a, b) => b.index - a.index);
+  const kept = new Set<string>();
+  for (const candidate of candidates) {
+    if (kept.size >= READS_IN_USE_KEPT) break;
+    const result = messages.find((m) => m.role === 'tool' && m.toolCallId === candidate.toolCallId);
+    if (result !== undefined && tokensOf(result) <= READ_IN_USE_MAX_TOKENS) kept.add(candidate.toolCallId);
+  }
+  return kept;
+}
+
 /**
  * Lightweight compaction that truncates old tool results without an LLM call.
  *
@@ -327,6 +374,9 @@ export class MicroCompaction {
     const config = this.config;
     const superseded = findSupersededPaths(messages, this.cutoff);
     const toolCalls = buildToolCallIndex(messages);
+    const inUse = findReadsInUse(messages, this.cutoff, (message) =>
+      estimateTokensForMessages([message], this.tokenizerKind),
+    );
     const result: ContextMessage[] = [];
     let i = 0;
     for (const msg of messages) {
@@ -342,6 +392,7 @@ export class MicroCompaction {
       const isOversizedTruncatable =
         isOld &&
         isTool &&
+        !inUse.has(toolCallId) &&
         estimateTokensForMessages([msg], this.tokenizerKind) >= config.minContentTokens;
       // The result is about to be replaced by a marker, which tells the model
       // the content is gone and it may re-fetch — so a subsequent identical
@@ -364,10 +415,19 @@ export class MicroCompaction {
         } as ContextMessage);
       } else if (isOversizedTruncatable) {
         const paths = toolCallId !== undefined ? superseded.get(toolCallId) : undefined;
+        const call = toolCallId !== undefined ? toolCalls.get(toolCallId) : undefined;
+        const readPaths =
+          call !== undefined && READ_TOOL_NAMES.has(call.name)
+            ? extractReadFilePaths(call.name, parseToolCallArguments(call.argumentsJson))
+            : [];
+        // A cleared Read names its file, so the model knows what to read again
+        // rather than editing from a memory of it.
         const marker =
           paths !== undefined && paths.length > 0
             ? `[Superseded by a newer read of ${paths.join(', ')}]`
-            : config.truncatedMarker;
+            : readPaths.length > 0
+              ? `[Old Read of ${readPaths.join(', ')} cleared: Read it again before editing it]`
+              : config.truncatedMarker;
         result.push({
           ...msg,
           content: [{ type: 'text', text: marker } as ContentPart],
@@ -444,9 +504,11 @@ export class MicroCompaction {
     let afterTokens = 0;
     const tokenizer = this.tokenizerKind;
     const toolCalls = buildToolCallIndex(messages);
+    const inUse = findReadsInUse(messages, cutoff, (message) => estimateTokensForMessages([message], tokenizer));
     for (let i = 0; i < messages.length && i < cutoff; i++) {
       const message = messages[i];
       if (message?.role !== 'tool' || message.toolCallId === undefined) continue;
+      if (inUse.has(message.toolCallId) && message.useless !== true) continue;
 
       const contentTokens = estimateTokensForMessages([message], tokenizer);
       const isUseless = message.useless === true;
