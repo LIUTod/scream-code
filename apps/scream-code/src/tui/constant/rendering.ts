@@ -32,13 +32,13 @@ export const MAX_SHELL_OUTPUT_BYTES = 128 * 1024;
 export const ACTIVITY_GROUP_TOOL_PREVIEW_LINES = 3;
 // Rows of a collapsed block, header included: the header plus this many minus
 // one steps of the timeline (reasoning runs, tool calls and the inline edit
-// previews share the budget, newest kept). Ten keeps a folded block compact while
-// the newest edit shows its changed lines; at three rows the block only ever showed its
-// header plus a single step.
-export const ACTIVITY_GROUP_COLLAPSED_LINES = 10;
+// previews share the budget, newest kept; the newest four steps keep their own
+// rows first). Fourteen leaves room for those steps and a full edit preview;
+// at three rows the block only ever showed its header plus a single step.
+export const ACTIVITY_GROUP_COLLAPSED_LINES = 14;
 // Changed lines shown under each Edit/Write row while a block is folded
 // (`/blockrows`; 0 turns the inline preview off). The rest is counted.
-export const ACTIVITY_GROUP_EDIT_PREVIEW_LINES = 8;
+export const ACTIVITY_GROUP_EDIT_PREVIEW_LINES = 12;
 // Result lines previewed per tool once the group is expanded (`/blockrows`;
 // the whole result stays one Ctrl+O away on the card itself).
 export const ACTIVITY_GROUP_TOOL_EXPANDED_LINES = 10;

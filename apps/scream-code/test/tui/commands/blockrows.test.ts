@@ -93,8 +93,8 @@ describe('handleBlockRowsCommand', () => {
       'activityExpandedThinkingLines',
     ]);
     expect(picker.options[0]?.label).toBe(t('blockrows.item_collapsed'));
-    expect(picker.options[0]?.description).toBe(t('blockrows.current', { value: '10' }));
-    expect(picker.options[1]?.description).toBe(t('blockrows.current', { value: '8' }));
+    expect(picker.options[0]?.description).toBe(t('blockrows.current', { value: '14' }));
+    expect(picker.options[1]?.description).toBe(t('blockrows.current', { value: '12' }));
   });
 
   it('opens the value list for the chosen budget and applies the choice', async () => {
