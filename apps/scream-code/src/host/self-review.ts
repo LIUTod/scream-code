@@ -36,7 +36,8 @@ const MEMORY_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
 export function selfReviewPrompt(does: JobDoes): string {
   return [
     PROMPT_HEAD,
-    'Look only at the numbers in <tool-friction>, <skill-use> and <memory-use>: they are aggregates. Do not open session files or read past conversations.',
+    'Look only at the numbers in <tool-friction>, <file-edits>, <skill-use> and <memory-use>: they are aggregates. Do not open session files or read past conversations.',
+    'In <file-edits>, a high or rising share of shell commands that changed files means Edit is failing the agent; name it as the thing to look at rather than writing a skill around it.',
     'Find at most three improvements: a new skill, a change to a skill, tidying memories, or a plugin. For each say what to change, why, which sessions it comes from (ids only), and which friction it should reduce.',
     'Your working directory is the person\'s skills folder; a skill is a folder with a SKILL.md.',
     does === 'act'

@@ -30,6 +30,12 @@ export interface FrictionReport {
   readonly tools: readonly ToolFriction[];
   /** Skill name → times invoked. */
   readonly skillCalls: Readonly<Record<string, number>>;
+  /**
+   * How files got changed: successful Edit / Write calls, and shell commands
+   * that changed a file the agent had read or edited (a Bash result carrying
+   * `file_changes`). A rising shell share means edits are failing the agent.
+   */
+  readonly fileEdits: { readonly viaTools: number; readonly viaShell: number };
 }
 
 const WIRE_CANDIDATES = [join('agents', 'main', 'wire.jsonl'), 'wire.jsonl'] as const;
@@ -85,6 +91,7 @@ export async function collectFriction(
 ): Promise<FrictionReport> {
   const counters = new Map<string, Counters>();
   const skillCalls: Record<string, number> = {};
+  const fileEdits = { viaTools: 0, viaShell: 0 };
   const wires = await recentWires(screamHomeDir, since);
   for (const { sessionId, path } of wires) {
     const toolByCall = new Map<string, string>();
@@ -114,7 +121,10 @@ export async function collectFriction(
         }
       } else if (event['type'] === 'tool.result' && typeof event['toolCallId'] === 'string') {
         const tool = toolByCall.get(event['toolCallId']);
-        const isError = (event['result'] as { isError?: unknown } | undefined)?.isError === true;
+        const result = event['result'] as { isError?: unknown; display?: { kind?: unknown } } | undefined;
+        const isError = result?.isError === true;
+        if (!isError && (tool === 'Edit' || tool === 'Write')) fileEdits.viaTools += 1;
+        if (result?.display?.kind === 'file_changes') fileEdits.viaShell += 1;
         if (tool === undefined || !isError) continue;
         const entry = counters.get(tool);
         if (entry === undefined) continue;
@@ -134,7 +144,7 @@ export async function collectFriction(
         .map(([id]) => id),
     }))
     .toSorted((a, b) => b.errors - a.errors || b.calls - a.calls);
-  return { sinceMs: since, sessions: wires.length, tools, skillCalls };
+  return { sinceMs: since, sessions: wires.length, tools, skillCalls, fileEdits };
 }
 
 /**
@@ -183,7 +193,23 @@ export function renderFrictionBlock(
         (entry.worstSessions.length === 0 ? '' : `; most in sessions ${entry.worstSessions.join(', ')}`),
     );
   }
-  lines.push('</tool-friction>', '<skill-use window="28 days">');
+  lines.push('</tool-friction>');
+  const shellShare = (report: FrictionReport | undefined): number | undefined => {
+    if (report === undefined) return undefined;
+    const all = report.fileEdits.viaTools + report.fileEdits.viaShell;
+    return all === 0 ? undefined : Math.round((report.fileEdits.viaShell / all) * 100);
+  };
+  const share = shellShare(week);
+  if (share !== undefined) {
+    const before = shellShare(previousWeek);
+    lines.push(
+      '<file-edits window="7 days">',
+      `through Edit / Write: ${String(week.fileEdits.viaTools)}; shell commands that changed files the agent was editing: ` +
+        `${String(week.fileEdits.viaShell)} (${String(share)}% of edits${before === undefined ? '' : `; the week before ${String(before)}%`})`,
+      '</file-edits>',
+    );
+  }
+  lines.push('<skill-use window="28 days">');
   const used = Object.entries(month.skillCalls).toSorted((a, b) => b[1] - a[1]);
   for (const [skill, count] of used.slice(0, 20)) lines.push(`- ${skill}: invoked ${String(count)} times`);
   const unused = userSkills.filter((skill) => month.skillCalls[skill] === undefined);

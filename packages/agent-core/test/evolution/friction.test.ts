@@ -56,4 +56,24 @@ describe('collectFriction', () => {
     expect(withMemory).toContain('never recalled and older than 30 days: 40');
     expect(JSON.stringify(report)).not.toContain('API_KEY');
   });
+
+  it('counts edits made through Edit / Write against shell commands that changed files', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'friction-'));
+    homes.push(home);
+    wire(home, 'ses-b', [
+      { type: 'tool.call', toolCallId: '1', name: 'Edit', args: {} },
+      { type: 'tool.result', toolCallId: '1', result: { isError: false, output: 'ok' } },
+      { type: 'tool.call', toolCallId: '2', name: 'Write', args: {} },
+      { type: 'tool.result', toolCallId: '2', result: { isError: false, output: 'ok' } },
+      { type: 'tool.call', toolCallId: '3', name: 'Bash', args: {} },
+      { type: 'tool.result', toolCallId: '3', result: { isError: false, output: '', display: { kind: 'file_changes', files: [] } } },
+      { type: 'tool.call', toolCallId: '4', name: 'Bash', args: {} },
+      { type: 'tool.result', toolCallId: '4', result: { isError: false, output: 'listing' } },
+    ]);
+    const report = await collectFriction(home, Date.now() - 86_400_000);
+    expect(report.fileEdits).toEqual({ viaTools: 2, viaShell: 1 });
+    const block = renderFrictionBlock(report, report, []);
+    expect(block).toContain('<file-edits window="7 days">');
+    expect(block).toContain('through Edit / Write: 2; shell commands that changed files the agent was editing: 1 (33% of edits)');
+  });
 });
