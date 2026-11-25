@@ -6,7 +6,7 @@ import {
   calculateRateLimitBackoffMs,
 } from '@scream-code/ltod';
 
-import { isScreamError, toScreamErrorPayload } from '#/errors';
+import { isScreamError, isTransientFailure, toScreamErrorPayload } from '#/errors';
 import type { Logger } from '#/logging/types';
 
 import { abortable } from '../utils/abort';
@@ -63,7 +63,33 @@ export interface ChatWithRetryInput {
    * multi-key pool rotate). Defaults to {@link DEFAULT_MAX_KEY_ROTATIONS}.
    */
   readonly maxRotations?: number;
+  /**
+   * Unattended work (an active goal, a bot-mode run) waits out an outage: once
+   * the attempt budget is spent on a failure that clears by itself — a
+   * timeout, the network down (a laptop that just woke), an overloaded
+   * provider — the request keeps being tried, less and less often, until
+   * this long after its first failure. Interactive turns leave it unset and
+   * fail after the usual budget, so a person is never kept waiting
+   * unknowingly. Esc still cancels the wait.
+   */
+  readonly outageWaitMs?: number | undefined;
+  /** Clock, for tests. */
+  readonly now?: (() => number) | undefined;
   readonly log?: Logger | undefined;
+}
+
+/** The first wait once the budget is spent, doubled each time up to {@link OUTAGE_MAX_DELAY_MS}. */
+const OUTAGE_FIRST_DELAY_MS = 30_000;
+const OUTAGE_MAX_DELAY_MS = 5 * 60_000;
+
+/**
+ * Whether a request that spent its budget on `error` may wait out an outage.
+ * Not a quota the account ran out of, nor a gateway that always breaks its
+ * streams: those have short budgets on purpose.
+ */
+function waitsOutOutage(error: unknown): boolean {
+  if (isQuotaExhaustedError(error) || error instanceof APIStreamFormatError) return false;
+  return isTransientFailure(toScreamErrorPayload(error));
 }
 
 export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatResponse> {
@@ -86,6 +112,9 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
   // a multi-key pool gets `attemptLimit` real backoffs AND up to
   // `maxRotations` immediate key hops.
   let rotations = 0;
+  const now = input.now ?? Date.now;
+  let firstFailureAt: number | undefined;
+  let outageWaits = 0;
 
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -142,7 +171,40 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
         continue;
       }
 
+      firstFailureAt ??= now();
       if (attempt >= attemptLimit) {
+        const outageUntil =
+          input.outageWaitMs === undefined || input.outageWaitMs <= 0 ? undefined : firstFailureAt + input.outageWaitMs;
+        if (outageUntil !== undefined && waitsOutOutage(error) && now() < outageUntil) {
+          // Past the usual budget: an outage, waited out at a slower pace.
+          const delayMs = Math.min(
+            OUTAGE_MAX_DELAY_MS,
+            OUTAGE_FIRST_DELAY_MS * 2 ** outageWaits,
+            Math.max(1_000, outageUntil - now()),
+          );
+          outageWaits += 1;
+          input.params.signal.throwIfAborted();
+          input.log?.warn('llm request: waiting out an outage', {
+            attempt,
+            delayMs,
+            outageUntil,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          input.dispatchEvent({
+            type: 'step.retrying',
+            turnId: input.turnId,
+            step: input.currentStep,
+            stepUuid: input.stepUuid,
+            failedAttempt: attempt,
+            nextAttempt: attempt + 1,
+            maxAttempts: attemptLimit,
+            delayMs,
+            outageUntil,
+            ...retryErrorFields(error),
+          });
+          await sleepForRetry(delayMs, input.params.signal);
+          continue;
+        }
         logRequestFailure(input, error, attempt, attemptLimit);
         throw error;
       }

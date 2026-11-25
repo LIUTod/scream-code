@@ -162,6 +162,12 @@ export interface AppState {
   /** Retry context for the status-bar reconnect label; set alongside reconnectAttempt. */
   reconnectMaxAttempts?: number;
   reconnectDelayMs?: number;
+  /**
+   * Set while unattended work (a goal, a bot run) waits out an outage past
+   * its retry budget: when it gives up (ms since epoch). The labels then say
+   * "cannot reach the model, waiting" instead of an attempt count.
+   */
+  reconnectUntil?: number;
   reconnectStatusCode?: number;
   reconnectErrorName?: string;
   /**

@@ -64,6 +64,8 @@ export interface ExecuteLoopStepDeps {
    */
   readonly finalStep?: boolean | undefined;
   readonly maxRetryAttempts?: number;
+  /** See ChatWithRetryInput.outageWaitMs. */
+  readonly outageWaitMs?: number | undefined;
   readonly recordUsage:
     (usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>;
   readonly hasPendingSteer?: (() => boolean) | undefined;
@@ -145,6 +147,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     currentStep,
     finalStep,
     maxRetryAttempts,
+    outageWaitMs,
     recordUsage,
     mediaProjection,
     structureRepair,
@@ -239,6 +242,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       currentStep,
       stepUuid,
       maxAttempts: maxRetryAttempts,
+      outageWaitMs,
       log,
     });
   } catch (error) {
@@ -259,6 +263,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       currentStep,
       stepUuid,
       maxAttempts: maxRetryAttempts,
+      outageWaitMs,
       log,
     });
   }

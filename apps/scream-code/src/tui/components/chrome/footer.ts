@@ -168,6 +168,7 @@ function buildStatusLine(
     readonly pendingUserActionSince?: AppState['pendingUserActionSince'];
     readonly reconnectAttempt: number;
     readonly reconnectMaxAttempts: number | undefined;
+    readonly reconnectUntil?: number | undefined;
   },
 ): string[] {
   // States where nothing is actually progressing on the model side. They
@@ -185,6 +186,9 @@ function buildStatusLine(
   if (statusFlags.isCompacting) return [t('status.compacting')];
   if (streamingPhase === 'idle') {
     return [t('status.idle')];
+  }
+  if (statusFlags.reconnectAttempt > 0 && statusFlags.reconnectUntil !== undefined) {
+    return [t('status.outage_short')];
   }
   if (statusFlags.reconnectAttempt > 0) {
     return [
@@ -672,6 +676,7 @@ export class FooterComponent implements Component {
         pendingUserActionSince: state.pendingUserActionSince ?? null,
         reconnectAttempt: state.reconnectAttempt ?? 0,
         reconnectMaxAttempts: state.reconnectMaxAttempts,
+        reconnectUntil: state.reconnectUntil,
       }).map((text) => dim(text)),
     };
 

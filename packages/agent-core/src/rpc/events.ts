@@ -184,6 +184,8 @@ export interface TurnStepRetryingEvent {
   readonly nextAttempt: number;
   readonly maxAttempts: number;
   readonly delayMs: number;
+  /** Waiting out an outage past the attempt budget: when it gives up (ms since epoch). */
+  readonly outageUntil?: number | undefined;
   readonly errorName: string;
   readonly errorMessage: string;
   readonly statusCode?: number;

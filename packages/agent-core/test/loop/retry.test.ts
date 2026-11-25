@@ -496,3 +496,99 @@ describe('chatWithRetry: API-key rotation on quota-429s', () => {
     expect(rotateAuth).not.toHaveBeenCalled();
   });
 });
+
+describe('chatWithRetry: waiting out an outage (unattended work)', () => {
+  function failingLlm(error: () => Error, succeedOnCall?: number): { llm: LLM; calls: () => number } {
+    let calls = 0;
+    return {
+      calls: () => calls,
+      llm: {
+        systemPrompt: '',
+        modelName: 'mock',
+        isRetryableError: (e) => isRetryableGenerateError(e),
+        async chat(): Promise<LLMChatResponse> {
+          calls += 1;
+          if (succeedOnCall !== undefined && calls >= succeedOnCall) return okResponse();
+          throw error();
+        },
+      },
+    };
+  }
+
+  it('keeps trying past the budget, less and less often, and succeeds once the network is back', async () => {
+    vi.useFakeTimers();
+    try {
+      const events: LoopStepRetryingEvent[] = [];
+      const { llm, calls } = failingLlm(() => new APITimeoutError('Request timed out.'), 5);
+      const promise = chatWithRetry({
+        ...makeInput(llm, new AbortController().signal),
+        maxAttempts: 2,
+        outageWaitMs: 30 * 60_000,
+        dispatchEvent: (async (event: LoopEvent) => {
+          if (event.type === 'step.retrying') events.push(event);
+        }) as LoopEventDispatcher,
+      });
+      await vi.runAllTimersAsync();
+      await expect(promise).resolves.toEqual(okResponse());
+      expect(calls()).toBe(5);
+      const outage = events.filter((event) => event.outageUntil !== undefined);
+      // Past the 2-attempt budget: three slower waits (30 s, 60 s, 120 s).
+      expect(outage.map((event) => event.delayMs)).toEqual([30_000, 60_000, 120_000]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up once the outage window has passed', async () => {
+    let clock = 0;
+    const { llm } = failingLlm(() => new APIConnectionError('ECONNREFUSED'));
+    const promise = chatWithRetry({
+      ...makeInput(llm, new AbortController().signal),
+      maxAttempts: 1,
+      outageWaitMs: 60_000,
+      now: () => clock,
+      dispatchEvent: (async () => {
+        // Each wait moves the clock past the window.
+        clock += 61_000;
+      }) as LoopEventDispatcher,
+    });
+    vi.useFakeTimers();
+    try {
+      const settled = expect(promise).rejects.toBeInstanceOf(APIConnectionError);
+      await vi.runAllTimersAsync();
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never waits out a rejected key, and an interactive turn fails after the usual budget', async () => {
+    const auth = failingLlm(() => new APIStatusError(401, 'Invalid API key'));
+    await expect(
+      chatWithRetry({ ...makeInput(auth.llm, new AbortController().signal), maxAttempts: 1, outageWaitMs: 60_000 }),
+    ).rejects.toBeInstanceOf(APIStatusError);
+    expect(auth.calls()).toBe(1);
+
+    const interactive = failingLlm(() => new APIConnectionError('ECONNREFUSED'));
+    await expect(chatWithRetry({ ...makeInput(interactive.llm, new AbortController().signal), maxAttempts: 1 })).rejects.toBeInstanceOf(
+      APIConnectionError,
+    );
+    expect(interactive.calls()).toBe(1);
+  });
+
+  it('stops waiting the moment the person cancels', async () => {
+    const controller = new AbortController();
+    const { llm } = failingLlm(() => new APIConnectionError('ECONNREFUSED'));
+    const promise = chatWithRetry({
+      ...makeInput(llm, controller.signal),
+      maxAttempts: 1,
+      outageWaitMs: 30 * 60_000,
+      dispatchEvent: (async () => {
+        setTimeout(() => {
+          controller.abort();
+        }, 0);
+      }) as LoopEventDispatcher,
+    });
+    await expect(promise).rejects.toThrow();
+  });
+});

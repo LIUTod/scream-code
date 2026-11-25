@@ -45,6 +45,12 @@ export interface LoopStepRetryingEvent {
   readonly nextAttempt: number;
   readonly maxAttempts: number;
   readonly delayMs: number;
+  /**
+   * Set when the attempt budget is spent and unattended work waits out an
+   * outage: the time (ms since epoch) it gives up. `nextAttempt` then runs
+   * past `maxAttempts`.
+   */
+  readonly outageUntil?: number | undefined;
   readonly errorName: string;
   readonly errorMessage: string;
   readonly statusCode?: number;

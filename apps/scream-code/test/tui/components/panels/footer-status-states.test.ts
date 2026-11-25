@@ -108,6 +108,20 @@ describe('footer status block — non-phase states', () => {
     expect(out).not.toContain('思考中');
   });
 
+  it('says it cannot reach the model, not an attempt count past its maximum, while waiting out an outage', () => {
+    const out = statusSegment(
+      baseState({
+        streamingPhase: 'thinking',
+        streamingStartTime: NOW - 9_000,
+        reconnectAttempt: 12,
+        reconnectMaxAttempts: 10,
+        reconnectUntil: NOW + 20 * 60_000,
+      }),
+    );
+    expect(out.endsWith('连不上模型，等待中')).toBe(true);
+    expect(out).not.toContain('12/10');
+  });
+
   it('a human-blocked panel outranks a compaction', () => {
     const out = statusSegment(
       baseState({

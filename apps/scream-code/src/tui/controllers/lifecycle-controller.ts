@@ -939,6 +939,16 @@ export class LifecycleController {
         ? `${t(reasonKey)} (${a.reconnectErrorName})`
         : t(reasonKey);
     const delaySec = Math.max(1, Math.round((a.reconnectDelayMs ?? 0) / 1000));
+    if (a.reconnectUntil !== undefined) {
+      // Past the retry budget, waiting out an outage: when it tries next and
+      // until when, instead of an attempt count past its maximum.
+      const until = new Date(a.reconnectUntil);
+      return t('status.outage_detail', {
+        reason,
+        delay: delaySec >= 60 ? t('status.outage_minutes', { m: String(Math.round(delaySec / 60)) }) : `${String(delaySec)}s`,
+        until: `${String(until.getHours()).padStart(2, '0')}:${String(until.getMinutes()).padStart(2, '0')}`,
+      });
+    }
     const label = t('status.reconnecting_detail', {
       attempt: String(a.reconnectAttempt),
       max: String(a.reconnectMaxAttempts ?? 0),

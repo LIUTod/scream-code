@@ -58,6 +58,8 @@ export interface RunTurnInput {
   readonly log?: Logger | undefined;
   readonly maxSteps?: number | undefined;
   readonly maxRetryAttempts?: number;
+  /** See ChatWithRetryInput.outageWaitMs. */
+  readonly outageWaitMs?: number | undefined;
   /**
    * Generic execution deadline per tool call, in milliseconds. `undefined`
    * falls back to the built-in default (`TOOL_DEADLINE_MS`); values `<= 0` are
@@ -105,6 +107,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
     log,
     maxSteps,
     maxRetryAttempts,
+    outageWaitMs,
     recordStepUsage: hostRecordStepUsage,
   } = input;
   let usage: TokenUsage = emptyUsage();
@@ -175,6 +178,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         currentStep: steps,
         finalStep,
         maxRetryAttempts,
+        outageWaitMs,
         toolDeadlineMs: input.toolDeadlineMs,
         recordUsage: recordStepUsage,
         hasPendingSteer: input.hasPendingSteer,

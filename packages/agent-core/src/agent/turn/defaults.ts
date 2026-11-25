@@ -51,6 +51,13 @@ export const TURN_DEFAULTS = {
    * budget. Prevents a goal from spinning forever and burning tokens.
    */
   maxGoalTurns: 50,
+  /**
+   * How long a model request of unattended work (an active goal, a bot-mode
+   * run) keeps trying through an outage before the turn fails (see
+   * ChatWithRetryInput.outageWaitMs). Thirty minutes covers a laptop waking
+   * on a network that takes a while and most provider incidents.
+   */
+  outageWaitMs: 30 * 60 * 1000,
 
   /**
    * Consecutive failed model tool calls that trigger a "change approach"

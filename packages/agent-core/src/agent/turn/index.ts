@@ -797,6 +797,11 @@ export class TurnFlow {
           // loop then wraps up with one final reporting step instead of failing.
           maxSteps: loopControl?.maxStepsPerTurn ?? TURN_DEFAULTS.maxStepsPerTurn,
           maxRetryAttempts: loopControl?.maxRetriesPerStep,
+          // Work nobody is waiting on (a goal, a bot-mode run) waits out an
+          // outage instead of failing after the usual minutes of retries: a
+          // laptop that wakes without network, a provider down for a while.
+          // Interactive turns fail as before, so nobody waits unknowingly.
+          outageWaitMs: this.runningWorkKind() === 'chat' ? undefined : TURN_DEFAULTS.outageWaitMs,
           // Session-wide token cap, shared by every agent of the session: a
           // reached cap ends this turn before its next model request.
           tokenCap: () => this.agent.tokenMeter?.exhausted(),

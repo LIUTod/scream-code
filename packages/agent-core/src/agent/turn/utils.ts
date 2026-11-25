@@ -67,6 +67,7 @@ export function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | und
         nextAttempt: event.nextAttempt,
         maxAttempts: event.maxAttempts,
         delayMs: event.delayMs,
+        ...(event.outageUntil === undefined ? {} : { outageUntil: event.outageUntil }),
         errorName: event.errorName,
         errorMessage: event.errorMessage,
         statusCode: event.statusCode,

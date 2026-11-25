@@ -915,6 +915,9 @@ export class SessionEventHandler {
       reconnectAttempt: event.nextAttempt,
       reconnectMaxAttempts: event.maxAttempts,
       reconnectDelayMs: event.delayMs,
+      // Overwritten on every retry, so an ordinary retry after an outage wait
+      // never inherits the outage label.
+      reconnectUntil: event.outageUntil,
       reconnectStatusCode: event.statusCode,
       reconnectErrorName: event.errorName,
       reconnectErrorCode: event.errorCode,
@@ -939,6 +942,7 @@ export class SessionEventHandler {
       reconnectAttempt: 0,
       reconnectMaxAttempts: undefined,
       reconnectDelayMs: undefined,
+      reconnectUntil: undefined,
       reconnectStatusCode: undefined,
       reconnectErrorName: undefined,
       reconnectErrorCode: undefined,
