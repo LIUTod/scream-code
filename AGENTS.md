@@ -638,7 +638,7 @@ User messages sit on a faint band so they read apart from the replies; `/hl` tog
 
 - **Entry**: `/hl` (alias: `highlight`) — `src/tui/commands/hl.ts` `toggleUserMessageHighlight` + `requestRender`
 - **Rendering**: `src/tui/components/messages/user-message.ts` — on, each text row is a full-width band in `userMessageBg`, only as tall as the text (one spacer row above, no padding rows), the `■` mark in `roleUser`, the text in `text` at normal weight; off (or below 256 colours, or a `<system-reminder>`), the plain look: `■` and the text in `roleUser`, bold. A message past 30 rendered rows shows the first 12, `… N more lines …` and the last 4. Colours are read from the live palette on every render (a theme change rewrites it in place); the cache key carries the toggle, the width and the colours in use.
-- **Config**: `ui-preferences.ts` `userMessageHighlightEnabled` (default **on**; only an explicit `false` turns it off); `userMessageBg` is derived from the terminal background like the code panel, one step lighter (`userMessageSurfaceFor` in `theme/code-surface.ts`: 4 L* light / 6 L* dark, kept readable for `text` and `textDim`; fallback `#eef0f2` / `#26292e`)
+- **Config**: `ui-preferences.ts` `userMessageHighlightEnabled` (default **on**; only an explicit `false` turns it off); `userMessageBg` is derived from the terminal background like the code panel: a light grey on dark grounds and a soft dark grey on light ones (`userMessageSurfaceFor` in `theme/code-surface.ts`: 9 L* light / 11 L* dark, only `text` has to stay readable on it; fallback `#e2e4e7` / `#383b40`)
 
 ### Turn Elapsed Marker (`/snaptimer`)
 

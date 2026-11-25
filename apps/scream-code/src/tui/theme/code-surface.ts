@@ -56,16 +56,17 @@ export const CODE_SURFACE_FALLBACK: Readonly<Record<ResolvedTheme, string>> = {
 };
 
 /**
- * The band behind a user message: the same derivation one step lighter than
- * a code panel, so a message reads as set apart from the reply without the
- * weight of a coloured block.
+ * The band behind a user message: the same derivation as a code panel, a
+ * light grey on a dark ground and a soft dark grey on a light one, so a
+ * message reads as set apart from the reply without the weight of a
+ * coloured block.
  */
-const USER_MESSAGE_DELTA_LIGHT = 4;
-const USER_MESSAGE_DELTA_DARK = 6;
+const USER_MESSAGE_DELTA_LIGHT = 9;
+const USER_MESSAGE_DELTA_DARK = 11;
 
 export const USER_MESSAGE_SURFACE_FALLBACK: Readonly<Record<ResolvedTheme, string>> = {
-  light: '#eef0f2',
-  dark: '#26292e',
+  light: '#e2e4e7',
+  dark: '#383b40',
 };
 
 /** The surface behind user messages on `backgroundHex` (see {@link codeSurfaceFor}). */

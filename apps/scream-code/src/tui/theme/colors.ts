@@ -298,8 +298,10 @@ export function getColorPalette(
   const userMessageBg =
     backgroundHex === undefined
       ? USER_MESSAGE_SURFACE_FALLBACK[theme]
-      : // A message draws body text and the dim fold count, never comment ink.
-        userMessageSurfaceFor(backgroundHex, theme, { body: base.text, muted: base.textDim });
+      : // Only the body text has to stay readable on it (the fold count is a
+        // dim meta line): that keeps the band a lighter grey on dark grounds
+        // instead of flipping it darker than the terminal.
+        userMessageSurfaceFor(backgroundHex, theme, { body: base.text, muted: base.text });
   const adapted: ColorPalette = { ...base, mdCodeBlockBg, userMessageBg };
   adaptivePalettes.set(key, adapted);
   return adapted;
