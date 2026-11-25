@@ -105,7 +105,12 @@ export class TurnFlow {
   private todoReconcileInjected = false;
   private convergenceInjections = 0;
   private currentStepHadContent = false;
-  private lastToolFailure: { toolName: string; isExploratory: boolean } | null = null;
+  private lastToolFailure: {
+    toolName: string;
+    isExploratory: boolean;
+    /** The call applied but left errors in the file (Edit / Write), rather than failing. */
+    leftErrors?: boolean;
+  } | null = null;
   /**
    * Consecutive-failure circuit breaker (model-issued calls only; nested
    * calls are excluded): `toolFailureStreak` counts consecutive `isError`
@@ -1057,8 +1062,11 @@ export class TurnFlow {
 
                 if (this.lastToolFailure?.isExploratory === false && !hasPassedVerificationThisTurn) {
                   reasons.push(
-                    `A required tool (${this.lastToolFailure.toolName}) failed this turn. ` +
-                      'Analyze the error and fix it before reporting completion.',
+                    this.lastToolFailure.leftErrors === true
+                      ? `Your last ${this.lastToolFailure.toolName} applied but left errors the language server reported. ` +
+                          'Fix them before reporting completion.'
+                      : `A required tool (${this.lastToolFailure.toolName}) failed this turn. ` +
+                          'Analyze the error and fix it before reporting completion.',
                   );
                 }
                 if (latestVerification && !latestVerification.passed && !this.verificationFailureInjected) {
@@ -1206,6 +1214,9 @@ export class TurnFlow {
                       ctx.result,
                     );
               const { isError, output } = finalResult;
+              // An Edit / Write that applied but left errors in the file is a
+              // success the completion check still holds the turn to.
+              const leftErrors = finalResult.isError !== true && finalResult.leftErrors === true;
 
               // Consecutive-failure streak over model-issued calls (nested
               // calls excluded): any success resets it. Only flags are set
@@ -1318,7 +1329,7 @@ export class TurnFlow {
                 this.todoSeenThisTurn = true;
               }
 
-              if (isError === true && ['Edit', 'Write', 'Bash', 'Agent'].includes(ctx.toolCall.name)) {
+              if ((isError === true || leftErrors) && ['Edit', 'Write', 'Bash', 'Agent'].includes(ctx.toolCall.name)) {
                 const command =
                   ctx.toolCall.name === 'Bash'
                     ? String((ctx.args as { command?: string }).command ?? '')
@@ -1331,8 +1342,8 @@ export class TurnFlow {
                   ctx.toolCall.name === 'Agent'
                     ? subagentType !== 'verify' && subagentType !== 'reviewer'
                     : isExploratoryBashCommand(command);
-                this.lastToolFailure = { toolName: ctx.toolCall.name, isExploratory };
-              } else if (isError !== true && this.lastToolFailure?.toolName === ctx.toolCall.name) {
+                this.lastToolFailure = { toolName: ctx.toolCall.name, isExploratory, ...(leftErrors ? { leftErrors: true } : {}) };
+              } else if (isError !== true && !leftErrors && this.lastToolFailure?.toolName === ctx.toolCall.name) {
                 // Edit/Write/Agent are deterministic — a later success of the
                 // same tool means the prior failure (e.g. stale old_string) is
                 // resolved. Bash is non-deterministic: a passing `ls` does

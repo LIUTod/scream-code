@@ -626,17 +626,17 @@ export class EditTool implements BuiltinTool<EditInput> {
         this.trackEditDiagnostics(safePath, args.path, signatures);
         // Diagnostics are appended to the (model-visible) output so the model
         // can self-correct in the same turn; the install hint travels on the
-        // `message` side channel for the UI. `hasErrors` keeps isError so the
-        // fix-then-re-verify gate still picks the edit up.
+        // `message` side channel for the UI. An edit that left errors is still
+        // a success (it applied — reporting it as failed taught models that
+        // Edit does not work); `leftErrors` lets the turn's completion check
+        // ask for the fix.
         const output = assembleEditOutput(
           `Replaced 1 occurrence in ${args.path}`,
           staleAnchorNote ?? this.staleReadWarning(args, safePath),
           notice,
         );
         const message = hint.length > 0 ? hint : undefined;
-        const result: ExecutableToolResult = hasErrors
-          ? { isError: true, output, message }
-          : { output, message };
+        const result: ExecutableToolResult = hasErrors ? { output, message, leftErrors: true } : { output, message };
         return withFileDiffDisplay(result, raw, writtenText, true, args.new_string);
       }
 
@@ -664,17 +664,15 @@ export class EditTool implements BuiltinTool<EditInput> {
       this.trackEditDiagnostics(safePath, args.path, signatures);
       // Diagnostics are appended to the (model-visible) output so the model
       // can self-correct in the same turn; the install hint travels on the
-      // `message` side channel for the UI. `hasErrors` keeps isError so the
-      // fix-then-re-verify gate still picks the edit up.
+      // `message` side channel for the UI. An edit that left errors is still a
+      // success; `leftErrors` lets the turn's completion check ask for the fix.
       const output = assembleEditOutput(
         `Replaced ${String(replacementCount)} occurrences in ${args.path}`,
         staleAnchorNote ?? this.staleReadWarning(args, safePath),
         notice,
       );
       const message = hint.length > 0 ? hint : undefined;
-      const result: ExecutableToolResult = hasErrors
-        ? { isError: true, output, message }
-        : { output, message };
+      const result: ExecutableToolResult = hasErrors ? { output, message, leftErrors: true } : { output, message };
       return withFileDiffDisplay(result, raw, writtenText, true, args.new_string);
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
@@ -957,8 +955,8 @@ export class EditTool implements BuiltinTool<EditInput> {
 
     // Diagnostics are appended to the (model-visible) output so the model
     // can self-correct in the same turn; the install hint travels on the
-    // `message` side channel for the UI. `hasErrors` keeps isError so the
-    // fix-then-re-verify gate still picks the edit up.
+    // `message` side channel for the UI. An edit that left errors is still a
+    // success; `leftErrors` lets the turn's completion check ask for the fix.
     const output = assembleEditOutput(
       startLine === endLine
         ? `Replaced line ${String(startLine)} in ${args.path}`
@@ -968,9 +966,7 @@ export class EditTool implements BuiltinTool<EditInput> {
       recoveryNote,
     );
     const message = hint.length > 0 ? hint : undefined;
-    const result: ExecutableToolResult = hasErrors
-      ? { isError: true, output, message }
-      : { output, message };
+    const result: ExecutableToolResult = hasErrors ? { output, message, leftErrors: true } : { output, message };
     return withFileDiffDisplay(result, raw, writtenText, false, args.new_string);
   }
 

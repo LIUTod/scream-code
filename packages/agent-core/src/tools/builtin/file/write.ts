@@ -197,8 +197,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       await reconcileEditReminders(this.editRecovery, this.jian, safePath, result);
       // Diagnostics are appended to the (model-visible) output so the model
       // can self-correct in the same turn; the install hint travels on the
-      // `message` side channel for the UI. `hasErrors` keeps isError so the
-      // fix-then-re-verify gate still picks the write up.
+      // `message` side channel for the UI.
       // A created directory is reported so a mistyped path is visible to the
       // model instead of silently growing a new tree.
       const created = parent.created === undefined ? '' : `\nCreated directory ${parent.created}`;
@@ -208,8 +207,10 @@ export class WriteTool implements BuiltinTool<WriteInput> {
           ? `${base}\n\nWrite applied; the language server reports:\n${notice}`
           : base;
       const message = hint.length > 0 ? hint : undefined;
-      if (result.hasErrors) return { isError: true, output, message };
-      return display === undefined ? { output, message } : { output, message, display };
+      // A write that left errors still happened: a success the completion
+      // check reads `leftErrors` from, not a failure.
+      const leftErrors = result.hasErrors ? { leftErrors: true } : {};
+      return display === undefined ? { output, message, ...leftErrors } : { output, message, display, ...leftErrors };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'ENOENT') {

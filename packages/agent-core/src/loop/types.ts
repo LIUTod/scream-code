@@ -138,6 +138,13 @@ export interface ExecutableToolSuccessResult {
    * actionable information.
    */
   readonly useless?: boolean | undefined;
+  /**
+   * The change was applied, but the language server reports errors in the
+   * file it left (Edit / Write). The result stays a success — the model is
+   * not told its edit failed when it did not — while the turn's completion
+   * check still treats the errors as work left to fix.
+   */
+  readonly leftErrors?: boolean | undefined;
 }
 
 export interface ExecutableToolErrorResult {

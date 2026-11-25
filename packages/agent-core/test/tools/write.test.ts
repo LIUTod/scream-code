@@ -484,7 +484,7 @@ describe('WriteTool', () => {
     expect(writeText).toHaveBeenCalled();
   });
 
-  it('marks isError when LSP reports error-severity diagnostics after write', async () => {
+  it('reports an applied write that left error-severity diagnostics as a success flagged leftErrors', async () => {
     const errorDiag: LspDiagnostic = {
       range: { start: { line: 0, character: 5 }, end: { line: 0, character: 10 } },
       severity: 1,
@@ -513,7 +513,8 @@ describe('WriteTool', () => {
       context({ path: '/tmp/bad.ts', content: 'const x: number = "bad";\n' }),
     );
 
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBeFalsy();
+    expect((result as { leftErrors?: boolean }).leftErrors).toBe(true);
     expect(result.output).toContain('Wrote');
     expect(result.output).toContain('[LSP]');
     expect(result.output).toContain('Type error');

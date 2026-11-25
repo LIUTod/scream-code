@@ -1407,7 +1407,7 @@ function normalizeToolResult(r: ExecutableToolResult): ExecutableToolResult {
       output = textJoined.length > 0 ? textJoined : TOOL_OUTPUT_EMPTY;
     }
   }
-  // `nestedCalls`, `message`, `display`, and `useless` are UI/persistence
+  // `nestedCalls`, `message`, `display`, `useless` and `leftErrors` are UI/persistence
   // side channels produced by tools (script sandbox, LSP diagnostics, file
   // diffs, search results, micro-compaction hints). They must survive
   // normalization so the tool.result event (and the UI/RPC layers reading
@@ -1429,7 +1429,8 @@ function normalizeToolResult(r: ExecutableToolResult): ExecutableToolResult {
   const useless = r.useless;
   const uselessPart = useless !== undefined ? { useless } : {};
   const displayPart = r.display !== undefined ? { display: r.display } : {};
-  return { output, ...nested, ...messagePart, ...uselessPart, ...displayPart };
+  const leftErrorsPart = r.leftErrors === true ? { leftErrors: true } : {};
+  return { output, ...nested, ...messagePart, ...uselessPart, ...displayPart, ...leftErrorsPart };
 }
 
 function makeToolResult(

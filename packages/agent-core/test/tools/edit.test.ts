@@ -727,7 +727,7 @@ describe('EditTool', () => {
     expect(writeText).toHaveBeenCalled();
   });
 
-  it('marks isError when LSP reports error-severity diagnostics after edit', async () => {
+  it('reports an applied edit that left error-severity diagnostics as a success flagged leftErrors', async () => {
     const errorDiag: LspDiagnostic = {
       range: { start: { line: 0, character: 5 }, end: { line: 0, character: 10 } },
       severity: 1,
@@ -764,7 +764,8 @@ describe('EditTool', () => {
       }),
     );
 
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBeFalsy();
+    expect((result as { leftErrors?: boolean }).leftErrors).toBe(true);
     expect(result.output).toContain('Replaced 1 occurrence');
     expect(result.output).toContain('[LSP]');
     expect(result.output).toContain('Type error');
@@ -873,7 +874,7 @@ describe('EditTool edit-recovery reminders', () => {
     const queue = new EditRecoveryQueue();
     const result = await edit(recoveryTool(queue, { diagnostics: [preExisting] }), '2');
 
-    expect(result.isError).toBe(true);
+    expect((result as { leftErrors?: boolean }).leftErrors).toBe(true);
     expect(queue.drain()).toEqual([]);
   });
 
@@ -1723,7 +1724,8 @@ describe('EditTool replace_range', () => {
       }),
     );
 
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBeFalsy();
+    expect((result as { leftErrors?: boolean }).leftErrors).toBe(true);
     expect(result.output).toContain('Replaced line 2 in /tmp/a.ts');
     expect(result.output).toContain('[LSP]');
     expect(result.output).toContain('Type error');
