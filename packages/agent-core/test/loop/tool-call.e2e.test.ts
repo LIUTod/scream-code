@@ -179,6 +179,21 @@ describe('runTurn — tool-call behaviour', () => {
     expect(results[0]?.result.output).toMatch(/malformed JSON in arguments|must have required property/);
   });
 
+  it('tells the model what to do next when the arguments do not parse at all', async () => {
+    const echo = new EchoTool();
+    const { sink } = await runTurn({
+      tools: [echo],
+      responses: [
+        makeToolUseResponse([{ type: 'function', id: 'tc-1', name: 'echo', arguments: '{"text": "a" "b" }' }]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    const output = expectTextOutput(sink.byType('tool.result')[0]?.result.output);
+    expect(output).toContain('malformed JSON in arguments');
+    expect(output).toContain('Send the call again with the arguments as one valid JSON object.');
+  });
+
   it('captures tool execution failures as error results', async () => {
     const fail = new FailingTool('boom');
     const { sink, context } = await runTurn({

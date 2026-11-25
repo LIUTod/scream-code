@@ -569,7 +569,7 @@ function preflightToolCall(
       toolCall: resolvedCall,
       toolName,
       args,
-      output: `Invalid args for tool "${toolName}": malformed JSON in arguments: ${parsedArgs.error}`,
+      output: `Invalid args for tool "${toolName}": malformed JSON in arguments: ${parsedArgs.error}. ${malformedArgsAdvice(toolName)}`,
     };
   }
   const normalizedArgs = normalizeToolArgs(tool, parsedArgs.data);
@@ -592,6 +592,22 @@ function preflightToolCall(
     argsRepaired: parsedArgs.repaired === true ? true : undefined,
     argsTrailingDiscarded: parsedArgs.trailingDiscarded === true ? true : undefined,
   };
+}
+
+/**
+ * What to do after arguments that did not parse. For the file tools the
+ * usual cause is one very large string, and the useful answer is a smaller
+ * call of the same tool — not switching to the shell, which is what models
+ * did when the error left the next step open.
+ */
+function malformedArgsAdvice(toolName: string): string {
+  if (toolName === 'Edit') {
+    return 'Send the Edit again as valid JSON. If new_string is long, split the change into several smaller Edit calls.';
+  }
+  if (toolName === 'Write') {
+    return 'Send the Write again as valid JSON. If the content is long, write it in parts: the first with mode "overwrite", the rest with mode "append".';
+  }
+  return 'Send the call again with the arguments as one valid JSON object.';
 }
 
 /** Longest tool list echoed back to the model in an unknown-tool reply. */
