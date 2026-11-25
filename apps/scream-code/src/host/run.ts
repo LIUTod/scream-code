@@ -241,6 +241,8 @@ export async function runHost(): Promise<void> {
   // boot: declared here so it never touches them before they exist.
   let driver: LineSessionDriver | undefined;
   let shuttingDown = false;
+  /** Set once the boot below is done: a restart asked for earlier waits (it would shut down half-built state). */
+  let booted = false;
   lock.onRequest((request) => {
     if (request.type === 'stop') {
       setImmediate(() => {
@@ -283,6 +285,7 @@ export async function runHost(): Promise<void> {
     // is started again by the terminal that asked.
     if (request.type === 'restart-if-idle') {
       if (shuttingDown) return { ok: false, error: 'shutting_down' };
+      if (!booted) return { ok: false, busy: true };
       const busy =
         (resumer?.busy() ?? false) || (jobsRef?.busy() ?? false) || (driver?.pendingTurnCount() ?? 0) > 0;
       if (busy) return { ok: false, busy: true };
@@ -606,6 +609,7 @@ export async function runHost(): Promise<void> {
     void inbox.sweep();
   }, INBOX_SWEEP_MS).unref();
 
+  booted = true;
   log.info('host: started', {
     platforms: handles.map((h) => h.name),
     permissionMode: channelConfig?.permissionMode,
