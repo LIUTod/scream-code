@@ -1,8 +1,7 @@
 /**
- * /hl — Toggle the user-message highlight background block. When enabled,
- * user messages render with a background block tinted by the roleUser theme
- * color; when disabled they fall back to the default (no background).
- * State is persisted to ui-preferences.json, so it survives restarts.
+ * /hl — Toggle the faint band behind user messages (on by default; see
+ * `UserMessageComponent`). Off, a message keeps only its ■ mark and the user
+ * colour. State is persisted to ui-preferences.json, so it survives restarts.
  */
 
 import { t } from '@scream-code/config';
@@ -15,6 +14,6 @@ export async function handleHighlightCommand(host: SlashCommandHost, _args: stri
   const status = enabled ? t('hl.enabled') : t('hl.disabled');
   host.showStatus(status, enabled ? host.state.theme.colors.success : host.state.theme.colors.textDim);
   // Re-render immediately so already-rendered user messages pick up the new
-  // toggle (UserMessageComponent cache is keyed by toggle state).
+  // toggle (UserMessageComponent's cache is keyed by it).
   host.state.ui.requestRender();
 }

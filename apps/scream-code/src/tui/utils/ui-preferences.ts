@@ -159,11 +159,12 @@ export function toggleCodeBlockPanel(): boolean {
 }
 
 /**
- * Whether user messages render with a highlight background block.
+ * Whether user messages render on their faint band (`/hl`).
  *
- * Default **off**: a fresh install (or one that never touched `/hl`) renders
- * user messages plain. Only an explicit `true` from a previous `/hl` turns the
- * block on, so an existing choice is honoured either way.
+ * Default **on**: the band is a light step off the terminal's own background,
+ * so it sets the person's messages apart from the replies without weight.
+ * Only an explicit `false` from a previous `/hl` turns it off, so an existing
+ * choice is honoured either way.
  *
  * Cached: `UserMessageComponent.render` asks once per component per frame, and
  * reading the file each time would hit the disk on every frame. `/hl` updates
@@ -172,18 +173,17 @@ export function toggleCodeBlockPanel(): boolean {
 let userMessageHighlightCache: boolean | undefined;
 
 export function isUserMessageHighlightEnabled(): boolean {
-  userMessageHighlightCache ??= readUiPreferences().userMessageHighlightEnabled === true;
+  userMessageHighlightCache ??= readUiPreferences().userMessageHighlightEnabled !== false;
   return userMessageHighlightCache;
 }
 
-/** Toggle the user-message highlight block via /hl. Returns the new state:
- *  true = highlighted, false = default (no background). Persisted immediately.
- *  Reads the same default as `isUserMessageHighlightEnabled`, so the first
- *  `/hl` on a fresh install turns the block on rather than writing `false`.
+/** Toggle the user-message band via /hl. Returns the new state, persisted
+ *  immediately. Reads the same default as `isUserMessageHighlightEnabled`,
+ *  so the first `/hl` on a fresh install turns the band off.
  */
 export function toggleUserMessageHighlight(): boolean {
   const prefs = readUiPreferences();
-  const enabled = prefs.userMessageHighlightEnabled === true;
+  const enabled = prefs.userMessageHighlightEnabled !== false;
   prefs.userMessageHighlightEnabled = !enabled;
   writeUiPreferences(prefs);
   userMessageHighlightCache = !enabled;

@@ -1,60 +1,66 @@
 /**
  * Renders a user message in the transcript.
+ *
+ * With `/hl` on (the default) the message sits on a faint band — the
+ * terminal's own background stepped a little lighter or darker
+ * (`userMessageBg`, see `theme/code-surface.ts`) — only as tall as its text,
+ * with the `■` mark in the user colour and the text in the normal colour. Off
+ * (or below 256 colours, where a band cannot be drawn faintly), the message
+ * keeps its plain look: the mark and the text in the user colour.
+ *
+ * A very long message (a pasted log) shows its head and tail with the number
+ * of lines in between, so it cannot fill the screen; the full text stays in
+ * the session.
  */
 
 import type { Component } from '@liutod-scream/pi-tui';
-import { Box, Spacer, Text, visibleWidth } from '@liutod-scream/pi-tui';
+import { Spacer, Text, visibleWidth } from '@liutod-scream/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import { ImageThumbnail } from '#/tui/components/media/image-thumbnail';
 import { USER_MESSAGE_BULLET } from '#/tui/constant/symbols';
-import { contrastTextHex, type ColorPalette } from '#/tui/theme/colors';
+import type { ColorPalette } from '#/tui/theme/colors';
 import { isUserMessageHighlightEnabled } from '#/tui/utils/ui-preferences';
 import type { ImageAttachment } from '#/tui/utils/image-attachment-store';
 
-export class UserMessageComponent implements Component {
-  private color: string;
-  private bgColor: string;
-  private isSystemReminder: boolean;
-  private textComponent: Text;
-  private textContent: string;
-  private currentFg: string | undefined;
-  private box: Box;
-  private spacerComponent: Spacer;
-  private imageThumbnails: ImageThumbnail[];
-  private cachedWidth: number | undefined;
-  private cachedLines: string[] | undefined;
-  private cachedHighlight: boolean | undefined;
+/** A message longer than this many rendered rows shows only its head and tail. */
+const MAX_ROWS = 30;
+const HEAD_ROWS = 12;
+const TAIL_ROWS = 4;
 
-  constructor(text: string, colors: ColorPalette, images?: ImageAttachment[]) {
-    this.color = colors.roleUser;
-    this.bgColor = colors.roleUserBg;
+const SGR_RESET_RE = /\u001B\[0?m/g;
+
+export class UserMessageComponent implements Component {
+  private readonly isSystemReminder: boolean;
+  private readonly textComponent: Text;
+  private readonly textContent: string;
+  /** What the text is styled with now: the palette colour and whether it is on a band. */
+  private textStyle: string | undefined;
+  private readonly spacerComponent: Spacer;
+  private readonly imageThumbnails: ImageThumbnail[];
+  private cachedKey: string | undefined;
+  private cachedLines: string[] | undefined;
+
+  constructor(
+    text: string,
+    /** Read on every render: a theme change rewrites the palette in place. */
+    private readonly colors: ColorPalette,
+    images?: ImageAttachment[],
+  ) {
     // System reminders are stored as role:'user' in the context but are NOT
-    // real user messages — skip the background block for them.
+    // real user messages — they never get the band.
     this.isSystemReminder = text.trimStart().startsWith('<system-reminder>');
     this.textContent = text;
     this.textComponent = new Text('', 0, 0);
-    this.applyTextColor(this.isSystemReminder ? colors.roleUser : contrastTextHex(colors.roleUserBg));
-    // Box applies background to all lines INCLUDING top/bottom padding (paddingY=1),
-    // so the entire message block — leading pad, content, trailing pad — gets the
-    // background color and fills the terminal width.
-    this.box = new Box(0, 1, (content: string) => chalk.bgHex(this.bgColor)(content));
     this.spacerComponent = new Spacer(1);
     this.imageThumbnails = images?.map((img) => new ImageThumbnail(img, colors)) ?? [];
   }
 
-  /** Rebuild the Text with the fg color matching the current highlight state. */
-  private applyTextColor(fg: string): void {
-    if (this.currentFg === fg) return;
-    this.currentFg = fg;
-    const fgCode = chalk.hex(fg);
-    this.textComponent.setText(chalk.bold(fgCode(this.textContent)));
-    this.textComponent.invalidate();
-  }
-
   invalidate(): void {
-    this.cachedWidth = undefined;
+    this.cachedKey = undefined;
     this.cachedLines = undefined;
+    this.textStyle = undefined;
     this.textComponent.invalidate();
     for (const img of this.imageThumbnails) {
       img.invalidate?.();
@@ -62,98 +68,73 @@ export class UserMessageComponent implements Component {
   }
 
   render(width: number): string[] {
-    // /hl toggle state is read live (the underlying preference read is cached
-    // at O(1) by utils/ui-preferences, no per-frame disk IO); the cache here is
-    // keyed by that state, so a change invalidates on the next render without
-    // an external transcript rebuild.
-    const highlightEnabled = isUserMessageHighlightEnabled();
-    if (
-      this.cachedLines !== undefined &&
-      this.cachedWidth === width &&
-      this.cachedHighlight === highlightEnabled
-    ) {
-      return this.cachedLines;
-    }
+    const colors = this.colors;
+    // /hl is read live (the preference read is cached by utils/ui-preferences,
+    // no per-frame disk IO); the cache key carries it and the colours in use,
+    // so a toggle or a theme change shows on the next frame.
+    const banded = !this.isSystemReminder && isUserMessageHighlightEnabled() && chalk.level >= 2;
+    const key = [width, banded, colors.roleUser, colors.text, colors.userMessageBg, colors.textDim].join('|');
+    if (this.cachedLines !== undefined && this.cachedKey === key) return this.cachedLines;
 
-    // System reminders: no background block — render as plain user-colored text.
-    // Also skipped when /hl is disabled (default look: ■ prefix only).
-    if (this.isSystemReminder || !highlightEnabled) {
-      // Highlight off → text goes back to the roleUser color (yellow /
-      // orange-red), not the white from the background contrast.
-      this.applyTextColor(this.color);
-      const border = chalk.hex(this.color).bold(USER_MESSAGE_BULLET);
-      const borderWidth = visibleWidth(border);
-      const contentWidth = Math.max(1, width - borderWidth);
-      const lines: string[] = [];
-      for (const line of this.spacerComponent.render(width)) {
-        lines.push(line);
+    this.styleText(banded ? `band:${colors.text}` : `plain:${colors.roleUser}`, banded);
+    const mark = chalk.hex(colors.roleUser).bold(USER_MESSAGE_BULLET);
+    const markWidth = visibleWidth(mark);
+    const contentWidth = Math.max(1, width - markWidth);
+    const rows = this.foldLongMessage(this.textComponent.render(contentWidth), contentWidth);
+
+    const lines: string[] = [...this.spacerComponent.render(width)];
+    const bandOpen = banded ? openOf(chalk.bgHex(colors.userMessageBg)) : '';
+    rows.forEach((row, index) => {
+      const prefix = index === 0 ? mark : ' '.repeat(markWidth);
+      if (!banded) {
+        lines.push(prefix + row);
+        return;
       }
-      const textLines = this.textComponent.render(contentWidth);
-      for (let i = 0; i < textLines.length; i++) {
-        const prefix = i === 0 ? border : ' '.repeat(borderWidth);
-        lines.push(prefix + textLines[i]);
-      }
-
-      // Images — indented to align with text after the border (no background).
-      for (const thumbnail of this.imageThumbnails) {
-        const imageLines = thumbnail.render(contentWidth);
-        for (const line of imageLines) {
-          lines.push(' '.repeat(borderWidth) + line);
-        }
-      }
-
-      this.cachedWidth = width;
-      this.cachedLines = lines;
-      this.cachedHighlight = highlightEnabled;
-      return lines;
-    }
-
-    const border = chalk.bgHex(this.bgColor)(chalk.hex(this.color).bold(USER_MESSAGE_BULLET));
-    const borderWidth = visibleWidth(border);
-    const contentWidth = Math.max(1, width - borderWidth);
-
-    // Highlight on (non-system-reminder): text must be the contrast color
-    // (white on the bright background block).
-    if (!this.isSystemReminder) {
-      this.applyTextColor(contrastTextHex(this.bgColor));
-    }
-
-    // Build content lines (text + images) — Box handles top/bottom padding.
-    const contentLines: string[] = [];
-
-    // Text — first line gets the ■ border, continuation lines get blank padding.
-    const textLines = this.textComponent.render(contentWidth);
-    for (let i = 0; i < textLines.length; i++) {
-      const prefix = i === 0 ? border : chalk.bgHex(this.bgColor)(' '.repeat(borderWidth));
-      contentLines.push(prefix + textLines[i]);
-    }
-
-    // Images — indented to align with text after the border.
-    for (const thumbnail of this.imageThumbnails) {
-      const imageLines = thumbnail.render(contentWidth);
-      for (const line of imageLines) {
-        contentLines.push(chalk.bgHex(this.bgColor)(' '.repeat(borderWidth)) + line);
-      }
-    }
-
-    // Feed content into Box — Box applies background + top/bottom padding rows.
-    this.box.clear();
-    this.box.addChild({
-      render: () => contentLines,
-      invalidate: () => {},
+      // The band runs across the row: re-opened after any reset inside the
+      // styled text, padded to the full width, and closed at the end.
+      const body = `${prefix}${row}`.replaceAll(SGR_RESET_RE, (reset) => reset + bandOpen);
+      const pad = ' '.repeat(Math.max(0, width - visibleWidth(body)));
+      lines.push(`${bandOpen}${body}${pad}\u001B[49m`);
     });
-    const bgLines = this.box.render(width);
 
-    // Spacer goes OUTSIDE the box (no background on the spacer line).
-    const lines: string[] = [];
-    for (const line of this.spacerComponent.render(width)) {
-      lines.push(line);
+    // Images — indented to align with the text, on the terminal's own ground.
+    for (const thumbnail of this.imageThumbnails) {
+      for (const line of thumbnail.render(contentWidth)) {
+        lines.push(' '.repeat(markWidth) + line);
+      }
     }
-    lines.push(...bgLines);
 
-    this.cachedWidth = width;
+    this.cachedKey = key;
     this.cachedLines = lines;
-    this.cachedHighlight = highlightEnabled;
     return lines;
   }
+
+  /** Restyles the text only when the look changed: rewrapping on every frame is not free. */
+  private styleText(style: string, banded: boolean): void {
+    if (this.textStyle === style) return;
+    this.textStyle = style;
+    // On the band the text is the reply's own colour at normal weight — the
+    // band and the mark already set it apart; without one, the user colour
+    // in bold does that job.
+    this.textComponent.setText(
+      banded ? chalk.hex(this.colors.text)(this.textContent) : chalk.bold(chalk.hex(this.colors.roleUser)(this.textContent)),
+    );
+    this.textComponent.invalidate();
+  }
+
+  /** Head and tail of a message past {@link MAX_ROWS} rows, with the rows between counted. */
+  private foldLongMessage(rows: string[], contentWidth: number): string[] {
+    if (rows.length <= MAX_ROWS) return rows;
+    const hidden = rows.length - HEAD_ROWS - TAIL_ROWS;
+    const marker = chalk.hex(this.colors.textDim)(t('usermessage.rows_hidden', { count: String(hidden) }));
+    const markerRow = marker + ' '.repeat(Math.max(0, contentWidth - visibleWidth(marker)));
+    return [...rows.slice(0, HEAD_ROWS), markerRow, ...rows.slice(-TAIL_ROWS)];
+  }
+}
+
+/** The opening SGR sequence a chalk style emits ('' when colour is off). */
+function openOf(style: (text: string) => string): string {
+  const styled = style('\u0000');
+  const at = styled.indexOf('\u0000');
+  return at > 0 ? styled.slice(0, at) : '';
 }

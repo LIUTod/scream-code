@@ -5,9 +5,9 @@
  * 所以这里断言的是真实的持久化结果。
  *
  * 重点钉两件事：
- *   1. 装完没动过 `/hl` 的用户 = 不显示高亮块（默认关闭）；
- *   2. 第一次 `/hl` 必须把它**打开** —— 读默认值与写默认值必须是同一个默认值，
- *      否则会出现「按了没反应」：读到 false、写入 false、屏幕上什么都不变。
+ *   1. 装完没动过 `/hl` 的用户 = 显示淡底色（默认开启）；
+ *   2. 第一次 `/hl` 必须把它**关闭** —— 读默认值与写默认值必须是同一个默认值，
+ *      否则会出现「按了没反应」：读到 true、写入 true、屏幕上什么都不变。
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -51,36 +51,36 @@ describe('/hl', () => {
   beforeEach(clearHighlightPreference);
   afterEach(clearHighlightPreference);
 
-  it('defaults to off for an install that never touched it', () => {
-    expect(isUserMessageHighlightEnabled()).toBe(false);
+  it('defaults to on for an install that never touched it', () => {
+    expect(isUserMessageHighlightEnabled()).toBe(true);
   });
 
-  it('turns the block on with the first /hl, and reports it', async () => {
+  it('turns the band off with the first /hl, and reports it', async () => {
     const { host } = makeHost();
 
     await handleHighlightCommand(host, '');
 
-    expect(isUserMessageHighlightEnabled()).toBe(true);
-    expect(host.showStatus).toHaveBeenCalledWith(t('hl.enabled'), darkColors.success);
+    expect(isUserMessageHighlightEnabled()).toBe(false);
+    expect(host.showStatus).toHaveBeenCalledWith(t('hl.disabled'), darkColors.textDim);
     // Already-rendered messages cache their rows, so the toggle repaints.
     expect(host.state.ui.requestRender).toHaveBeenCalledTimes(1);
   });
 
-  it('toggles back off and reports that too', async () => {
+  it('toggles back on and reports that too', async () => {
     const { host } = makeHost();
 
     await handleHighlightCommand(host, '');
     await handleHighlightCommand(host, '');
 
-    expect(isUserMessageHighlightEnabled()).toBe(false);
-    expect(host.showStatus).toHaveBeenLastCalledWith(t('hl.disabled'), darkColors.textDim);
+    expect(isUserMessageHighlightEnabled()).toBe(true);
+    expect(host.showStatus).toHaveBeenLastCalledWith(t('hl.enabled'), darkColors.success);
   });
 
   it('persists an explicit choice, so a restart keeps it', () => {
-    expect(toggleUserMessageHighlight()).toBe(true);
-    expect(isUserMessageHighlightEnabled()).toBe(true);
-
     expect(toggleUserMessageHighlight()).toBe(false);
     expect(isUserMessageHighlightEnabled()).toBe(false);
+
+    expect(toggleUserMessageHighlight()).toBe(true);
+    expect(isUserMessageHighlightEnabled()).toBe(true);
   });
 });

@@ -12,7 +12,7 @@
  * WCAG AA.
  */
 
-import { CODE_SURFACE_FALLBACK, codeSurfaceFor } from './code-surface';
+import { CODE_SURFACE_FALLBACK, codeSurfaceFor, USER_MESSAGE_SURFACE_FALLBACK, userMessageSurfaceFor } from './code-surface';
 
 const dark = {
   yellowGreen: '#79eb00',
@@ -118,7 +118,8 @@ export interface ColorPalette {
 
   // Roles
   roleUser: string;
-  roleUserBg: string;
+  /** Faint band behind a user message (`/hl`), derived from the terminal's own background. */
+  userMessageBg: string;
   /** Bar behind the selected row of every list (pickers, the `/` menu): the primary green, solid. */
   selectionBg: string;
   /** Text on the selection bar: every foreground colour of the row is repainted to this. */
@@ -187,7 +188,7 @@ export const darkColors: ColorPalette = {
   diffMeta: dark.gray500,
 
   roleUser: '#f7e308',
-  roleUserBg: '#f7e308',
+  userMessageBg: USER_MESSAGE_SURFACE_FALLBACK.dark,
   // The selected row is inverted: the primary green as a solid bar, its text
   // near-black (≈12:1) and its notes deep green (≈8:1). A dim tint of the
   // green read as olive — a stain rather than a highlight.
@@ -254,7 +255,7 @@ export const lightColors: ColorPalette = {
   diffMeta: light.gray600,
 
   roleUser: '#bd5302',
-  roleUserBg: '#bd5302',
+  userMessageBg: USER_MESSAGE_SURFACE_FALLBACK.light,
   // Inverted like the dark palette: deep green bar, white text (≈5.1:1), pale
   // green notes (≈4.4:1, the row's secondary text).
   selectionBg: light.yellowGreen700,
@@ -291,11 +292,15 @@ export function getColorPalette(
   const cached = adaptivePalettes.get(key);
   if (cached !== undefined) return cached;
 
+  const inks = { body: base.text, muted: base.textMuted };
   const mdCodeBlockBg =
+    backgroundHex === undefined ? CODE_SURFACE_FALLBACK[theme] : codeSurfaceFor(backgroundHex, theme, inks);
+  const userMessageBg =
     backgroundHex === undefined
-      ? CODE_SURFACE_FALLBACK[theme]
-      : codeSurfaceFor(backgroundHex, theme, { body: base.text, muted: base.textMuted });
-  const adapted: ColorPalette = { ...base, mdCodeBlockBg };
+      ? USER_MESSAGE_SURFACE_FALLBACK[theme]
+      : // A message draws body text and the dim fold count, never comment ink.
+        userMessageSurfaceFor(backgroundHex, theme, { body: base.text, muted: base.textDim });
+  const adapted: ColorPalette = { ...base, mdCodeBlockBg, userMessageBg };
   adaptivePalettes.set(key, adapted);
   return adapted;
 }

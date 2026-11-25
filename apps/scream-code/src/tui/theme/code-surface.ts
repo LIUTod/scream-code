@@ -55,6 +55,41 @@ export const CODE_SURFACE_FALLBACK: Readonly<Record<ResolvedTheme, string>> = {
   dark: '#1a1f26',
 };
 
+/**
+ * The band behind a user message: the same derivation one step lighter than
+ * a code panel, so a message reads as set apart from the reply without the
+ * weight of a coloured block.
+ */
+const USER_MESSAGE_DELTA_LIGHT = 4;
+const USER_MESSAGE_DELTA_DARK = 6;
+
+export const USER_MESSAGE_SURFACE_FALLBACK: Readonly<Record<ResolvedTheme, string>> = {
+  light: '#eef0f2',
+  dark: '#26292e',
+};
+
+/** The surface behind user messages on `backgroundHex` (see {@link codeSurfaceFor}). */
+export function userMessageSurfaceFor(backgroundHex: string, theme: ResolvedTheme, inks?: SurfaceInks): string {
+  return codeSurfaceFor(backgroundHex, theme, inks, {
+    light: USER_MESSAGE_DELTA_LIGHT,
+    dark: USER_MESSAGE_DELTA_DARK,
+    fallback: USER_MESSAGE_SURFACE_FALLBACK,
+  });
+}
+
+/** How far a surface steps off the ground per theme, and what to use when it cannot. */
+interface SurfaceStep {
+  readonly light: number;
+  readonly dark: number;
+  readonly fallback: Readonly<Record<ResolvedTheme, string>>;
+}
+
+const CODE_PANEL_STEP: SurfaceStep = {
+  light: SURFACE_DELTA_LIGHT,
+  dark: SURFACE_DELTA_DARK,
+  fallback: CODE_SURFACE_FALLBACK,
+};
+
 /** The inks the panel draws on top of the surface. */
 export interface SurfaceInks {
   /** Body ink inside code (identifiers, strings). */
@@ -74,14 +109,15 @@ export function codeSurfaceFor(
   backgroundHex: string,
   theme: ResolvedTheme,
   inks?: SurfaceInks,
+  step: SurfaceStep = CODE_PANEL_STEP,
 ): string {
   const background = parseHex(backgroundHex);
-  if (background === undefined) return CODE_SURFACE_FALLBACK[theme];
+  if (background === undefined) return step.fallback[theme];
   const body = inks === undefined ? undefined : parseHex(inks.body);
   const muted = inks === undefined ? undefined : parseHex(inks.muted);
 
   const backgroundLstar = lstarOf(background);
-  const delta = theme === 'light' ? SURFACE_DELTA_LIGHT : SURFACE_DELTA_DARK;
+  const delta = theme === 'light' ? step.light : step.dark;
   // Raised on dark grounds and recessed on light ones reads as a panel; the
   // opposite direction is the fallback when the ink would lose contrast.
   const directions: readonly (0 | 1)[] = theme === 'light' ? [0, 1] : [1, 0];
@@ -94,12 +130,12 @@ export function codeSurfaceFor(
 
     // Clamping can eat the step on extreme grounds — an invisible panel is
     // worse than the fallback.
-    if (Math.abs(lstarOf(candidate) - backgroundLstar) < 4) continue;
+    if (Math.abs(lstarOf(candidate) - backgroundLstar) < Math.min(4, delta - 1)) continue;
     if (body !== undefined && contrastRatio(candidate, body) < MIN_BODY_CONTRAST) continue;
     if (muted !== undefined && contrastRatio(candidate, muted) < MIN_MUTED_CONTRAST) continue;
     return toHex(candidate);
   }
-  return CODE_SURFACE_FALLBACK[theme];
+  return step.fallback[theme];
 }
 
 /** CIE L* of a `#rrggbb` colour (0 = black, 100 = white). Exported for tests. */

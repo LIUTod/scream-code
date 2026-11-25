@@ -181,7 +181,7 @@ Scream 是一个装在你自己电脑或服务器上的个人 Agent：以写代�
 | `/search` | 搜索当前对话（等同 `Ctrl+Shift+F`），Esc 关闭 |
 | `/trace` | 查看会话工作轨迹 |
 | `/sidebar`（`/sb`） | 打开/关闭侧边栏（`Ctrl+X`） |
-| `/hl`（`/highlight`） | 开关用户消息高亮块 |
+| `/hl`（`/highlight`） | 开关用户消息底色（默认开启，一层随终端背景的淡底色） |
 | `/blockrows`（`/rows`） | 调整活动块行数（折叠高度 / 每个编辑的改动行数 / 工具结果行数 / 思考行数） |
 | `/codebg`（`/codeblock`） | 开关代码块背景色 |
 | `/mermaid`（`/diagram`） | Mermaid 图的画法：制表符边框 / ASCII 边框 / 保留源码 |

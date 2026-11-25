@@ -43,7 +43,7 @@ describe('ui-preferences disk-read cache', () => {
     expect(prefsReads()).toBe(1);
   });
 
-  it('refreshes the cache on toggle, so the next read sees the new state', async () => {
+  it('is on by default and refreshes the cache on toggle, so the next read sees the new state', async () => {
     writeFileSync(getUiPreferencesPath(), '{}');
     const fs = await import('node:fs');
     const prefs = await import('#/tui/utils/ui-preferences');
@@ -51,13 +51,19 @@ describe('ui-preferences disk-read cache', () => {
     const prefsReads = (): number =>
       readFileSync.mock.calls.filter(([file]) => String(file) === getUiPreferencesPath()).length;
 
-    expect(prefs.isUserMessageHighlightEnabled()).toBe(false); // first disk read
+    expect(prefs.isUserMessageHighlightEnabled()).toBe(true); // first disk read: on by default
     expect(prefsReads()).toBe(1);
 
-    expect(prefs.toggleUserMessageHighlight()).toBe(true); // reads + writes, refreshes cache
+    expect(prefs.toggleUserMessageHighlight()).toBe(false); // reads + writes, refreshes cache
     expect(prefsReads()).toBe(2);
 
-    expect(prefs.isUserMessageHighlightEnabled()).toBe(true); // cache hit, no disk read
+    expect(prefs.isUserMessageHighlightEnabled()).toBe(false); // cache hit, no disk read
     expect(prefsReads()).toBe(2);
+  });
+
+  it('keeps an explicit earlier choice to turn the band off', async () => {
+    writeFileSync(getUiPreferencesPath(), JSON.stringify({ userMessageHighlightEnabled: false }));
+    const prefs = await import('#/tui/utils/ui-preferences');
+    expect(prefs.isUserMessageHighlightEnabled()).toBe(false);
   });
 });
