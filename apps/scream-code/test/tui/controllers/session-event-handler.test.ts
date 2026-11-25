@@ -177,9 +177,9 @@ describe('SessionEventHandler', () => {
     };
 
     recalled(1);
-    expect(host.showStatus).toHaveBeenLastCalledWith('· 想起 1 条相关经验（/memory 查看）', host.state.theme.colors.textDim);
+    expect(host.showStatus).toHaveBeenLastCalledWith('· 已参考 1 条以往经验', host.state.theme.colors.textDim);
     recalled(2);
-    expect(host.showStatus).toHaveBeenLastCalledWith('· 想起 2 条相关经验（/memory 查看）', host.state.theme.colors.textDim);
+    expect(host.showStatus).toHaveBeenLastCalledWith('· 已参考 2 条以往经验', host.state.theme.colors.textDim);
     vi.mocked(host.showStatus).mockClear();
     recalled(0);
     expect(host.showStatus).not.toHaveBeenCalled();
