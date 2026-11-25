@@ -556,7 +556,9 @@ export class QuestionDialogComponent extends Container implements Focusable {
         else if (isCursor) tone = primaryBold;
         else tone = dim;
       } else if (isSelected && this.isAnswered(questionIdx)) {
-        prefix = isCursor ? `  ${pulse} ${String(num)}. ` : `  ✓ ${String(num)}. `;
+        // The chosen option keeps its ✓ under the cursor too: the selection bar
+        // repaints the row's colours, so the green alone would not say "chosen".
+        prefix = `  ✓ ${String(num)}. `;
         tone = isCursor ? (s) => success.bold(s) : success;
       } else if (isCursor) {
         prefix = `  ${pulse} ${String(num)}. `;

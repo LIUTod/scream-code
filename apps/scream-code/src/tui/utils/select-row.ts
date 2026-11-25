@@ -1,9 +1,9 @@
 /**
  * The one look of a selected row, shared by every list in the TUI: the `❯`
- * pointer in the primary colour, the label in bold primary, and a quiet bar
- * (`selectionBg`) across the whole row — so the eye finds the cursor by its
- * shape, not by hunting for a one-cell arrow. Rows that belong to the
- * selected item (its description lines) carry the same bar.
+ * pointer and a bold label on a solid primary-green bar (`selectionBg`)
+ * across the whole row, its text inverted (`selectionFg`) — so the eye finds
+ * the cursor by its shape, not by hunting for a one-cell arrow. Rows that
+ * belong to the selected item (its description lines) carry the same bar.
  *
  * Unselected rows keep the pointer cell blank so labels never shift.
  */
@@ -24,45 +24,60 @@ export function rowLabel(colors: ColorPalette, selected: boolean): (text: string
   return selected ? chalk.hex(colors.primary).bold : chalk.hex(colors.text);
 }
 
-// SGR sequences that end a background: full reset and "default background".
-const BG_RESET = /\u001B\[(?:0|49)?m/g;
+const SGR = /\u001B\[([0-9;]*)m/g;
+
+/** The parameters chalk opens a style with at the current colour level ("38;2;…"), or "". */
+function openParams(probe: string): string {
+  const match = /^\u001B\[([0-9;]*)m/.exec(probe);
+  return match?.[1] ?? '';
+}
 
 /**
  * Paint `line` (already coloured) on the selection bar, padded to `width`.
- * Inner resets would end the bar early, so the bar is reopened after each.
+ *
+ * The bar is the primary green, solid, so the row's own colours cannot stay:
+ * a green label or `← 当前` would vanish on it and light grey would sink.
+ * Every foreground in the row is repainted — dim and muted greys to
+ * `selectionMuted`, everything else to `selectionFg` — and every reset or
+ * background inside the row reopens the bar. Other attributes (bold, the
+ * reverse-video input cursor) are kept.
  */
 export function selectedRow(colors: ColorPalette, line: string, width: number): string {
   const fitted = visibleWidth(line) > width ? truncateToWidth(line, width) : line;
   const pad = ' '.repeat(Math.max(0, width - visibleWidth(fitted)));
-  // The bar needs 256 colours or more: on a 16-colour terminal its quiet green
-  // would round to a loud basic green, with the green label lost on it — there
-  // the pointer and the bold label carry the selection alone.
+  // The bar needs 256 colours or more: on a 16-colour terminal the green
+  // rounds to a loud basic green — there the pointer and the bold label carry
+  // the selection alone.
   if (chalk.level < 2) return fitted + pad;
-  const probe = chalk.bgHex(colors.selectionBg)('x');
-  const open = probe.slice(0, probe.indexOf('x'));
-  if (open === '') return fitted + pad;
-  const close = probe.slice(probe.indexOf('x') + 1);
-  const lifted = liftDimText(colors, fitted);
-  return `${open}${lifted.replaceAll(BG_RESET, (reset) => `${reset}${open}`)}${pad}${close}`;
+  const bg = openParams(chalk.bgHex(colors.selectionBg)('x'));
+  const fg = openParams(chalk.hex(colors.selectionFg)('x'));
+  const muted = openParams(chalk.hex(colors.selectionMuted)('x'));
+  if (bg === '' || fg === '') return fitted + pad;
+  const quiet = new Set([openParams(chalk.hex(colors.textDim)('x')), openParams(chalk.hex(colors.textMuted)('x'))]);
+  const body = fitted.replaceAll(SGR, (_sgr, params: string) => `\u001B[${onBar(params, bg, fg, muted, quiet)}m`);
+  return `\u001B[${bg};${fg}m${body}${pad}\u001B[39;49m`;
 }
 
-/** The SGR that opens `hex` as a foreground at the terminal's colour level. */
-function fgOpen(hex: string): string {
-  const probe = chalk.hex(hex)('x');
-  return probe.slice(0, probe.indexOf('x'));
-}
-
-/**
- * Dim and muted greys are made for the bare background; on the bar they
- * would sink (about 2:1 in the dark theme), so they become `selectionMuted`.
- */
-function liftDimText(colors: ColorPalette, line: string): string {
-  const to = fgOpen(colors.selectionMuted);
-  let out = line;
-  for (const from of new Set([fgOpen(colors.textDim), fgOpen(colors.textMuted)])) {
-    if (from !== '' && from !== to) out = out.replaceAll(from, to);
+/** One SGR's parameters rewritten for the bar (see `selectedRow`). */
+function onBar(params: string, bg: string, fg: string, muted: string, quiet: ReadonlySet<string>): string {
+  const parts = params === '' ? ['0'] : params.split(';');
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
+    if (part === '38' || part === '48') {
+      const span = parts[i + 1] === '5' ? 3 : parts[i + 1] === '2' ? 5 : 1;
+      const colour = parts.slice(i, i + span).join(';');
+      i += span - 1;
+      out.push(part === '48' ? bg : quiet.has(colour) ? muted : fg);
+      continue;
+    }
+    const code = Number(part);
+    if (code === 0) out.push('0', bg, fg);
+    else if (code === 39 || (code >= 30 && code <= 37) || (code >= 90 && code <= 97)) out.push(fg);
+    else if (code === 49 || (code >= 40 && code <= 47) || (code >= 100 && code <= 107)) out.push(bg);
+    else out.push(part);
   }
-  return out;
+  return out.join(';');
 }
 
 /** Paint the row on the bar when selected; otherwise return it unchanged. */

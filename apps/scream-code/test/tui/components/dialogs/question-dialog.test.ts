@@ -281,7 +281,7 @@ describe('QuestionDialogComponent', () => {
     expect(out).toContain(CURSOR_MARKER);
   });
 
-  it('keeps selected options green even when the cursor returns to them', () => {
+  it('keeps the chosen mark on an option when the cursor returns to it', () => {
     const pending = makePending([
       {
         question: 'Pick one?',
@@ -294,9 +294,13 @@ describe('QuestionDialogComponent', () => {
     dialog.handleInput('\r');
     dialog.handleInput('\u001B[D');
 
-    const out = dialog.render(80).join('\n');
-    expect(out).toContain(chalk.hex(darkColors.success).bold(`  ${chalk.hex(darkColors.primary)('█')} 1. A`));
-    expect(out).not.toContain('→ [1] A');
+    const lines = dialog.render(80);
+    const row = lines.find((line) => strip(line).includes('1. A'));
+    // The cursor row sits on the inverted bar, so its green is repainted:
+    // the chosen state is carried by the ✓ itself.
+    expect(strip(row ?? '')).toContain('✓ 1. A');
+    expect(row).toContain('\u001B[48;2;121;235;0');
+    expect(lines.join('\n')).not.toContain('→ [1] A');
   });
 
   it('stretches the border to the full available width', () => {

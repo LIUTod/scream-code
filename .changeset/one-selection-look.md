@@ -2,7 +2,7 @@
 "scream-code": patch
 ---
 
-Every list in the terminal now marks the selected row the same way: the `❯` pointer, the label in bold, and a quiet bar across the whole row (its description lines included). Before, the `/` menu used `→`, `/tasks` used `>`, the setup cards used `▶`, and nothing had a background, so the cursor was a one-cell arrow to hunt for. The approval panel and question dialog keep their breathing block as the pointer and get the same bar.
+Every list in the terminal now marks the selected row the same way: the `❯` pointer, the label in bold, and the whole row inverted on a solid green bar (its description lines included) — dark text on bright green in a dark terminal, white on deep green in a light one. A dim tint of the green was tried first and read as olive, a stain rather than a highlight. Before, the `/` menu used `→`, `/tasks` used `>`, the setup cards used `▶`, and nothing had a background, so the cursor was a one-cell arrow to hunt for. The approval panel and question dialog keep their breathing block as the pointer and get the same bar.
 
 - The `/` menu shows eight rows, the command name and its description in two aligned columns; aliases lead the dim description, and a trailing "(yolo)" that only repeated the name is gone.
 - The key hint sits under the list in every dialog, with one wording (`↑↓ 选择 · Enter 确认 · Esc 取消`); "← current" is translated.

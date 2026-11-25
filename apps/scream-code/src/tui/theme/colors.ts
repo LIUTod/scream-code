@@ -116,9 +116,11 @@ export interface ColorPalette {
   // Roles
   roleUser: string;
   roleUserBg: string;
-  /** Background bar behind the selected row of every list (pickers, the `/` menu). */
+  /** Bar behind the selected row of every list (pickers, the `/` menu): the primary green, solid. */
   selectionBg: string;
-  /** Dim and muted text on the selection bar is lifted to this, so it stays readable there. */
+  /** Text on the selection bar: every foreground colour of the row is repainted to this. */
+  selectionFg: string;
+  /** Dim and muted text on the selection bar becomes this, a quieter shade of `selectionFg`. */
   selectionMuted: string;
   roleAssistant: string;
   roleThinking: string;
@@ -181,10 +183,12 @@ export const darkColors: ColorPalette = {
 
   roleUser: '#f7e308',
   roleUserBg: '#f7e308',
-  // Clearly lighter than common dark terminal grounds (≥1.6:1 on #272b36),
-  // with the primary green still ≥4.5:1 on it.
-  selectionBg: '#3b5124',
-  selectionMuted: '#b8c4a8',
+  // The selected row is inverted: the primary green as a solid bar, its text
+  // near-black (≈12:1) and its notes deep green (≈8:1). A dim tint of the
+  // green read as olive — a stain rather than a highlight.
+  selectionBg: dark.yellowGreen,
+  selectionFg: '#0d1600',
+  selectionMuted: '#1f3a00',
   roleAssistant: dark.gray100,
   roleThinking: dark.gray500,
   roleTool: dark.amber400,
@@ -244,8 +248,11 @@ export const lightColors: ColorPalette = {
 
   roleUser: '#bd5302',
   roleUserBg: '#bd5302',
-  selectionBg: '#e3ecd3',
-  selectionMuted: '#5F5F5F',
+  // Inverted like the dark palette: deep green bar, white text (≈5.1:1), pale
+  // green notes (≈4.4:1, the row's secondary text).
+  selectionBg: light.yellowGreen700,
+  selectionFg: '#ffffff',
+  selectionMuted: '#e6f0d6',
   roleAssistant: light.gray900,
   roleThinking: light.gray700,
   roleTool: light.amber800,
