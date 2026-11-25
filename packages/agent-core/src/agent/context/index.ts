@@ -749,7 +749,8 @@ export class ContextMemory {
           isError: event.result.isError,
           useless: event.result.isError !== true && event.result.useless === true ? true : undefined,
           display:
-            event.result.isError !== true && event.result.display?.kind === 'file_diff'
+            event.result.isError !== true &&
+            (event.result.display?.kind === 'file_diff' || event.result.display?.kind === 'file_changes')
               ? event.result.display
               : undefined,
         });

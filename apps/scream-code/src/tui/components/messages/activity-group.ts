@@ -919,6 +919,13 @@ export class ActivityGroupComponent extends Container {
     const change = fileChangeOf(tc.toolCallView, tc.resultView);
     if (change === undefined) return row.body.map((line) => `${BODY_TEXT_INDENT}${line}`);
     const limit = getActivityLines().expandedTool;
+    if (tc.toolCallView.name !== 'Edit' && tc.toolCallView.name !== 'Write') {
+      // A command that changed files: its own preview (the command, its
+      // output) first, then what it did to them, sharing the step's budget.
+      const own = row.body.slice(0, Math.max(2, Math.floor(limit / 2))).map((line) => `${BODY_TEXT_INDENT}${line}`);
+      const rows = renderFileChange(change, 'expanded', Math.max(1, limit - own.length - 1), width - BRANCH_PIPE.length, this.colors);
+      return [...own, ...rows];
+    }
     const notes = changeNotes(tc.resultView?.output ?? '').slice(0, CHANGE_NOTE_LINES);
     // The step's body stays within its budget: the count row and the notes
     // come out of it too.

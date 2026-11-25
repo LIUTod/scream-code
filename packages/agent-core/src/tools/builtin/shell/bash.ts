@@ -40,7 +40,7 @@
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import type { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 
@@ -55,6 +55,8 @@ import type { BackgroundProcessManager } from '../../background/manager';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { commandApprovalRule, matchesCommandRule } from '../../support/command-rule';
 import { ToolResultBuilder } from '../../support/result-builder';
+import type { EditSnapshotStore } from '../../support/edit-snapshot-store';
+import { collectShellFileChanges, stampTrackedFiles, type ShellFileChange } from '../../support/shell-file-changes';
 import bashDescriptionTemplate from './bash.md';
 
 const MS_PER_SECOND = 1000;
@@ -609,6 +611,10 @@ export class BashTool implements BuiltinTool<BashInput> {
   private readonly allowBackground: boolean;
 
   private readonly availableTools: Set<string>;
+  /** Files the agent has read or edited, checked around each foreground command. */
+  private readonly editSnapshots: EditSnapshotStore | undefined;
+  /** Commands so far that changed a tracked file (the note says when it keeps happening). */
+  private fileChangingCommands = 0;
 
   constructor(
     private readonly jian: Jian,
@@ -617,8 +623,10 @@ export class BashTool implements BuiltinTool<BashInput> {
     options?: {
       allowBackground?: boolean | undefined;
       availableTools?: Set<string> | undefined;
+      editSnapshots?: EditSnapshotStore | undefined;
     },
   ) {
+    this.editSnapshots = options?.editSnapshots;
     this.isWindows = this.jian.osEnv.osKind === 'Windows';
     this.shellKind = shellKindOf(this.jian.osEnv);
     this.isWindowsBash = this.isWindows && this.shellKind === 'posix';
@@ -646,8 +654,54 @@ export class BashTool implements BuiltinTool<BashInput> {
       },
       approvalRule: commandApprovalRule(this.name, args.command),
       matchesRule: (ruleArgs) => matchesCommandRule(ruleArgs, args.command),
-      execute: (ctx) => this.execution(args, ctx),
+      execute: (ctx) =>
+        args.run_in_background === true ? this.execution(args, ctx) : this.trackingFileChanges(() => this.execution(args, ctx)),
     };
+  }
+
+  /**
+   * Runs a foreground command and reports what it did to the files the agent
+   * has read or edited: the change goes on the result for the activity block,
+   * becomes the file's known view (so the next Edit is not refused over it),
+   * and a note points back at Edit / Write, which would have shown and
+   * checked it.
+   */
+  private async trackingFileChanges(run: () => Promise<ExecutableToolResult>): Promise<ExecutableToolResult> {
+    const store = this.editSnapshots;
+    if (store === undefined) return run();
+    const before = await stampTrackedFiles(store, this.jian);
+    const result = await run();
+    if (before.size === 0) return result;
+    const changes = await collectShellFileChanges(before, store, this.jian).catch((): ShellFileChange[] => []);
+    if (changes.length === 0) return result;
+    this.fileChangingCommands += 1;
+    const names = changes.map((change) => this.shownPath(change.path)).join(', ');
+    const repeat =
+      this.fileChangingCommands > 1
+        ? ` That is ${String(this.fileChangingCommands)} commands in this session that edited files.`
+        : '';
+    const note =
+      `[note] This command changed ${names}; its new text is now the file's known view.${repeat} ` +
+      'For source edits use Edit or Write: they show the change and check it against the file.';
+    const output = result.output;
+    const withNote =
+      typeof output === 'string'
+        ? `${output}${output.length > 0 ? '\n' : ''}${note}`
+        : [...output, { type: 'text' as const, text: note }];
+    if (result.isError === true) return { ...result, output: withNote };
+    return {
+      ...result,
+      output: withNote,
+      display: {
+        kind: 'file_changes',
+        files: changes.map((change) => ({ ...change, path: this.shownPath(change.path) })),
+      },
+    };
+  }
+
+  private shownPath(path: string): string {
+    const rel = relative(this.cwd, path);
+    return rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel) ? rel : path;
   }
 
   private spawn(effectiveCwd: string, command: string): Promise<JianProcess> {

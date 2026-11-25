@@ -153,4 +153,44 @@ describe('ActivityGroupComponent — inline edit previews while folded', () => {
     // A settled block reports no reasoning rate.
     expect(rows[0]).not.toContain('toks/s');
   });
+
+  it('shows what a shell command did to a file, under the file’s name, and counts it in the header', () => {
+    refreshActivityLines();
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(
+      new ToolCallComponent(
+        { id: 'b1', name: 'Bash', args: { command: 'python3 fix.py' } },
+        {
+          tool_call_id: 'b1',
+          output: 'done\n[note] This command changed src/app.ts',
+          is_error: false,
+          display: {
+            kind: 'file_changes',
+            files: [
+              {
+                path: 'src/app.ts',
+                added: 1,
+                removed: 1,
+                preview: [
+                  { kind: 'delete', line: 3, text: 'const port = 3000;' },
+                  { kind: 'add', line: 3, text: 'const port = 8080;' },
+                ],
+                previewTotal: 2,
+              },
+            ],
+          },
+        },
+        darkColors,
+      ),
+      1,
+    );
+    group.setRunning(false);
+    const rows = group.render(WIDTH).map(strip).filter((row) => row.trim().length > 0);
+
+    expect(rows[0]).toContain('+1 -1');
+    const at = rows.findIndex((row) => row.includes('Bash'));
+    expect(rows[at + 1]).toMatch(/src\/app\.ts/);
+    expect(rows[at + 2]).toMatch(/3 - const port = 3000;/);
+    expect(rows[at + 3]).toMatch(/3 \+ const port = 8080;/);
+  });
 });

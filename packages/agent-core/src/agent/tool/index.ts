@@ -1478,6 +1478,7 @@ export class ToolManager {
         new b.BashTool(jian, cwd, background, {
           allowBackground,
           availableTools: this.enabledTools,
+          editSnapshots: this.agent.editSnapshots,
         }),
         // /rlm mode: persistent python kernel. Registered but NOT enabled by
         // default — activated only when the /rlm command adds 'Python' to the

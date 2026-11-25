@@ -34,7 +34,8 @@ import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
 import { replaceTabs, sanitizeShellOutput } from '#/tui/utils/sanitize';
 
 export interface ChangeRow {
-  readonly kind: 'add' | 'delete' | 'context' | 'gap';
+  /** `file`: the name of the file the rows after it belong to (a command that changed several). */
+  readonly kind: 'add' | 'delete' | 'context' | 'gap' | 'file';
   /** File line number; absent for a record without the display. */
   readonly line?: number | undefined;
   /** Line text; absent for a deletion the call did not carry. */
@@ -64,13 +65,17 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-/** The change of a finished, successful Edit / Write, or undefined. */
+/**
+ * The change of a finished, successful Edit / Write — or of a shell command
+ * that changed files the agent had read or edited — or undefined.
+ */
 export function fileChangeOf(
   toolCall: Readonly<ToolCallBlockData>,
   result: Readonly<ToolResultBlockData> | undefined,
 ): FileChange | undefined {
-  if (!CHANGE_TOOLS.has(toolCall.name)) return undefined;
   if (result === undefined || result.is_error === true) return undefined;
+  if (result.display?.kind === 'file_changes') return shellChangeOf(result.display.files);
+  if (!CHANGE_TOOLS.has(toolCall.name)) return undefined;
   const lang = langFromPath(str(toolCall.args['file_path'] ?? toolCall.args['path']));
   const display = result.display;
   if (display?.kind === 'file_diff' && display.preview !== undefined) {
@@ -84,6 +89,21 @@ export function fileChangeOf(
   const rows = rowsFromStrings(str(toolCall.args['old_string']), str(toolCall.args['new_string']));
   const total = rows.filter((row) => row.kind === 'add' || row.kind === 'delete').length;
   return total === 0 ? undefined : { rows, total, lang };
+}
+
+type ShellChangedFile = Extract<NonNullable<ToolResultBlockData['display']>, { kind: 'file_changes' }>['files'][number];
+
+/** Every file a command changed, each under a row naming it. */
+function shellChangeOf(files: readonly ShellChangedFile[]): FileChange | undefined {
+  const rows: ChangeRow[] = [];
+  let total = 0;
+  for (const file of files) {
+    const preview = file.preview ?? [];
+    if (!preview.some((row) => row.kind === 'add' || row.kind === 'delete')) continue;
+    rows.push({ kind: 'file', text: file.path }, ...preview);
+    total += file.previewTotal ?? preview.filter((row) => row.kind === 'add' || row.kind === 'delete').length;
+  }
+  return total === 0 ? undefined : { rows, total, lang: undefined };
 }
 
 /** Changed lines of two strings plus the unchanged ones around them, unnumbered. */
@@ -111,7 +131,9 @@ function rowsFromStrings(oldText: string, newText: string): ChangeRow[] {
 
 /** One drawn row: a line, a run of removed lines whose text is unknown, a gap or the count. */
 interface DrawRow {
-  readonly kind: 'add' | 'delete' | 'context' | 'gap' | 'more';
+  readonly kind: 'add' | 'delete' | 'context' | 'gap' | 'more' | 'file';
+  /** Highlighting language of the row's file. */
+  readonly lang?: string | undefined;
   readonly line: number | undefined;
   readonly text: string | undefined;
   /** Removed lines folded into this row (text-less runs), gap size, or lines left out. */
@@ -144,7 +166,13 @@ function replacementMarks(rows: readonly ChangeRow[]): Map<number, readonly (rea
 function drawRows(change: FileChange, view: ChangeView): DrawRow[] {
   const out: DrawRow[] = [];
   const marks = replacementMarks(change.rows);
+  let lang = change.lang;
   for (const [index, row] of change.rows.entries()) {
+    if (row.kind === 'file') {
+      lang = langFromPath(row.text ?? '');
+      out.push({ kind: 'file', line: undefined, text: row.text, count: 0, lang });
+      continue;
+    }
     if (view === 'folded' && (row.kind === 'context' || row.kind === 'gap')) continue;
     if (row.kind === 'gap') {
       // Folded rows skip context, so two gaps can meet in the expanded list
@@ -159,7 +187,7 @@ function drawRows(change: FileChange, view: ChangeView): DrawRow[] {
       out[out.length - 1] = { ...last, count: last.count + 1 };
       continue;
     }
-    out.push({ kind: row.kind, line: row.line, text: row.text, count: 1, marks: marks.get(index) });
+    out.push({ kind: row.kind, line: row.line, text: row.text, count: 1, marks: marks.get(index), lang });
   }
   return out;
 }
@@ -177,7 +205,12 @@ function layout(change: FileChange, view: ChangeView, limit: number): DrawRow[] 
   if (fits) return all;
   const shown = all.slice(0, limit);
   // A cut never ends on an unchanged line: the count row says what follows.
-  while (shown.length > 1 && (shown.at(-1)?.kind === 'gap' || shown.at(-1)?.kind === 'context')) shown.pop();
+  while (
+    shown.length > 1 &&
+    (shown.at(-1)?.kind === 'gap' || shown.at(-1)?.kind === 'context' || shown.at(-1)?.kind === 'file')
+  ) {
+    shown.pop();
+  }
   const remaining = Math.max(0, change.total - changedIn(shown));
   return remaining > 0 ? [...shown, { kind: 'more', line: undefined, text: undefined, count: remaining }] : shown;
 }
@@ -353,10 +386,13 @@ export function renderFileChange(
     if (row.kind === 'gap') {
       return truncateToWidth(dim(` ${lead}${t('activitygroup.edit_gap', { count: String(row.count) })}`), rowWidth, '…');
     }
+    if (row.kind === 'file') {
+      return truncateToWidth(chalk.hex(colors.textDim).bold(` ${row.text ?? ''}`), rowWidth, '…');
+    }
     const number = numbered ? `${String(row.line ?? '').padStart(numberWidth)} ` : '';
     const gutter = chalk.hex(colors.diffGutter)(` ${number}`);
     if (row.kind === 'context') {
-      const body = row.text === undefined ? '' : chalk.dim(chalk.hex(colors.text)(highlight(clean(row.text), change.lang, colors)));
+      const body = row.text === undefined ? '' : chalk.dim(chalk.hex(colors.text)(highlight(clean(row.text), row.lang, colors)));
       return truncateToWidth(`${gutter}  ${body}`, rowWidth, '…');
     }
 
@@ -365,7 +401,7 @@ export function renderFileChange(
     const body =
       row.text === undefined
         ? dim(t('activitygroup.edit_removed', { count: String(row.count) }))
-        : chalk.hex(colors.text)(highlight(clean(row.text), change.lang, colors));
+        : chalk.hex(colors.text)(highlight(clean(row.text), row.lang, colors));
     const marks = row.marks ?? [];
     const head = `${gutter}${sign}`;
     const headWidth = visibleWidth(head);

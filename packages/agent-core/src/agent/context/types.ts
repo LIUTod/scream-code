@@ -101,12 +101,13 @@ export type ContextMessage = Message & {
    */
   readonly useless?: boolean;
   /**
-   * The `file_diff` display of a successful Edit / Write, kept on its tool
+   * The `file_diff` display of a successful Edit / Write (or the
+   * `file_changes` of a shell command that changed files), kept on its tool
    * result so a resumed session redraws the change with the same line
    * numbers it had live. UI only: the projector drops it before a request,
    * so the model never sees it.
    */
-  readonly display?: Extract<ToolResultDisplay, { kind: 'file_diff' }> | undefined;
+  readonly display?: Extract<ToolResultDisplay, { kind: 'file_diff' | 'file_changes' }> | undefined;
 };
 
 export interface AgentContextData {

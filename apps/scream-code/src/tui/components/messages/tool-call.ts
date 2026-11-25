@@ -684,6 +684,13 @@ export class ToolCallComponent extends CachedContainer {
       if (reported.added === 0 && reported.removed === 0) return undefined;
       return { added: reported.added, removed: reported.removed };
     }
+    if (reported?.kind === 'file_changes') {
+      // A shell command that changed files the agent had read or edited
+      // counts toward the block's totals like the edit it stood in for.
+      const added = reported.files.reduce((sum, file) => sum + file.added, 0);
+      const removed = reported.files.reduce((sum, file) => sum + file.removed, 0);
+      return added === 0 && removed === 0 ? undefined : { added, removed };
+    }
     if (this.toolCall.name === 'Edit') {
       const stats = computeEditStats(this.toolCall.args);
       if (stats.added === 0 && stats.removed === 0) return undefined;

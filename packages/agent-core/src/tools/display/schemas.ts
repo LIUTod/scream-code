@@ -93,6 +93,14 @@ export const ToolInputDisplaySchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
+/** One row of a change preview (see `fileDiffDetails`). */
+const FileDiffPreviewRowSchema = z.object({
+  kind: z.enum(['add', 'delete', 'context', 'gap']),
+  line: z.number().int().positive().optional(),
+  text: z.string().optional(),
+  count: z.number().int().positive().optional(),
+});
+
 export const ToolResultDisplaySchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('command_output'),
@@ -128,18 +136,24 @@ export const ToolResultDisplaySchema = z.discriminatedUnion('kind', [
     // activity block (see `fileDiffDetails`). Text only where the call's own
     // arguments carried it; absent on older records, which also have no
     // `context` / `gap` rows.
-    preview: z
-      .array(
-        z.object({
-          kind: z.enum(['add', 'delete', 'context', 'gap']),
-          line: z.number().int().positive().optional(),
-          text: z.string().optional(),
-          count: z.number().int().positive().optional(),
-        }),
-      )
-      .optional(),
+    preview: z.array(FileDiffPreviewRowSchema).optional(),
     /** Changed lines in all (the preview may hold fewer). */
     previewTotal: z.number().int().nonnegative().optional(),
+  }),
+  z.object({
+    // Files a shell command changed among those the agent had read or
+    // edited (Bash): each with the same counts and preview rows a file_diff
+    // carries, so the UI shows what a script did to the code.
+    kind: z.literal('file_changes'),
+    files: z.array(
+      z.object({
+        path: z.string(),
+        added: z.number().int().nonnegative(),
+        removed: z.number().int().nonnegative(),
+        preview: z.array(FileDiffPreviewRowSchema).optional(),
+        previewTotal: z.number().int().nonnegative().optional(),
+      }),
+    ),
   }),
   z.object({
     kind: z.literal('search_results'),
