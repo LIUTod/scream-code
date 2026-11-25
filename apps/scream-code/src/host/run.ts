@@ -287,7 +287,10 @@ export async function runHost(): Promise<void> {
       if (shuttingDown) return { ok: false, error: 'shutting_down' };
       if (!booted) return { ok: false, busy: true };
       const busy =
-        (resumer?.busy() ?? false) || (jobsRef?.busy() ?? false) || (driver?.pendingTurnCount() ?? 0) > 0;
+        (resumer?.busy() ?? false) ||
+        (jobsRef?.busy() ?? false) ||
+        (inboxRef?.busy() ?? false) ||
+        (driver?.pendingTurnCount() ?? 0) > 0;
       if (busy) return { ok: false, busy: true };
       setImmediate(() => {
         shutdownRun('restart on the installed build', serviceLaunched ? HOST_RESTART_EXIT_CODE : 0);

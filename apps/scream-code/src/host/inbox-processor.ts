@@ -74,6 +74,11 @@ export class InboxProcessor {
 
   constructor(private readonly options: InboxProcessorOptions) {}
 
+  /** A decision is being delivered right now (an approved action running in its session). */
+  busy(): boolean {
+    return this.delivering.size > 0;
+  }
+
   sweep(): Promise<void> {
     if (this.sweeping !== undefined) return this.sweeping;
     this.sweeping = this.sweepOnce().finally(() => {

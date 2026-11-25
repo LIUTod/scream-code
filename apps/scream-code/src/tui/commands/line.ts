@@ -422,6 +422,8 @@ export async function mergeAndSaveConfig(
       // Preserve fields the wizard does not edit (custom commands, and any
       // forward-compatible key): rebuilding the object must not delete them.
       ...(existing?.commands !== undefined ? { commands: existing.commands } : {}),
+      // Nor the chat's reminder setting (/line → 会话提醒).
+      ...(existing?.reminders !== undefined ? { reminders: existing.reminders } : {}),
     };
     await saveLineConfig(config);
     host.setAppState({ linePlatform: config.feishu !== undefined ? 'lark' : 'wechat' });
