@@ -51,7 +51,27 @@ It is installed only when you choose it: `/service`, `scream service install`, o
 - While the background host runs, a repeating task the agent schedules in a terminal session (every 15 minutes or less often) becomes a background job, so it keeps running after the terminal closes. One-shot reminders, more frequent ones, and tasks made in a chat stay in their session.
 - Jobs the agent makes repeat at most every 15 minutes, and at most 20 jobs are on at once. Unattended (bot mode), the agent may create jobs and delete the ones it made; deleting one you set up waits for your approval.
 - In the chat: `/jobs` lists jobs, `/brief` turns on the 08:30 daily brief, `/stop all` pauses all background work.
-- **Daily brief**: every day at 08:30, a few sentences on what background work did, what failed and what waits for you, ending with the one thing you should look at. Offered only with Feishu or WeChat set up (asked once when the service is first turned on; `/brief` in the chat turns it on and off). Without a chat, the "while you were away" note in the terminal is your brief. `scream report` shows the same data at any time.
+- **Daily brief**: every day at 08:30, a few sentences on what background work did, what failed and what waits for you, ending with the one thing you should look at. Turned on and off with `/brief` in the chat; it is no longer offered when the service is turned on, and neither is the weekly self-review (`/jobs` has it). A morning with nothing to report sends nothing and costs nothing: when the only background work since the last brief was the brief itself and nothing waits, the run is recorded without a model call. Without a chat, the "while you were away" note in the terminal is your brief. `scream report` shows the same data at any time.
+
+## Session reminders (`/line`)
+
+With Feishu or WeChat set up, the chat hears when a session you are not watching needs you — and only then:
+
+```
+✅「修复标题丢失」做完了 · scream-code · 用时 12 分钟
+⏸「发布 0.21.3」在等你批准：git push origin main
+   直接回复：同意 / 拒绝 / 以后都同意
+⏸「重构后台」在等你回答一个问题 · 回到终端处理
+❌「每日检查」没做完：Request timed out. [provider.timeout]
+```
+
+- **What counts**: a session is done, waits for an approval or an answer, or failed. Never a start or progress ("started working on…" messages are gone), and never the conversation itself — a reminder names the session, its project, how long it ran and what to do next. A job's result, which you asked to be sent, is the one exception.
+- **Which sessions**, set in `/line` → 会话提醒: **background and away** (default) — sessions the background runs (work handed over or cut off, job runs, approvals they wait on) and a terminal's sessions once you have been away from that terminal for 3 minutes (it lost focus; a terminal that does not report focus never counts as away); **background only**; or **off** (a task made in the chat still answers there). The background reads the setting within half a minute.
+- **When you come back first**, nothing is sent: a terminal reminder waits until you have been away 3 minutes, and is dropped if you returned meanwhile, the approval was answered, or a new turn started (a goal's next turn is not "done").
+- **Several at once** go out as one message (gathered for 10 seconds), and each reminder once.
+- **Only the background sends** (the chat connection lives there): a terminal asks it, so with no background running there is no reminder; the terminal's own notification still shows.
+- **WeChat** can only send after you wrote to it (it needs the token of your last message). When a reminder cannot be delivered, the terminal's "while you were away" says so (at most every six hours), with a system notification.
+- In the terminal, a background failure or trouble (a job that failed, work that did not finish, the background crashing, a reminder that could not be sent) also raises a terminal notification when the background cannot show a system notification itself.
 
 ## Waiting for you
 

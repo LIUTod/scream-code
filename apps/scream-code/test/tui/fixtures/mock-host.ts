@@ -145,6 +145,7 @@ export function createMockTUIState(options: { appState?: Partial<AppState> } = {
       supportsOsc9: false,
       insideTmux: false,
     },
+    reminders: { note: vi.fn(), dispose: vi.fn() },
     toolOutputExpanded: false,
     planExpanded: false,
     sessions: [] as unknown[],

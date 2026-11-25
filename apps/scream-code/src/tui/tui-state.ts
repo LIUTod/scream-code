@@ -23,6 +23,7 @@ import type { TasksBrowserState } from './controllers/tasks-browser';
 import { applyMotionEnv } from '#/tui/utils/motion';
 import { createScreamTUIThemeBundle, type ScreamTUIThemeBundle } from './theme/bundle';
 import { createTerminalState, type TerminalState } from './utils/terminal-state';
+import { TerminalReminders } from './utils/terminal-reminders';
 import { openUrl } from './utils/open-url';
 import type { GitLsFilesCache } from '#/utils/git/git-ls-files';
 import { createGitLsFilesCache } from '#/utils/git/git-ls-files';
@@ -77,6 +78,8 @@ export interface TUIState {
   livePane: LivePaneState;
   transcriptEntries: TranscriptEntry[];
   terminalState: TerminalState;
+  /** Reminders to the chat about this session while the person is away from the terminal. */
+  reminders: TerminalReminders;
   /**
    * Ctrl+O mode for tool output: the press applies it to the current turn and
    * components that mount later inherit it, so the transcript stays in one
@@ -253,6 +256,8 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const sidebarPane = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   sidebarPane.addChild(sidebarContainer);
   editor.onToggleSidebar = () => sidebarManager.toggle();
+  const terminalState = createTerminalState();
+  const reminders = new TerminalReminders({ unfocusedAt: () => terminalState.unfocusedAt });
 
   return {
     ui,
@@ -279,7 +284,8 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     startupState: 'pending',
     livePane: { ...INITIAL_LIVE_PANE },
     transcriptEntries: [],
-    terminalState: createTerminalState(),
+    terminalState,
+    reminders,
     toolOutputExpanded: false,
     planExpanded: false,
     sessions: [],

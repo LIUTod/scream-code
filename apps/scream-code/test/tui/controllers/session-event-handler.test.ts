@@ -80,6 +80,7 @@ function createMockHost(): SessionEventHost {
     },
     queuedMessages: [],
     transcriptEntries,
+    reminders: { note: vi.fn(), dispose: vi.fn() },
     theme: {
       colors: {
         error: 'red',
@@ -255,6 +256,32 @@ describe('SessionEventHandler', () => {
       host.state.theme.colors.warning,
     );
     expect(t('handler.token_cap_reached', { used: '1', limit: '2' })).toContain('/budget');
+  });
+
+  it('tells the away reminders about a turn that failed or finished, not one that was cancelled', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const note = host.state.reminders.note as ReturnType<typeof vi.fn>;
+
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.ended'),
+        turnId: 1,
+        reason: 'failed',
+        error: { code: 'provider.timeout', message: 'Request timed out.', retryable: true },
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(note).toHaveBeenLastCalledWith(
+      expect.objectContaining({ state: 'failed', key: 'ses-test:1', title: 'Test Session', what: 'Request timed out.' }),
+    );
+
+    handler.handleEvent({ ...baseEvent('turn.ended'), turnId: 2, reason: 'completed' } as unknown as Event, vi.fn());
+    expect(note).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'done', key: 'ses-test:2' }));
+
+    note.mockClear();
+    handler.handleEvent({ ...baseEvent('turn.ended'), turnId: 3, reason: 'cancelled' } as unknown as Event, vi.fn());
+    expect(note).not.toHaveBeenCalled();
   });
 
   it('does not warn about a token limit on a normal turn end', () => {

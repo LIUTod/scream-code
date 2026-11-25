@@ -39,6 +39,7 @@ import { isDeadTerminalError } from '../utils/dead-terminal';
 import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
+import { readActivitySince } from '#/host/activity';
 import { hostShowsDesktopNotifications } from '#/host/desktop-notify';
 import { readHostSettings } from '#/host/settings';
 import { installTerminalThemeTracking } from '../utils/terminal-theme';
@@ -314,6 +315,34 @@ export class LifecycleController {
       body: t('host.notify.waiting_body', { count: String(waiting) }),
     });
   }
+  /** Background activity up to here has been looked at for failures to announce. */
+  private activitySeenAt = Date.now();
+
+  /**
+   * A background failure — a job run, work handed over, the background itself
+   * (it keeps crashing, a chat reminder could not be sent) — raised by the
+   * terminal where the background cannot show a system notification (same
+   * rule as {@link announceNewWaiting}). Only what happened while this
+   * terminal is open: the rest is in "while you were away".
+   */
+  private announceNewTrouble(): void {
+    const entries = readActivitySince(this.activitySeenAt);
+    if (entries.length === 0) return;
+    this.activitySeenAt = Math.max(this.activitySeenAt, ...entries.map((entry) => entry.at));
+    if (hostShowsDesktopNotifications() || !readHostSettings().desktopNotifications) return;
+    for (const entry of entries) {
+      const failed = entry.ok === false && (entry.kind === 'job' || entry.kind === 'continued');
+      if (!failed && entry.kind !== 'health') continue;
+      notifyTerminalOnce(this.host.state, `activity:${entry.kind}:${String(entry.at)}`, {
+        title:
+          entry.kind === 'health'
+            ? entry.title
+            : t(entry.kind === 'job' ? 'host.notify.job_failed_title' : 'host.notify.continued_failed_title'),
+        body: entry.kind === 'health' ? entry.detail : entry.title,
+      });
+    }
+  }
+
   /** The Jobs panel's last snapshot, refreshed by the jobs poll. */
   private sidebarJobs: SidebarJobsData | undefined;
 
@@ -326,6 +355,7 @@ export class LifecycleController {
     const POLL_INTERVAL_MS = 30_000;
     const apply = (status: JobsFooterStatus): void => {
       this.announceNewWaiting(status.needsYou ?? 0);
+      this.announceNewTrouble();
       this.sidebarJobs = { hostRunning: status.hostRunning, waiting: status.waiting, rows: status.jobs ?? [] };
       this.host.setAppState({ jobsEnabled: status.enabled, jobsWaiting: status.waiting, jobsHostRunning: status.hostRunning });
     };
@@ -750,6 +780,7 @@ export class LifecycleController {
   disposeTerminalTracking(): void {
     this.stopTerminalThemeTracking();
     this.terminalFocusTrackingDispose?.();
+    this.host.state.reminders.dispose();
     this.terminalFocusTrackingDispose = undefined;
   }
 

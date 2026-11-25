@@ -28,6 +28,7 @@ import { beginWeixinQRLogin, pollWeixinQRStatus, WeixinLoginError } from '#/line
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent } from '../components/dialogs/choice-picker';
 import type { ChoiceOption } from '../components/dialogs/choice-picker';
+import { DEFAULT_REMINDER_MODE, type ReminderMode } from '#/host/reminders';
 import type { SlashCommandHost } from './dispatch';
 
 // ─── Entry ────────────────────────────────────────────────────────────────
@@ -54,6 +55,16 @@ export async function handleLineCommand(host: SlashCommandHost): Promise<void> {
     { value: 'start', label: t('common.start'), description: t('line.opt_start_desc') },
     { value: 'stop', label: t('common.stop'), description: t('line.opt_stop_desc') },
     { value: 'restart', label: t('common.restart'), description: t('line.opt_restart_desc') },
+    // Only with a channel: there is nowhere to send them otherwise.
+    ...(config?.feishu !== undefined || config?.weixin !== undefined
+      ? [
+          {
+            value: 'reminders',
+            label: t('line.opt_reminders', { mode: reminderModeLabel(config.reminders ?? DEFAULT_REMINDER_MODE) }),
+            description: t('line.opt_reminders_desc'),
+          },
+        ]
+      : []),
     {
       value: 'uninstall',
       label: t('line.opt_uninstall'),
@@ -85,6 +96,9 @@ export async function handleLineCommand(host: SlashCommandHost): Promise<void> {
         case 'restart':
           void doRestart(host);
           return;
+        case 'reminders':
+          if (config !== null) void chooseReminders(host, config);
+          return;
         case 'uninstall':
           void doUninstall(host);
           return;
@@ -95,6 +109,42 @@ export async function handleLineCommand(host: SlashCommandHost): Promise<void> {
     },
   });
   host.mountEditorReplacement(picker);
+}
+
+function reminderModeLabel(mode: ReminderMode): string {
+  return t(`line.reminders_mode_${mode}`);
+}
+
+/** Which session reminders this chat gets (see host/reminders.ts). Read by the background within half a minute. */
+async function chooseReminders(host: SlashCommandHost, config: LineConfig): Promise<void> {
+  const current = config.reminders ?? DEFAULT_REMINDER_MODE;
+  const modes: readonly ReminderMode[] = ['away', 'background', 'off'];
+  const chosen = await new Promise<ReminderMode | undefined>((resolve) => {
+    host.mountEditorReplacement(
+      new ChoicePickerComponent({
+        title: t('line.reminders_title'),
+        breadcrumb: t('line.title'),
+        options: modes.map((mode) => ({
+          value: mode,
+          label: t(`line.reminders_${mode}`),
+          description: t(`line.reminders_${mode}_desc`),
+        })),
+        currentValue: current,
+        colors: host.state.theme.colors,
+        onSelect: (value) => {
+          host.restoreEditor();
+          resolve(value as ReminderMode);
+        },
+        onCancel: () => {
+          host.restoreEditor();
+          resolve(undefined);
+        },
+      }),
+    );
+  });
+  if (chosen === undefined || chosen === current) return;
+  await saveLineConfig({ ...config, reminders: chosen });
+  host.showStatus(t('line.reminders_saved', { mode: reminderModeLabel(chosen) }));
 }
 
 /** Single-channel invariant helper: is `kind` blocked by the other platform? */

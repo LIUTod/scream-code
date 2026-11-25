@@ -791,6 +791,7 @@ export class SessionEventHandler {
       );
     }
     this.host.setAppState({ reconnectAttempt: 0 });
+    this.remindAboutTurnEnd(event);
     const todos = this.host.state.todoPanel.getTodos();
     if (todos.length > 0 && todos.every((todo) => todo.status === 'done')) {
       this.host.streamingUI.setTodoList([]);
@@ -820,6 +821,35 @@ export class SessionEventHandler {
     }
 
     this.host.streamingUI.finalizeTurn(sendQueued);
+  }
+
+  /**
+   * The person may be away from this terminal (see utils/terminal-reminders):
+   * a finished turn — once nothing follows it — or a failed one reaches the chat.
+   * A cancelled turn was stopped by the person, who is here.
+   */
+  private remindAboutTurnEnd(event: TurnEndedEvent): void {
+    const { appState } = this.host.state;
+    const sessionId = appState.sessionId;
+    if (sessionId === undefined || sessionId === '') return;
+    const base = {
+      key: `${sessionId}:${String(event.turnId)}`,
+      title: appState.sessionTitle ?? undefined,
+      workDir: appState.workDir,
+    };
+    if (event.reason === 'failed') {
+      this.host.state.reminders.note({ ...base, state: 'failed', what: event.error?.message });
+      return;
+    }
+    if (event.reason !== 'completed' || this.host.state.queuedMessages.length > 0) return;
+    const startedAt = appState.streamingStartTime;
+    this.host.state.reminders.note({
+      ...base,
+      state: 'done',
+      ...(startedAt > 0 ? { elapsedMs: Date.now() - startedAt } : {}),
+      // A goal's next turn (or a queued message) started meanwhile: not done.
+      stillHolds: () => this.host.state.appState.streamingPhase === 'idle',
+    });
   }
 
   private handleStepBegin(event: TurnStepStartedEvent): void {

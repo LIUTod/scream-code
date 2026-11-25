@@ -51,18 +51,27 @@ import {
 } from './control';
 import { CRASH_LIMIT, CRASH_WINDOW_MS, hostStartsFile, markHostStartClean, recordHostStart } from './host-starts';
 import { hostErr as err, hostOut as out } from './log';
-import { appendActivity } from './activity';
+import { appendActivity, readActivitySince } from './activity';
 import { notifyDesktop } from './desktop-notify';
 import { InboxProcessor } from './inbox-processor';
 import { isSelfReviewJob, selfReviewContext } from './self-review';
 import { releaseHeldWorktree } from './worktree';
-import { JOB_RUN_SESSION_PREFIX, JobRunner } from './job-runner';
+import { briefHasNothingToReport, JOB_RUN_SESSION_PREFIX, jobIdOfRunSession, JobRunner } from './job-runner';
 import { KeepAwake } from './keep-awake';
 import { pauseAllJobs } from './pause-all';
 import { readHostSettings } from './settings';
 import { addHostTokens, hostBudgetReached } from './usage';
-import { inboxNotice } from '#/line/background-commands';
+import { inboxNotice, isBriefJob } from '#/line/background-commands';
 import { WorkResumer } from './work-resumer';
+import {
+  formatReminder,
+  parseTerminalReminder,
+  reminderAllowed,
+  ReminderOutbox,
+  ReminderSettings,
+  reminderTitle,
+  type Reminder,
+} from './reminders';
 
 /**
  * How long a shutdown waits for the in-flight turn to finish before forcing an
@@ -80,6 +89,8 @@ const IDLE_CHECK_MS = 60 * 1000;
 const INBOX_SWEEP_MS = 15 * 1000;
 /** How often the host decides whether to hold the sleep inhibitor. */
 const KEEP_AWAKE_CHECK_MS = 30 * 1000;
+/** A chat that cannot be reached is noted in the activity log at most this often. */
+const UNDELIVERED_NOTE_EVERY_MS = 6 * 60 * 60 * 1000;
 
 
 /** How often a service-launched host waiting behind a terminal's host tries the lock again. */
@@ -219,6 +230,8 @@ export async function runHost(): Promise<void> {
   let jobsRef: JobRunner | undefined;
   let inboxRef: InboxProcessor | undefined;
   let harnessRef: ScreamHarness | undefined;
+  let outboxRef: ReminderOutbox | undefined;
+  let remindRef: ((reminder: Reminder, source: 'background' | 'terminal', key: string) => Promise<boolean>) | undefined;
   let lastBusyAt = Date.now();
   // `stop` asks through the lock, so a stop is graceful on every platform (on
   // Windows a signal would end the process at once); `sweep` is a terminal
@@ -246,6 +259,18 @@ export async function runHost(): Promise<void> {
       const session = typeof sessionId === 'string' ? harnessRef?.getSession(sessionId) : undefined;
       if (session === undefined) return { ok: false, error: 'not_open' };
       return peekSession(session);
+    }
+    // A terminal's session finished, waits or failed while the person is away
+    // from that terminal: the chat connection is here, so the terminal asks.
+    if (request.type === 'remind') {
+      const payload = request as { reminder?: unknown; key?: unknown };
+      const reminder = parseTerminalReminder(payload.reminder);
+      if (reminder === undefined || typeof payload.key !== 'string') return { ok: false, error: 'bad_request' };
+      const key = `terminal:${payload.key.slice(0, 200)}`;
+      return (async () => {
+        const ok = (await remindRef?.(reminder, 'terminal', key)) ?? false;
+        return { ok };
+      })();
     }
     if (request.type === 'sweep') {
       lastBusyAt = Date.now();
@@ -303,7 +328,7 @@ export async function runHost(): Promise<void> {
       process.exit(1);
     }, SHUTDOWN_GRACE_MS);
     forceTimer.unref();
-    void gracefulShutdown(handles, driver, resumer, jobsRef).finally(() => {
+    void gracefulShutdown(handles, driver, resumer, jobsRef, outboxRef).finally(() => {
       clearTimeout(forceTimer);
       markHostStartClean(startsFile, process.pid, startedAt);
       process.exit(0);
@@ -341,19 +366,69 @@ export async function runHost(): Promise<void> {
   }
 
   const activeDriver = handles.length > 0 ? driver : undefined;
+
+  // Session reminders to the chat (see host/reminders.ts): one outbox, so a
+  // reminder is sent once and several at once go out as one message.
+  let lastUndeliveredNote = 0;
+  const outbox =
+    activeDriver === undefined
+      ? undefined
+      : new ReminderOutbox({
+          send: (chat, text) => activeDriver.sendToChat(chat, text),
+          // A reminder that never arrives is worse than none: say so where the
+          // person will look (the terminal's "while you were away"), at most
+          // every few hours.
+          onUndelivered: (chat, delivery) => {
+            if (Date.now() - lastUndeliveredNote < UNDELIVERED_NOTE_EVERY_MS) return;
+            lastUndeliveredNote = Date.now();
+            const title =
+              chat.startsWith('line-weixin-') && delivery === 'no-target'
+                ? t('reminder.undelivered_weixin')
+                : t('reminder.undelivered');
+            appendActivity({ kind: 'health', title, ok: false });
+            notifyDesktop(t('host.notify.health_title'), title);
+          },
+        });
+  const reminders = new ReminderSettings();
+  // Read before the inbox's first sweep and the first job run: until then the
+  // default would let a reminder through to a chat that switched them off.
+  await reminders.mode();
+  /** Queue a reminder for the chat the person last wrote from, when the chat's setting allows it. */
+  const remind = async (
+    reminder: Reminder,
+    source: 'background' | 'terminal',
+    key: string,
+  ): Promise<boolean> => {
+    const chat = activeDriver?.ownerChat();
+    if (outbox === undefined || chat === undefined) return false;
+    if (!reminderAllowed(await reminders.mode(), source)) return false;
+    return outbox.push(chat, formatReminder(reminder), key);
+  };
+  outboxRef = outbox;
+  remindRef = remind;
+
   resumer = new WorkResumer({
     onFinished: (record, title, result) => {
       lastBusyAt = Date.now();
-      const name = title ?? record.sessionId;
+      const name = reminderTitle(title, record.workDir);
       appendActivity({ kind: 'continued', title: name, ok: result.ok, detail: result.text });
       notifyDesktop(t('host.notify.continued_title'), name);
-      const chat = activeDriver?.ownerChat();
-      if (activeDriver !== undefined && chat !== undefined && !record.sessionId.startsWith('line-')) {
-        const last = result.text.trim().slice(-600);
-        void activeDriver
-          .sendToChat(chat, t(result.ok ? 'host.msg.continued_done' : 'host.msg.continued_stopped', { title: name, detail: last }))
-          .catch(() => {});
-      }
+      // A chat session answers in its own chat; nothing to remind about.
+      if (record.sessionId.startsWith('line-')) return;
+      void remind(
+        {
+          state: result.ok ? 'done' : 'failed',
+          title,
+          workDir: record.workDir,
+          // How long it ran means something for work handed over; for work a
+          // crash or a power loss cut off it would count the time it was down.
+          ...(record.handoff === true ? { elapsedMs: Date.now() - record.startedAt } : {}),
+          recovered: record.handoff !== true,
+          ...(result.ok ? {} : { what: result.failedReason ?? (result.timedOut ? t('reminder.timed_out') : undefined) }),
+        },
+        'background',
+        `continued:${record.sessionId}:${String(record.startedAt)}`,
+      );
     },
     harness,
     screamHomeDir: resolveScreamHome(),
@@ -369,24 +444,14 @@ export async function runHost(): Promise<void> {
         : (sessionId, text) => activeDriver.continueInterrupted(sessionId, text),
     onContinued: (record, title) => {
       lastBusyAt = Date.now();
+      // The log says it; the chat hears only when it is done (a reminder is
+      // for something to know or do, not for progress), and that reminder
+      // says the work had been cut off.
       out(
         t(record.handoff === true ? 'host.log.continued_handoff' : 'host.log.continued_interrupted', {
           title: title ?? record.sessionId,
         }),
       );
-      // Say so on the phone: work picked up after a crash or a power loss
-      // would otherwise happen unseen. A chat session replies in its own chat.
-      const chat = activeDriver?.ownerChat();
-      if (activeDriver !== undefined && chat !== undefined && !record.sessionId.startsWith('line-')) {
-        void activeDriver
-          .sendToChat(
-            chat,
-            t(record.handoff === true ? 'host.msg.continued_handoff' : 'host.msg.continued_interrupted', {
-              title: title ?? record.sessionId,
-            }),
-          )
-          .catch(() => {});
-      }
     },
   });
   resumer.start();
@@ -406,7 +471,24 @@ export async function runHost(): Promise<void> {
       const first = run.summary.split('\n').find((line) => line.trim() !== '') ?? '';
       await snapshotEvolution(resolveScreamHome(), `self-review: ${first.slice(0, 200)}`);
     },
-    deliver: activeDriver === undefined ? undefined : (sessionKey, text) => activeDriver.sendToChat(sessionKey, text),
+    // Through the outbox: several results at once are one message.
+    deliver:
+      outbox === undefined
+        ? undefined
+        : (sessionKey, text) => {
+            outbox.push(sessionKey, text);
+            return Promise.resolve();
+          },
+    nothingToReport: (job, since) =>
+      isBriefJob(job) &&
+      briefHasNothingToReport({
+        job,
+        since,
+        now: Date.now(),
+        activity: readActivitySince(since),
+        inbox: listInbox(resolveScreamHome()),
+        jobs: new JobStore(resolveScreamHome()).list(),
+      }),
     messages: {
       firstFailure: (job, summary) => t('jobs.msg.first_failure', { title: job.title, error: summary.slice(0, 300) }),
       fatigued: (job) => t('jobs.msg.fatigued', { title: job.title }),
@@ -441,8 +523,9 @@ export async function runHost(): Promise<void> {
       if (!ok) notifyDesktop(t('host.notify.job_failed_title'), t('host.notify.job_failed_body', { title: job.title }));
     },
     // A job made in a terminal names no chat: its results go to the chat the
-    // person last wrote from, when a channel runs.
-    fallbackChat: () => activeDriver?.ownerChat(),
+    // person last wrote from, when a channel runs — a reminder like any other,
+    // so the chat's setting decides. A job made in a chat always answers there.
+    fallbackChat: () => (reminders.latest() === 'off' ? undefined : activeDriver?.ownerChat()),
   });
   jobsRef = jobs;
   await jobs.start();
@@ -452,8 +535,22 @@ export async function runHost(): Promise<void> {
   const inbox = new InboxProcessor({
     harness,
     screamHomeDir: resolveScreamHome(),
-    notify: activeDriver === undefined ? undefined : (sessionKey, text) => activeDriver.sendToChat(sessionKey, text),
-    ownerChat: () => activeDriver?.ownerChat(),
+    notify:
+      outbox === undefined
+        ? undefined
+        : (sessionKey, text) => {
+            outbox.push(sessionKey, text);
+            return Promise.resolve();
+          },
+    // Items of a chat's own session go to that chat; the rest are reminders
+    // to the chat the person last wrote from, when its setting allows.
+    ownerChat: () => (reminders.latest() === 'off' ? undefined : activeDriver?.ownerChat()),
+    titleFor: async (item) => {
+      const jobId = jobIdOfRunSession(item.sessionId);
+      if (jobId !== undefined) return new JobStore(resolveScreamHome()).get(jobId)?.title;
+      const [summary] = await harness.listSessions({ sessionId: item.sessionId });
+      return reminderTitle(summary?.title, item.workDir);
+    },
     deliverToChat:
       activeDriver === undefined
         ? undefined
@@ -574,6 +671,7 @@ async function gracefulShutdown(
   driver: LineSessionDriver | undefined,
   resumer: WorkResumer | undefined,
   jobs: JobRunner | undefined,
+  outbox: ReminderOutbox | undefined,
 ): Promise<void> {
   // Work that should outlive this process (a goal, a bot run, a channel turn
   // in flight) is marked as handed over before anything closes, so closing
@@ -605,6 +703,9 @@ async function gracefulShutdown(
     }
   }
   await jobsDone;
+  // Reminders still gathering (a run that just finished) go out while the
+  // channel is still connected.
+  await outbox?.flushAll().catch(() => {});
   for (const handle of handles) {
     try {
       await handle.close();

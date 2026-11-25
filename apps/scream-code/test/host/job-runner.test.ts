@@ -6,10 +6,13 @@ import { JobStore, type Event, type Job, type ScreamHarness, type Session } from
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  briefHasNothingToReport,
   JOB_RETRY_DELAY_MS,
   JOB_RUN_SESSION_PREFIX,
   JOB_TRANSIENT_RETRIES,
+  jobIdOfRunSession,
   JobRunner,
+  NOTHING_TO_REPORT,
   renderJobPrompt,
 } from '#/host/job-runner';
 
@@ -379,5 +382,59 @@ describe('JobRunner — a failure that clears by itself', () => {
     await waitIdle(runner);
 
     expect(new JobStore(dir).get(job.id)).toMatchObject({ consecutiveFailures: 1 });
+  });
+});
+
+describe('a report with nothing to report', () => {
+  it('is recorded as done without a session or a model call, and sends nothing', async () => {
+    const dir = home();
+    const job = await new JobStore(dir).add(
+      { title: '每日简报', prompt: 'brief', starts: { kind: 'cron', cron: '0 9 * * *' }, does: 'report', workDir: '/w', createdBy: 'person', deliverTo: 'line-feishu-x' },
+      NOW - 60_000,
+    );
+    const { harness } = fakeHarness();
+    const deliver = vi.fn(async () => {});
+    const onRun = vi.fn();
+    const runner = new JobRunner({
+      harness,
+      useWorktrees: false,
+      screamHomeDir: dir,
+      deliver,
+      messages,
+      onRun,
+      nothingToReport: () => true,
+      now: () => NOW,
+    });
+
+    await runner.tick();
+    await waitIdle(runner);
+
+    expect(harness.createSession).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(onRun).not.toHaveBeenCalled();
+    const after = new JobStore(dir).get(job.id)!;
+    expect(after.runs[0]).toMatchObject({ ok: true, sessionId: '', summary: NOTHING_TO_REPORT });
+    expect(after.nextRunAt).toBeGreaterThan(NOW);
+  });
+});
+
+describe('briefHasNothingToReport', () => {
+  const brief = { title: '每日简报' } as Job;
+  const base = { job: brief, since: 0, now: NOW, activity: [], inbox: [], jobs: [] };
+
+  it('is true when the only thing that happened is the brief itself', () => {
+    expect(briefHasNothingToReport({ ...base, activity: [{ kind: 'job', title: '每日简报' }] })).toBe(true);
+  });
+
+  it('is false when other work ran or something waits', () => {
+    expect(briefHasNothingToReport({ ...base, activity: [{ kind: 'continued', title: '修复' }] })).toBe(false);
+    expect(briefHasNothingToReport({ ...base, activity: [{ kind: 'health', title: '后台反复崩溃' }] })).toBe(false);
+  });
+});
+
+describe('jobIdOfRunSession', () => {
+  it('reads the job a run session belongs to', () => {
+    expect(jobIdOfRunSession('job-run-job-c2fe237b-64684892')).toBe('job-c2fe237b');
+    expect(jobIdOfRunSession('ses-123')).toBeUndefined();
   });
 });

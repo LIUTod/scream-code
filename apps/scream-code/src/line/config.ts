@@ -179,6 +179,12 @@ export const lineConfigSchema = z.object({
   /** Working directory for line sessions (default: daemon start cwd). */
   workDir: z.string().optional(),
   /**
+   * Session reminders sent to this chat (see host/reminders.ts): `off`,
+   * `background` (sessions the background runs), or `away` (also a terminal's
+   * sessions while the person is away from it). Absent: `away`.
+   */
+  reminders: z.enum(['off', 'background', 'away']).optional(),
+  /**
    * Wall-clock cap for one turn, in minutes (default 60).
    *
    * The cap is not a performance limit: it only exists so a turn that never

@@ -29,15 +29,17 @@ export function installTerminalFocusTracking(state: TUIState): () => void {
 }
 
 export function handleTerminalFocusInput(
-  state: Pick<TerminalState, 'focused'>,
+  state: Pick<TerminalState, 'focused' | 'unfocusedAt'>,
   data: string,
 ): { consume: true } | undefined {
   if (data === TERMINAL_FOCUS_IN) {
     state.focused = true;
+    state.unfocusedAt = undefined;
     return { consume: true };
   }
   if (data === TERMINAL_FOCUS_OUT) {
     state.focused = false;
+    state.unfocusedAt ??= Date.now();
     return { consume: true };
   }
   return undefined;

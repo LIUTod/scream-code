@@ -28,7 +28,7 @@ import {
   type Session,
 } from '@scream-code/scream-code-sdk';
 
-import { runPromptToEnd } from './run-to-end';
+import { runPromptToEnd, type RunResult } from './run-to-end';
 import { readUsage, usageTokens } from './usage';
 
 /** How often the register is read while the host runs. */
@@ -61,7 +61,7 @@ export interface WorkResumerOptions {
   readonly onContinued?: ((record: RunningWorkRecord, title: string | undefined) => void) | undefined;
   /** Told when continued work is done (or failed, or hit its deadline), with its last answer. */
   readonly onFinished?:
-    | ((record: RunningWorkRecord, title: string | undefined, result: { ok: boolean; text: string }) => void)
+    | ((record: RunningWorkRecord, title: string | undefined, result: RunResult) => void)
     | undefined;
   readonly now?: () => number;
   /** How long after a turn ends with none following the run counts as done (default 2 s). */

@@ -38,7 +38,9 @@ export interface InboxProcessorOptions {
   readonly ownerChat?: (() => string | undefined) | undefined;
   /** Deliver a decision to a chat session through its channel (grant, turn, reply). */
   readonly deliverToChat?: ((sessionKey: string, text: string, actionKey?: string) => Promise<void>) | undefined;
-  readonly formatNotice: (item: InboxItem) => string;
+  readonly formatNotice: (item: InboxItem, title?: string) => string;
+  /** The title of the session an item comes from (a job's title for a job run), for its notice. */
+  readonly titleFor?: ((item: InboxItem) => Promise<string | undefined>) | undefined;
   readonly recordUsage?: ((tokens: number) => void) | undefined;
   /** Told once about each new item, chat or no chat (activity log, system notification). */
   readonly onNewItem?: ((item: InboxItem) => void) | undefined;
@@ -134,7 +136,8 @@ export class InboxProcessor {
     const target = item.sessionId.startsWith(CHANNEL_SESSION_PREFIX) ? item.sessionId : this.options.ownerChat?.();
     if (target === undefined || this.options.notify === undefined) return;
     try {
-      await this.options.notify(target, this.options.formatNotice(item));
+      const title = await this.options.titleFor?.(item).catch(() => undefined);
+      await this.options.notify(target, this.options.formatNotice(item, title));
       patchInboxItem(this.options.screamHomeDir, item.id, 'pending', { notified: true, notifiedTo: target });
     } catch (error) {
       log.warn('host: could not push an inbox item', { id: item.id, error: String(error) });

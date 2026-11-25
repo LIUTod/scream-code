@@ -149,6 +149,18 @@ export async function wakeHost(): Promise<boolean> {
   return reply?.ok === true;
 }
 
+/**
+ * Ask the background to send a reminder about a terminal's session to the
+ * chat (see host/reminders.ts). False when no background runs, it has no
+ * chat, or the chat's setting does not want it.
+ */
+export async function remindHost(reminder: Readonly<Record<string, unknown>>, key: string): Promise<boolean> {
+  const reply = (await requestProcessLock(lockOptions(), { type: 'remind', reminder, key, token: controlToken() }).catch(
+    () => undefined,
+  )) as { ok?: boolean } | undefined;
+  return reply?.ok === true;
+}
+
 export interface HostSessionPeek {
   readonly title?: string | undefined;
   readonly running: boolean;

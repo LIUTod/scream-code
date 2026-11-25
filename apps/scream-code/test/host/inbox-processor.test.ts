@@ -91,6 +91,39 @@ describe('InboxProcessor', () => {
     expect(notify).toHaveBeenCalledWith('line-weixin-me', expect.any(String));
   });
 
+  it('names the session it comes from, so the phone says which work is waiting', async () => {
+    const dir = home();
+    writeItem(dir, { id: 'inbox-ttt', sessionId: 'session_1' });
+    const notify = vi.fn(async (_sessionKey: string, _text: string) => {});
+    const processor = new InboxProcessor({
+      harness: fakeHarness().harness,
+      screamHomeDir: dir,
+      notify,
+      ownerChat: () => 'line-feishu-me',
+      formatNotice: inboxNotice,
+      titleFor: async () => '发布 0.21.3',
+    });
+    await processor.sweep();
+    expect(notify.mock.calls[0]![1]).toMatch(/^⏸「发布 0\.21\.3」在等你批准：/);
+    expect(notify.mock.calls[0]![1]).toContain('/approve inbox-ttt');
+  });
+
+  it('keeps a reminder off: no chat, no push, and the item still waits', async () => {
+    const dir = home();
+    writeItem(dir, { id: 'inbox-off', sessionId: 'session_1' });
+    const notify = vi.fn(async (_sessionKey: string, _text: string) => {});
+    const processor = new InboxProcessor({
+      harness: fakeHarness().harness,
+      screamHomeDir: dir,
+      notify,
+      ownerChat: () => undefined,
+      formatNotice: inboxNotice,
+    });
+    await processor.sweep();
+    expect(notify).not.toHaveBeenCalled();
+    expect(listInbox(dir)[0]?.status).toBe('pending');
+  });
+
   it('expires an item nobody answered', async () => {
     const dir = home();
     writeItem(dir, { id: 'inbox-ccc', sessionId: 'session_1', expiresAt: Date.now() - 1 });

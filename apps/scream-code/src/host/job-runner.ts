@@ -44,6 +44,11 @@ import { finishRunWorktree, holdRunWorktree, prepareRunWorktree } from './worktr
  */
 export const JOB_RUN_SESSION_PREFIX = 'job-run-';
 
+/** The job a run session belongs to (`job-run-<job id>-<random>`), or undefined. */
+export function jobIdOfRunSession(sessionId: string): string | undefined {
+  return /^job-run-(job-[0-9a-f]+)-[0-9a-f]+$/.exec(sessionId)?.[1];
+}
+
 /** How often due jobs are looked for. */
 export const JOB_TICK_MS = 30_000;
 /** A due time this far in the past when the host starts is a missed window. */
@@ -60,6 +65,8 @@ const MAX_CONCURRENT_RUNS = 2;
  */
 export const JOB_RETRY_DELAY_MS = 15 * 60 * 1000;
 export const JOB_TRANSIENT_RETRIES = 2;
+/** The summary of a report run skipped because there was nothing to report. */
+export const NOTHING_TO_REPORT = '(Nothing to report: no background work, nothing waiting.)';
 const SUMMARY_CHARS = 1_500;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -82,6 +89,12 @@ export interface JobRunnerOptions {
   readonly onRun?: ((job: Job, ok: boolean) => void) | undefined;
   /** A run failed for a reason that clears by itself and runs again at `at`. */
   readonly onRetry?: ((job: Job, at: number) => void) | undefined;
+  /**
+   * A due report with nothing to report since `since` (its last run): it is
+   * recorded as done without a model call and says nothing. The daily brief
+   * used to write a brief about itself every morning.
+   */
+  readonly nothingToReport?: ((job: Job, since: number) => boolean) | undefined;
   /**
    * Where results go for a job that names no chat (made in a terminal): the
    * chat the person last wrote from, when a channel runs. Undefined: none.
@@ -258,6 +271,10 @@ export class JobRunner {
   private async run(job: Job): Promise<void> {
     const { harness } = this.options;
     const startedAt = this.now();
+    if (job.does === 'report' && this.options.nothingToReport?.(job, job.runs.at(-1)?.at ?? job.createdAt) === true) {
+      await this.finish(job, { at: startedAt, ok: true, sessionId: '', summary: NOTHING_TO_REPORT }, { quiet: true });
+      return;
+    }
     const preparation = await this.options.prepareRun?.(job).catch((error: unknown) => {
       log.warn('host: preparing a job run failed', { jobId: job.id, error: String(error) });
       return undefined;
@@ -382,6 +399,7 @@ export class JobRunner {
   private async finish(
     job: Job,
     run: { at: number; ok: boolean; sessionId: string; summary: string; notes?: string; outcomeReached?: boolean },
+    options: { readonly quiet?: boolean } = {},
   ): Promise<void> {
     const { harness, deliver, messages } = this.options;
     const previousFailures = job.consecutiveFailures;
@@ -397,6 +415,8 @@ export class JobRunner {
       log.warn('host: could not record a job run', { jobId: job.id, error: String(error) });
       return;
     }
+    // A quiet run (nothing to report) changes the schedule, not the record of what happened.
+    if (options.quiet === true) return;
     this.options.onRun?.(updated, run.ok);
     const target = updated.deliverTo ?? this.options.fallbackChat?.();
     if (target === undefined || deliver === undefined) return;
@@ -408,3 +428,22 @@ export class JobRunner {
   }
 }
 
+
+/**
+ * Whether the daily brief would only describe itself: since `since`, no
+ * background work other than the brief's own runs was recorded, nothing
+ * waits for the person and no runs were skipped.
+ */
+export function briefHasNothingToReport(input: {
+  readonly job: Job;
+  readonly since: number;
+  readonly now: number;
+  readonly activity: readonly { readonly kind: string; readonly title: string }[];
+  readonly inbox: readonly InboxItem[];
+  readonly jobs: readonly Job[];
+}): boolean {
+  const happened = input.activity.some((entry) => entry.kind !== 'waiting' && entry.title !== input.job.title);
+  if (happened) return false;
+  if (renderWaitingBlock(input.inbox, input.now) !== undefined) return false;
+  return renderSkippedBlock(input.jobs, input.now) === undefined;
+}

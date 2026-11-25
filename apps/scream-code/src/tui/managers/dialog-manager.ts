@@ -323,6 +323,28 @@ export class DialogManager {
     this.restoreEditor();
   }
 
+  /**
+   * An approval or a question waits in this terminal: when the person is away
+   * from it, the chat hears (see utils/terminal-reminders). Dropped once it is
+   * answered — the live pane no longer holds it.
+   */
+  private remindWhileAway(kind: 'approval' | 'question', id: string, what: string | undefined): void {
+    const { appState } = this.host.state;
+    if (appState.sessionId === undefined || appState.sessionId === '') return;
+    this.host.state.reminders.note({
+      state: 'waiting',
+      key: `${appState.sessionId}:${kind}:${id}`,
+      title: appState.sessionTitle ?? undefined,
+      workDir: appState.workDir,
+      waitingFor: kind,
+      ...(what === undefined ? {} : { what }),
+      stillHolds: () =>
+        kind === 'approval'
+          ? this.host.state.livePane.pendingApproval?.data.id === id
+          : this.host.state.livePane.pendingQuestion?.data.id === id,
+    });
+  }
+
   // =========================================================================
   // Approval panel
   // =========================================================================
@@ -334,6 +356,7 @@ export class DialogManager {
       title: t('dialog.approval_title'),
       body: payload.tool_name,
     });
+    this.remindWhileAway('approval', payload.id, payload.description || payload.action || payload.tool_name);
     const panel = new ApprovalPanelComponent(
       { data: payload },
       (response: ApprovalPanelResponse) => {
@@ -406,6 +429,7 @@ export class DialogManager {
       title: t('dialog.question_title'),
       body: payload.questions[0]?.question,
     });
+    this.remindWhileAway('question', payload.id, undefined);
     const dialog = new QuestionDialogComponent(
       { data: payload },
       (response) => {

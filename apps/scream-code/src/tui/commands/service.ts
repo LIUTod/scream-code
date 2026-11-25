@@ -13,7 +13,6 @@
 import { userInfo } from 'node:os';
 
 import { t } from '@scream-code/config';
-import { JobStore } from '@scream-code/scream-code-sdk';
 
 import { getHostLogFile } from '#/host/control';
 import { describeHostCheck, type HostCheckResult } from '#/host/check';
@@ -24,12 +23,6 @@ import {
   serviceManagerFor,
   uninstallService,
 } from '#/host/service';
-import { addBriefJob, isBriefJob } from '#/line/background-commands';
-import { isSelfReviewJob } from '#/host/self-review';
-import { enableSelfReview } from './jobs';
-import { loadLineConfig } from '#/line/config';
-import { loadLastChat } from '#/line/session-driver';
-import { getDataDir } from '#/utils/paths';
 import { describeServiceStart, readServiceSummary, serviceSummaryLines } from '#/host/service-summary';
 import { readHostSettings, writeHostSettings } from '#/host/settings';
 
@@ -105,7 +98,7 @@ export async function handleServiceCommand(host: SlashCommandHost): Promise<void
 async function applyServiceChoice(host: SlashCommandHost, choice: ServiceChoice): Promise<void> {
   switch (choice) {
     case 'enable':
-      if (await enableService(host)) await offerBriefOnce(host);
+      await enableService(host);
       return;
     case 'disable': {
       const result = await uninstallService();
@@ -227,87 +220,5 @@ export async function offerServiceOnce(host: SlashCommandHost): Promise<void> {
     });
     host.mountEditorReplacement(picker);
   });
-  if (yes && (await enableService(host))) await offerBriefOnce(host);
-}
-
-/**
- * Right after the service is turned on, offer the daily brief once: every day
- * at 08:30, what background work did. It goes to the chat the person last
- * wrote from, when there is one; otherwise it is kept in `/jobs` and
- * `scream report`.
- */
-async function offerBriefOnce(host: SlashCommandHost): Promise<void> {
-  // The brief is a message to the phone: without a chat channel there is
-  // nowhere to send it, and the terminal's "while you were away" note covers it.
-  const channel = await loadLineConfig().catch(() => undefined);
-  if (channel?.feishu === undefined && channel?.weixin === undefined) {
-    await offerSelfReview(host, getDataDir());
-    return;
-  }
-  if (readHostSettings().briefOffered) return;
-  writeHostSettings({ briefOffered: true });
-  const home = getDataDir();
-  if (new JobStore(home).list().some(isBriefJob)) return;
-  const chat = await loadLastChat().catch(() => undefined);
-  const yes = await new Promise<boolean>((resolve) => {
-    const picker = new ChoicePickerComponent({
-      title: t('service.brief_offer_title'),
-      details: [chat === undefined ? t('service.brief_offer_local') : t('service.brief_offer_chat')],
-      options: [
-        { value: 'yes', label: t('service.brief_offer_yes') },
-        { value: 'no', label: t('service.offer_no') },
-      ],
-      colors: host.state.theme.colors,
-      onSelect: (value: string) => {
-        resolve(value === 'yes');
-        host.restoreEditor();
-      },
-      onCancel: () => {
-        resolve(false);
-        host.restoreEditor();
-      },
-      onDispose: () => {
-        resolve(false);
-      },
-    });
-    host.mountEditorReplacement(picker);
-  });
-  if (yes) {
-    try {
-      await addBriefJob(home, { workDir: host.state.appState.workDir, deliverTo: chat });
-      host.showStatus(t('service.brief_on'));
-    } catch (error) {
-      host.showError(error instanceof Error ? error.message : String(error));
-    }
-  }
-  await offerSelfReview(host, home);
-}
-
-/** Then, once, the weekly self-review (it only proposes until the person lets it act). */
-async function offerSelfReview(host: SlashCommandHost, home: string): Promise<void> {
-  if (new JobStore(home).list().some(isSelfReviewJob)) return;
-  const yes = await new Promise<boolean>((resolve) => {
-    const picker = new ChoicePickerComponent({
-      title: t('service.self_review_offer_title'),
-      details: [t('jobs.self_review_hint')],
-      options: [
-        { value: 'yes', label: t('service.self_review_offer_yes') },
-        { value: 'no', label: t('service.offer_no') },
-      ],
-      colors: host.state.theme.colors,
-      onSelect: (value: string) => {
-        resolve(value === 'yes');
-        host.restoreEditor();
-      },
-      onCancel: () => {
-        resolve(false);
-        host.restoreEditor();
-      },
-      onDispose: () => {
-        resolve(false);
-      },
-    });
-    host.mountEditorReplacement(picker);
-  });
-  if (yes) await enableSelfReview(host);
+  if (yes) await enableService(host);
 }

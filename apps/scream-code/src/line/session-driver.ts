@@ -529,11 +529,13 @@ export class LineSessionDriver {
   }
 
   /** Send `text` to a chat with no inbound message to reply to (a background task's result). */
-  async sendToChat(sessionKey: string, text: string): Promise<void> {
-    const delivery = await this.proactiveSender?.(sessionKey, text);
-    if (delivery !== undefined && delivery !== 'sent') {
+  /** Send unsolicited text to a chat; says whether it got there (WeChat needs a message from the person first). */
+  async sendToChat(sessionKey: string, text: string): Promise<ProactiveDelivery> {
+    const delivery = (await this.proactiveSender?.(sessionKey, text)) ?? 'no-target';
+    if (delivery !== 'sent') {
       log.warn('line: could not deliver to a chat', { sessionKey, delivery });
     }
+    return delivery;
   }
 
   /**

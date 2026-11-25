@@ -154,7 +154,7 @@ export async function projectCommand(
 // ─── The "waiting for you" inbox ─────────────────────────────────────────
 
 /** How an inbox item reads in a chat, with the commands that answer it. */
-export function inboxNotice(item: InboxItem): string {
+export function inboxNotice(item: InboxItem, title?: string): string {
   if (item.kind === 'memory') {
     const lines = [`后台的工作想记住 ${String(item.memories?.length ?? 0)} 条经验（你同意前不会用到）：`];
     for (const memo of (item.memories ?? []).slice(0, 5)) lines.push(`· ${memo.userNeed}：${memo.whatWorked !== 'none' ? memo.whatWorked : memo.approach}`.slice(0, 200));
@@ -162,7 +162,7 @@ export function inboxNotice(item: InboxItem): string {
     return lines.join('\n');
   }
   if (item.kind === 'question') {
-    const lines = ['后台的工作有个问题要问你：'];
+    const lines = [title === undefined ? '后台的工作有个问题要问你：' : `⏸「${title}」在等你回答一个问题：`];
     for (const q of item.question?.items ?? []) {
       lines.push(`· ${q.question}${q.options.length === 0 ? '' : `（${q.options.join(' / ')}）`}`);
     }
@@ -170,7 +170,7 @@ export function inboxNotice(item: InboxItem): string {
     return lines.join('\n');
   }
   return [
-    '后台的工作想做一件需要你同意的事：',
+    title === undefined ? '后台的工作想做一件需要你同意的事：' : `⏸「${title}」在等你批准：`,
     item.approval?.action ?? '',
     `（${item.approval?.reason ?? ''}）`,
     '',
@@ -183,7 +183,7 @@ export function inboxNotice(item: InboxItem): string {
 export function inboxText(screamHomeDir: string): string {
   const pending = listInbox(screamHomeDir).filter((item) => item.status === 'pending');
   if (pending.length === 0) return '没有等你处理的事。';
-  return pending.map(inboxNotice).join('\n\n────\n\n');
+  return pending.map((item) => inboxNotice(item)).join('\n\n────\n\n');
 }
 
 /** `/approve <id> [always]`, `/reject <id>`, `/mine <id>`, `/answer <id> <text>`. */
