@@ -45,7 +45,10 @@ export async function runServiceCommand(action: ServiceAction): Promise<void> {
       }
       const summary = await readServiceSummary();
       out(t('service.enabled', { when: describeServiceStart(summary.status) }));
+      // The summary carries the check the install just ran through the
+      // service's launcher (or says none could run).
       for (const line of serviceSummaryLines(summary).slice(1)) out(line);
+      if (result.check !== undefined && !result.check.ok) process.exitCode = 1;
       return;
     }
     case 'uninstall': {

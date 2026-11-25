@@ -42,7 +42,14 @@ import { createChannelDriver, startChannel, type PlatformHandle } from '#/line/c
 import { assertSinglePlatformConfig, loadLineConfig, type LineConfig } from '#/line/config';
 import type { LineSessionDriver } from '#/line/session-driver';
 
-import { claimHostLock, HOST_SHUTDOWN_GRACE_MS, rotateHostLogIfNeeded } from './control';
+import {
+  claimHostLock,
+  getHostDir,
+  HOST_SHUTDOWN_GRACE_MS,
+  hostStopRequestedSince,
+  rotateHostLogIfNeeded,
+} from './control';
+import { CRASH_LIMIT, CRASH_WINDOW_MS, hostStartsFile, markHostStartClean, recordHostStart } from './host-starts';
 import { hostErr as err, hostOut as out } from './log';
 import { appendActivity } from './activity';
 import { notifyDesktop } from './desktop-notify';
@@ -75,6 +82,57 @@ const INBOX_SWEEP_MS = 15 * 1000;
 const KEEP_AWAKE_CHECK_MS = 30 * 1000;
 
 
+/** How often a service-launched host waiting behind a terminal's host tries the lock again. */
+const LOCK_WAIT_POLL_MS = 5_000;
+
+/**
+ * Wait for the host lock a terminal's host holds, trying again every few
+ * seconds (one local socket connect — nothing like the Node boot a supervisor
+ * restart costs). Ends without the lock when a stop is asked for meanwhile
+ * (`scream host stop` must leave the background stopped, not hand it to this
+ * process), when the process is told to end, or when the holder turns out to
+ * be the service's own host.
+ */
+export async function waitForTheLock(
+  info: Readonly<Record<string, unknown>>,
+  deps: {
+    readonly claim?: typeof claimHostLock;
+    readonly stopRequestedSince?: (since: number) => boolean;
+    readonly pollMs?: number;
+  } = {},
+): Promise<Awaited<ReturnType<typeof claimHostLock>> | undefined> {
+  const claim = deps.claim ?? claimHostLock;
+  const stopRequestedSince = deps.stopRequestedSince ?? hostStopRequestedSince;
+  const pollMs = deps.pollMs ?? LOCK_WAIT_POLL_MS;
+  const since = Date.now();
+  const state: { ended: boolean; wake: (() => void) | undefined } = { ended: false, wake: undefined };
+  const end = (): void => {
+    state.ended = true;
+    state.wake?.();
+  };
+  // Sleeps one poll, or less when the process is told to end.
+  const pause = (): Promise<void> =>
+    new Promise<void>((resolve) => {
+      state.wake = resolve;
+      setTimeout(resolve, pollMs);
+    });
+  process.once('SIGTERM', end);
+  process.once('SIGINT', end);
+  log.info('host: a terminal host holds the lock; waiting to take over');
+  try {
+    for (;;) {
+      await pause();
+      if (state.ended || stopRequestedSince(since)) return undefined;
+      const attempt = await claim(info);
+      if (attempt.held) return attempt;
+      if (attempt.holder?.info?.['service'] === true) return undefined;
+    }
+  } finally {
+    process.off('SIGTERM', end);
+    process.off('SIGINT', end);
+  }
+}
+
 /** Run the host in the foreground; exits the process on shutdown. */
 export async function runHost(): Promise<void> {
   // The chat channel is optional: the host also continues interrupted work.
@@ -101,26 +159,58 @@ export async function runHost(): Promise<void> {
   // One host per Scream home: the lock is held by this process for as long as
   // it lives and released by the OS however it exits.
   const serviceLaunched = process.env['SCREAM_CODE_HOST_SERVICE'] === '1';
-  const lock = await claimHostLock({ kind: 'host', service: serviceLaunched, version: getVersion() });
-  if (!lock.held) {
-    const pid = lock.holder?.pid;
-    // "Another host is running" is the steady state, not a failure — and the
-    // exit code is what the resident service reads. Its launchd job runs with
-    // KeepAlive.SuccessfulExit=false, so a non-zero exit here restarts this
-    // launcher every ThrottleInterval, forever: one log line and one Node boot
-    // per ten seconds for as long as another host lives (4908 lines and 5168
-    // spawns over two days, observed). Exit 0 when the *service's own* host
-    // holds the lock — there is nothing left to do — and keep the retry (exit
-    // 1) only while a terminal's host holds it, so the service still takes over
-    // when that one leaves.
-    process.exitCode = lock.holder?.info?.['service'] === true ? 0 : 1;
+  const lockInfo = { kind: 'host', service: serviceLaunched, version: getVersion() } as const;
+  let claimed = await claimHostLock(lockInfo);
+  // "Another host is running" is the steady state, not a failure — and the
+  // exit code is what the resident service reads: launchd
+  // (KeepAlive.SuccessfulExit=false) and systemd (Restart=on-failure) restart a
+  // non-zero exit every ten seconds, forever. That once meant one log line and
+  // one Node boot per ten seconds for as long as another host lived (4908 lines
+  // and 5168 spawns over two days, observed). So a service-launched host never
+  // exits non-zero to retry: when a terminal's host holds the lock it waits in
+  // place until that host leaves and then takes over.
+  if (!claimed.held && serviceLaunched && claimed.holder?.info?.['service'] !== true) {
+    claimed = (await waitForTheLock(lockInfo)) ?? claimed;
+  }
+  if (!claimed.held) {
+    const pid = claimed.holder?.pid;
+    // The service's own host holds it, or the wait ended (a stop was asked
+    // for, a signal): nothing to do, and exit 0 keeps the supervisor from
+    // starting another. A host started by hand or by a terminal keeps the
+    // old exit 1.
+    process.exitCode = serviceLaunched || claimed.holder?.info?.['service'] === true ? 0 : 1;
     // A person running `scream host run` by hand still deserves to be told; the
-    // service loop says nothing, because it is expected and it is what spammed
-    // the log.
+    // service says nothing, because it is expected and it is what spammed the log.
     if (!serviceLaunched) {
       err(t('cli.line.already_running', { pid: pid === undefined ? '?' : String(pid) }));
     }
     return;
+  }
+  const lock = claimed;
+
+  // A host that keeps dying must not be restarted forever either.
+  const startedAt = Date.now();
+  const startsFile = hostStartsFile(getHostDir());
+  const crashes = recordHostStart(startsFile, { at: startedAt, pid: process.pid });
+  if (crashes >= CRASH_LIMIT) {
+    err(t('host.log.crash_loop', { count: String(crashes), minutes: String(CRASH_WINDOW_MS / 60_000) }));
+    appendActivity({
+      kind: 'health',
+      title: t('host.notify.crash_loop_title'),
+      ok: false,
+      detail: t('host.notify.crash_loop_body', { count: String(crashes) }),
+    });
+    notifyDesktop(t('host.notify.crash_loop_title'), t('host.notify.crash_loop_body', { count: String(crashes) }));
+    if (serviceLaunched) {
+      // Exit 0: the supervisor leaves it stopped until the next login or a
+      // start from a terminal. The lock goes first: its listening socket
+      // would otherwise keep this process alive, holding the lock and doing
+      // nothing.
+      markHostStartClean(startsFile, process.pid, startedAt);
+      await lock.release().catch(() => {});
+      process.exitCode = 0;
+      return;
+    }
   }
   let resumer: WorkResumer | undefined;
   // Declared before the lock answers requests: a request can arrive during
@@ -215,6 +305,7 @@ export async function runHost(): Promise<void> {
     forceTimer.unref();
     void gracefulShutdown(handles, driver, resumer, jobsRef).finally(() => {
       clearTimeout(forceTimer);
+      markHostStartClean(startsFile, process.pid, startedAt);
       process.exit(0);
     });
   }
@@ -331,6 +422,16 @@ export async function runHost(): Promise<void> {
     },
     recordUsage: (tokens) => {
       addHostTokens(tokens);
+    },
+    onRetry: (job, at) => {
+      lastBusyAt = Date.now();
+      const time = new Date(at);
+      out(
+        t('host.log.job_retry', {
+          title: job.title,
+          time: `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`,
+        }),
+      );
     },
     onRun: (job, ok) => {
       lastBusyAt = Date.now();

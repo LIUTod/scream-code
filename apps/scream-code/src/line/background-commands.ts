@@ -41,7 +41,10 @@ function describe(job: Job): string {
       ? '连续失败已停用'
       : '已暂停';
   const last = job.runs.at(-1);
-  const lastText = last === undefined ? '还没运行' : `上次${last.ok ? '成功' : '失败'} ${localTime(last.at)}`;
+  const lastText =
+    last === undefined
+      ? '还没运行'
+      : `上次${last.retrying === true ? '暂时失败，稍后重试' : last.ok ? '成功' : '失败'} ${localTime(last.at)}`;
   return `${job.id}  ${job.title}\n  ${schedule} · ${job.does === 'report' ? '只汇报' : '动手做'} · ${state} · ${lastText}`;
 }
 

@@ -16,7 +16,14 @@ import { t } from '@scream-code/config';
 import { JobStore } from '@scream-code/scream-code-sdk';
 
 import { getHostLogFile } from '#/host/control';
-import { installService, restartService, serviceManagerFor, uninstallService } from '#/host/service';
+import { describeHostCheck, type HostCheckResult } from '#/host/check';
+import {
+  checkServiceEnvironment,
+  installService,
+  restartService,
+  serviceManagerFor,
+  uninstallService,
+} from '#/host/service';
 import { addBriefJob, isBriefJob } from '#/line/background-commands';
 import { isSelfReviewJob } from '#/host/self-review';
 import { enableSelfReview } from './jobs';
@@ -41,7 +48,8 @@ type ServiceChoice =
   | 'keep-awake-off'
   | 'token-limit'
   | 'notify-on'
-  | 'notify-off';
+  | 'notify-off'
+  | 'check';
 
 export async function handleServiceCommand(host: SlashCommandHost): Promise<void> {
   if (serviceManagerFor() === undefined) {
@@ -58,6 +66,7 @@ export async function handleServiceCommand(host: SlashCommandHost): Promise<void
   const options: ChoiceOption[] = summary.status.installed
     ? [
         { value: 'restart', label: t('service.restart') },
+        { value: 'check', label: t('service.check') },
         { value: 'logs', label: t('service.logs') },
         summary.keepAwake
           ? { value: 'keep-awake-off', label: t('service.toggle_keep_awake_off') }
@@ -111,6 +120,18 @@ async function applyServiceChoice(host: SlashCommandHost, choice: ServiceChoice)
     case 'logs':
       host.showStatus(t('service.logs_path', { path: getHostLogFile() }));
       return;
+    case 'check': {
+      const spinner = host.showProgressSpinner(t('host.check.running'));
+      const result = await checkServiceEnvironment();
+      if (result === undefined) {
+        spinner.stop({ ok: false, label: t('service.check_unavailable') });
+        return;
+      }
+      spinner.stop({ ok: result.ok, label: describeHostCheck(result) });
+      const note = envModelNote(result);
+      if (note !== undefined) host.showStatus(note);
+      return;
+    }
     case 'token-limit': {
       const typed = await promptTextInput(host, t('service.token_limit_title'), {
         subtitle: t('service.token_limit_hint'),
@@ -155,7 +176,22 @@ export async function enableService(host: SlashCommandHost): Promise<boolean> {
   const summary = await readServiceSummary();
   spinner.stop({ ok: true, label: t('service.enabled', { when: describeServiceStart(summary.status) }) });
   if (result.lingerOff === true) host.showStatus(t('service.linger_hint', { user: userInfo().username }));
+  // Installed is not the same as working: the service runs without this
+  // terminal's environment. Say right away when it cannot reach the model.
+  if (result.check !== undefined && !result.check.ok) host.showError(describeHostCheck(result.check));
+  const note = result.check === undefined ? undefined : envModelNote(result.check);
+  if (note !== undefined) host.showStatus(note);
   return true;
+}
+
+/**
+ * This terminal's model comes from `SCREAM_MODEL_*` variables, which the
+ * service does not have: the background then answers with another model (or
+ * none). Said once, where the person decides about the service.
+ */
+function envModelNote(check: HostCheckResult): string | undefined {
+  if ((process.env['SCREAM_MODEL_NAME'] ?? '').trim() === '') return undefined;
+  return check.ok ? t('service.check_env_model', { model: check.model ?? '' }) : t('service.check_env_model_none');
 }
 
 /**

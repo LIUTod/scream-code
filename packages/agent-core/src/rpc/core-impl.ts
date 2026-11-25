@@ -396,10 +396,13 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     const id = options.id ?? createSessionId();
     const thinkingLevel = resolveThinkingLevel(options.thinking, config);
     const permissionMode = options.permission ?? config.defaultPermissionMode;
-    const baseMcpConfig = await resolveSessionMcpConfig({
-      cwd: workDir,
-      homeDir: this.homeDir,
-    });
+    const extensions = options.extensions !== false;
+    const baseMcpConfig = extensions
+      ? await resolveSessionMcpConfig({
+          cwd: workDir,
+          homeDir: this.homeDir,
+        })
+      : undefined;
     const summary = await this.sessionStore.create({
       id,
       workDir,
@@ -411,8 +414,8 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     };
 
     await this.pluginsReady;
-    const pluginSessionStarts = this.plugins.enabledSessionStarts();
-    const mcpConfig = this.mergePluginMcpConfig(baseMcpConfig);
+    const pluginSessionStarts = extensions ? this.plugins.enabledSessionStarts() : [];
+    const mcpConfig = extensions ? this.mergePluginMcpConfig(baseMcpConfig) : undefined;
 
     // Session ctor attaches its own log sink. If anything in the setup-after-
     // ctor block throws, `session.close()` releases the sink (and mcp).

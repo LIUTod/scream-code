@@ -99,7 +99,8 @@ import { DialogManager } from './managers/dialog-manager';
 import { refreshProviderBalance, supportsBalance } from './api-balance';
 import { ChoicePickerComponent } from './components/dialogs/choice-picker';
 import { isStreaming } from './utils/app-state';
-import { peekHostSession, startHostDetached, wakeHost } from '#/host/control';
+import { peekHostSession, wakeHost } from '#/host/control';
+import { startBackground } from '#/host/service';
 import { readLastSeen, writeLastSeen } from '#/host/activity';
 import { readAwayEntries, renderAwaySummary } from './utils/jobs-status';
 
@@ -645,7 +646,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   /** After a handoff: make sure a host runs to pick the session up, and say where it went. */
   private async startHostForHandoff(): Promise<string> {
     try {
-      await startHostDetached();
+      await startBackground();
       await wakeHost();
       return t('exit.handed_off');
     } catch (error) {
@@ -775,7 +776,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     const handOver = (async () => {
       const handoff = await this.decideExitHandoff(true);
       if (handoff !== 'handoff') return;
-      await startHostDetached();
+      await startBackground();
       await wakeHost();
     })().catch(() => {});
     // Windows ends a process whose console closed after about 10 seconds.

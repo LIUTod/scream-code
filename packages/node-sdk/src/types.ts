@@ -119,6 +119,8 @@ export interface CreateSessionOptions {
   readonly profile?: SessionAgentProfile | undefined;
   /** Root the session at `workDir` exactly, skipping the ancestor walk. */
   readonly exactWorkDir?: boolean | undefined;
+  /** False: no MCP servers and no plugin session hooks (a model probe). Defaults to true. */
+  readonly extensions?: boolean | undefined;
 }
 
 export interface RenameSessionInput {

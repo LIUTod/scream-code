@@ -11,7 +11,8 @@
 import { log } from '@scream-code/scream-code-sdk';
 
 import { LineConfigError, loadLineConfig } from './config';
-import { readHostStatus, startHostDetached } from '#/host/control';
+import { readHostStatus } from '#/host/control';
+import { startBackground } from '#/host/service';
 
 export async function autoStartLineDaemonIfConfigured(): Promise<void> {
   try {
@@ -20,7 +21,7 @@ export async function autoStartLineDaemonIfConfigured(): Promise<void> {
     if (!config.autoStart) return;
     const status = await readHostStatus();
     if (status.running) return;
-    const { pid } = await startHostDetached();
+    const { pid } = await startBackground();
     log.info('line: auto-started daemon on TUI boot', { pid });
   } catch (error) {
     if (error instanceof LineConfigError) {

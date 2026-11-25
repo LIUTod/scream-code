@@ -11,12 +11,19 @@ import { LineConfigError, getLineConfigPath, loadLineConfig } from '#/line/confi
 import { t } from '@scream-code/config';
 import { getVersion } from '#/cli/version';
 import { runHost } from '#/host/run';
-import { getHostLogFile, readHostStatus, startHostDetached, stopHost } from '#/host/control';
+import { getHostLogFile, readHostStatus, stopHost } from '#/host/control';
 import { pauseAllBackgroundWork } from '#/host/pause-all';
-import { readServiceStatus, restartService } from '#/host/service';
+import { describeHostCheck, runHostCheck, writeHostCheck } from '#/host/check';
+import {
+  checkServiceEnvironment,
+  readServiceStatus,
+  restartService,
+  serviceLauncherFingerprint,
+  startBackground,
+} from '#/host/service';
 import { staleBuildLine } from '#/host/service-summary';
 
-export type LineAction = 'run' | 'start' | 'stop' | 'status' | 'restart' | 'pause';
+export type LineAction = 'run' | 'start' | 'stop' | 'status' | 'restart' | 'pause' | 'check';
 
 function out(message: string): void {
   process.stdout.write(`${message}\n`);
@@ -32,6 +39,37 @@ export async function runLineCommand(action: LineAction, surface: 'line' | 'host
     case 'run':
       await runHost();
       return;
+    case 'check': {
+      // Can the background reach the model from here? Run through the
+      // service's launcher (`SCREAM_CODE_HOST_SERVICE=1`) the answer is the
+      // service's, and it is recorded for the terminal to trust it with
+      // starting the background (see `startBackground`).
+      out(t('host.check.running'));
+      const asService = process.env['SCREAM_CODE_HOST_SERVICE'] === '1';
+      // Typed by a person on a machine with the service, "the background" is
+      // the service's: check through its launcher, with its environment —
+      // this terminal's environment would answer a question nobody asked.
+      if (!asService && (await readServiceStatus()).installed) {
+        const viaService = await checkServiceEnvironment();
+        if (viaService !== undefined) {
+          out(describeHostCheck(viaService));
+          if (!viaService.ok) process.exitCode = 1;
+          return;
+        }
+      }
+      const result = await runHostCheck();
+      if (asService) {
+        const launcher = await serviceLauncherFingerprint();
+        try {
+          writeHostCheck({ ...result, ...(launcher === undefined ? {} : { launcher }) });
+        } catch {
+          // Unwritable home: the line below still says what was found.
+        }
+      }
+      out(describeHostCheck(result));
+      if (!result.ok) process.exitCode = 1;
+      return;
+    }
     case 'start': {
       if (surface === 'line') {
         const config = await loadLineConfig();
@@ -40,7 +78,7 @@ export async function runLineCommand(action: LineAction, surface: 'line' | 'host
           return;
         }
       }
-      const { pid, alreadyRunning } = await startHostDetached();
+      const { pid, alreadyRunning } = await startBackground();
       out(
         alreadyRunning
           ? t('cli.line.already_running', { pid: String(pid) })
@@ -63,7 +101,7 @@ export async function runLineCommand(action: LineAction, surface: 'line' | 'host
         return;
       }
       await stopHost();
-      const { pid } = await startHostDetached();
+      const { pid } = await startBackground();
       out(t('cli.line.started', { pid: String(pid), log: getHostLogFile() }));
       return;
     }

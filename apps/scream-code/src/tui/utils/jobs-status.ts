@@ -9,7 +9,8 @@ import { t } from '@scream-code/config';
 import { JobStore, listInbox } from '@scream-code/scream-code-sdk';
 
 import { readActivitySince, type ActivityEntry } from '#/host/activity';
-import { readHostStatus, startHostDetached } from '#/host/control';
+import { readHostStatus } from '#/host/control';
+import { startBackground } from '#/host/service';
 import { getDataDir } from '#/utils/paths';
 
 export interface JobSummaryRow {
@@ -42,7 +43,11 @@ export async function readJobsFooterStatus(now: number = Date.now()): Promise<Jo
     const needsYou = pending.filter((item) => item.kind !== 'memory').length;
     const hostRunning = enabled > 0 ? (await readHostStatus()).running : false;
     const jobs = on
-      .map((job) => ({ title: job.title, lastOk: job.runs.at(-1)?.ok, nextRunAt: job.nextRunAt }))
+      .map((job) => {
+        const last = job.runs.at(-1);
+        // A run waiting to be retried is neither a success nor a failure yet.
+        return { title: job.title, lastOk: last?.retrying === true ? undefined : last?.ok, nextRunAt: job.nextRunAt };
+      })
       .toSorted((a, b) => (a.nextRunAt ?? Number.POSITIVE_INFINITY) - (b.nextRunAt ?? Number.POSITIVE_INFINITY));
     return { enabled, waiting, needsYou, hostRunning, jobs };
   } catch {
@@ -65,7 +70,7 @@ export async function ensureBackgroundForJobs(status: JobsFooterStatus, now: num
   if (now - lastAutoStartAt < AUTO_START_EVERY_MS) return false;
   lastAutoStartAt = now;
   try {
-    await startHostDetached();
+    await startBackground();
     return true;
   } catch {
     return false;

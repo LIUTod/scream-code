@@ -14,7 +14,8 @@ import { getVersion } from '#/cli/version';
 
 import { readHostStatus } from './control';
 import { machineHasBattery } from './keep-awake';
-import { readServiceStatus, type ServiceStatus } from './service';
+import { describeHostCheck, readHostCheck, type HostCheckResult } from './check';
+import { readServiceStatus, serviceLauncherFingerprint, type ServiceStatus } from './service';
 import { formatTokenLimit } from '#/utils/usage/token-limit';
 import { getDataDir } from '#/utils/paths';
 
@@ -44,10 +45,18 @@ export interface ServiceSummary {
   readonly dailyTokenLimit: number;
   /** Items in "waiting for you" (approvals, questions). */
   readonly waiting?: number;
+  /**
+   * The last check run through the service's current launcher (`scream host
+   * check`): whether its own environment reaches the model. Absent when none
+   * ran since the launcher was written.
+   */
+  readonly check?: HostCheckResult | undefined;
 }
 
 export async function readServiceSummary(): Promise<ServiceSummary> {
-  const [status, host] = await Promise.all([readServiceStatus(), readHostStatus()]);
+  const [status, host, launcher] = await Promise.all([readServiceStatus(), readHostStatus(), serviceLauncherFingerprint()]);
+  const lastCheck = readHostCheck();
+  const check = lastCheck !== undefined && launcher !== undefined && lastCheck.launcher === launcher ? lastCheck : undefined;
   let channel: ServiceSummary['channel'];
   try {
     const config = await loadLineConfig();
@@ -70,6 +79,7 @@ export async function readServiceSummary(): Promise<ServiceSummary> {
     tokensToday: hostTokensToday(),
     dailyTokenLimit: settings.dailyTokenLimit,
     waiting: listInbox(getDataDir()).filter((item) => item.status === 'pending' && item.expiresAt > Date.now()).length,
+    ...(check === undefined ? {} : { check }),
   };
 }
 
@@ -136,6 +146,9 @@ export function serviceSummaryLines(summary: ServiceSummary, now: number = Date.
     );
     if (drift !== undefined) lines.push(drift);
   }
+  // Whether the service's own environment reaches the model: the one thing
+  // that works in a terminal and silently fails in the background.
+  lines.push(summary.check === undefined ? t('service.check_none') : describeHostCheck(summary.check));
   const channel =
     summary.channel === 'feishu' ? 'Feishu' : summary.channel === 'weixin' ? 'WeChat' : t('service.channel_none');
   lines.push(

@@ -58,6 +58,44 @@ describe('JobStore', () => {
     ).rejects.toMatchObject({ reason: 'too_many' });
   });
 
+  it('records a retry without counting it as a failure, and the next recorded run clears it', async () => {
+    const jobs = store();
+    const job = await jobs.add(
+      { title: 'brief', prompt: 'p', starts: { kind: 'cron', cron: '30 8 * * *' }, workDir: '/w', createdBy: 'person' },
+      NOW,
+    );
+    const due = new Date(2026, 10, 18, 8, 30).getTime();
+    const retryAt = due + 15 * 60_000;
+    const retried = (await jobs.recordRetry(job.id, { at: due, ok: false, sessionId: 's1', summary: 'timeout' }, retryAt)).job;
+    expect(retried).toMatchObject({ consecutiveFailures: 0, retries: 1, nextRunAt: retryAt, enabled: true });
+    expect(retried.runs.at(-1)).toMatchObject({ ok: false, retrying: true, summary: 'timeout' });
+    // The retry is a second chance at the same due time: the run after it is recorded as usual.
+    const done = (await jobs.recordRun(job.id, { at: retryAt, ok: true, sessionId: 's2', summary: 'ok' }, retryAt)).job;
+    expect(done.retries).toBeUndefined();
+    expect(done.consecutiveFailures).toBe(0);
+    expect(done.nextRunAt).toBe(new Date(2026, 10, 19, 8, 30).getTime());
+  });
+
+  it('retries no later than the regular next run, and a one-time job at the retry time', async () => {
+    const jobs = store();
+    const hourly = await jobs.add(
+      { title: 'h', prompt: 'p', starts: { kind: 'cron', cron: '10 * * * *' }, workDir: '/w', createdBy: 'person' },
+      NOW,
+    );
+    // 08:00 + 15 min is after the regular 08:10 run, which then stands in for the retry.
+    const nextRegular = new Date(2026, 10, 18, 8, 10).getTime();
+    expect((await jobs.recordRetry(hourly.id, { at: NOW, ok: false, sessionId: 's', summary: '' }, NOW + 15 * 60_000)).job.nextRunAt).toBe(
+      nextRegular,
+    );
+    const once = await jobs.add(
+      { title: 'o', prompt: 'p', starts: { kind: 'once', at: NOW }, workDir: '/w', createdBy: 'person' },
+      NOW - 1,
+    );
+    expect((await jobs.recordRetry(once.id, { at: NOW, ok: false, sessionId: 's', summary: '' }, NOW + 900_000)).job.nextRunAt).toBe(
+      NOW + 900_000,
+    );
+  });
+
   it(`switches a job off after ${String(JOB_FATIGUE_LIMIT)} failed runs in a row, and resets on re-enable`, async () => {
     const jobs = store();
     const job = await jobs.add({ title: 't', prompt: 'p', starts: { kind: 'cron', cron: '0 9 * * *' }, workDir: '/w', createdBy: 'person' }, NOW);

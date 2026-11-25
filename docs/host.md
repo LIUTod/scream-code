@@ -20,11 +20,15 @@ The background host (`scream host`) is a scream process without a window; there 
 | Linux | systemd user unit (`~/.config/systemd/user`) | At boot, no login needed: install turns on lingering for you where that needs no password (root, or a desktop session). Otherwise at login, and `/service` tells you to run `sudo loginctl enable-linger $USER` |
 | Windows | Logon task (hidden window) | At login |
 
-The service runs a launcher script in `~/.scream-code/bin` that pins the node and scream paths and the `PATH` of the time. Every scream start checks it and rewrites it when an update or a different node version moved those paths.
+The service runs a launcher script in `~/.scream-code/bin` that pins the node and scream paths and the `PATH` of the time, plus the CA, proxy and locale settings of the shell that wrote it (`NODE_EXTRA_CA_CERTS`, `HTTPS_PROXY` and the like, `LANG`). Keys never go into it: a key lives in Scream's own credentials (`/config`). The launcher is repaired, never re-pointed: a scream start rewrites it only when the node or scream it runs is gone, and a checkout run from its sources never becomes the service. `scream service install` is how you point it at another install.
+
+A service starts without your shell's environment, so a key exported in `~/.zshrc`, a company CA or a model set through `SCREAM_MODEL_*` variables is there in the terminal and missing in the background. Install therefore runs `scream host check` through the launcher, with an environment like the service's: it opens a session the way the host does (no MCP servers, no plugins), sends one tiny request, and deletes the session. `/service` shows the result, says what to do when it failed, and can run it again (a failed check is also retried every six hours from a terminal start). Once the check passed, a terminal starts the background through the service instead of as a process of its own, so a terminal's host and the service's host never compete for the lock.
+
+A service host that still finds a terminal's host running waits for it to leave and takes over; `scream host stop` meanwhile leaves the background stopped. A host that dies three times within ten minutes is not restarted again: it says so (notification, `/service`, the log) and waits for the next login or `scream host start`.
 
 It is installed only when you choose it: `/service`, `scream service install`, or the one offer made when `/line` is first set up. Turn it off with "turn off" in `/service` or `scream service uninstall`; your data stays.
 
-`/service` also has "keep awake while work runs", on by default: while any scream process runs a turn on mains power, the host keeps the system from idling into sleep (`caffeinate` on macOS, `systemd-inhibit` on Linux, `SetThreadExecutionState` on Windows); on battery it does not. A MacBook still sleeps with its lid closed, unless an external display is attached.
+`/service` also has "keep awake while work runs", on by default: while any scream process runs a turn on mains power, the host keeps the system from idling into sleep (`caffeinate` on macOS, `systemd-inhibit` on Linux, `SetThreadExecutionState` on Windows); on battery it does not. A laptop still sleeps with its lid closed, unless an external display is attached.
 
 ## Handing work over, taking it back
 
@@ -43,7 +47,7 @@ It is installed only when you choose it: `/service`, `scream service install`, o
 - A job that **acts** inside a git repository works in its own worktree (`~/.scream-code/worktrees/`) on a branch `scream/<job>/<date-time>`. Afterwards the host commits the changes to that branch and removes the worktree; your checkout is never touched. A run that changed nothing leaves no branch.
 - A job that **only reports** cannot change anything.
 - **No need to turn on `/service` first**: with jobs on, opening a terminal starts the background, which keeps running after the terminal closes, until the computer restarts. `/service` makes it start again after a restart.
-- Jobs do not run while the background is down. When it runs again, runs missed in the last 24 hours are coalesced into one that knows how many it stands in for; older ones are skipped and noted in the brief and `scream report`. A job that fails ten runs in a row is switched off, and you are told.
+- Jobs do not run while the background is down. When it runs again, runs missed in the last 24 hours are coalesced into one that knows how many it stands in for; older ones are skipped and noted in the brief and `scream report`. A run that fails for a reason that clears by itself (a timeout, the network down, the provider overloaded) is tried again 15 minutes later, twice at most, before it counts as a failure; `/jobs` shows it as `↻`. A job that fails ten runs in a row is switched off, and you are told.
 - While the background host runs, a repeating task the agent schedules in a terminal session (every 15 minutes or less often) becomes a background job, so it keeps running after the terminal closes. One-shot reminders, more frequent ones, and tasks made in a chat stay in their session.
 - Jobs the agent makes repeat at most every 15 minutes, and at most 20 jobs are on at once. Unattended (bot mode), the agent may create jobs and delete the ones it made; deleting one you set up waits for your approval.
 - In the chat: `/jobs` lists jobs, `/brief` turns on the 08:30 daily brief, `/stop all` pauses all background work.
@@ -80,7 +84,7 @@ The weekly self-review is a built-in background job, and the only way scream imp
 ## Commands
 
 ```
-scream host [run|start|stop|status|restart|pause]   # run = in the foreground; pause stops all background work
+scream host [run|start|stop|status|restart|pause|check]   # run = in the foreground; pause stops all background work; check = can the background reach the model (through the service when one is installed)
 scream service [install|uninstall|status|restart|logs]
 scream report [--since 24h]   # what background work did: job runs, what waits, tokens today (no model call)
 ```
@@ -92,6 +96,9 @@ scream report [--since 24h]   # what background work did: job runs, what waits, 
 - `~/.scream-code/host/host.log`: the log, rotated to `host.log.1` past 5 MB
 - `~/.scream-code/host/running/`: work in progress, one file per session, written when a turn starts and removed when it ends; a file left behind means the turn was cut off
 - `~/.scream-code/host/settings.json`: `/service` settings (keep awake, daily token limit, notifications)
+- `~/.scream-code/host/check.json`: the last `scream host check` run through the service's launcher
+- `~/.scream-code/host/host-starts.json`: recent host starts, to stop a crash loop
+- `~/.scream-code/host/stop-requested.json`: when a stop was last asked for
 - `~/.scream-code/host/jobs.json`: background jobs
 - `~/.scream-code/host/usage.json`: tokens unattended work spent today
 - `~/.scream-code/host/inbox/`: what waits for you, one file per item

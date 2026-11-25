@@ -15,3 +15,4 @@ export {
   toScreamErrorPayload,
   type ScreamErrorPayload,
 } from './serialize';
+export { isTransientFailure } from './transient';

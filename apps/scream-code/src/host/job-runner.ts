@@ -24,6 +24,7 @@ import { randomBytes } from 'node:crypto';
 import {
   JOB_FATIGUE_LIMIT,
   JobStore,
+  isTransientFailure,
   listInbox,
   log,
   type InboxItem,
@@ -32,7 +33,7 @@ import {
   type Session,
 } from '@scream-code/scream-code-sdk';
 
-import { runPromptToEnd } from './run-to-end';
+import { runPromptToEnd, type RunResult } from './run-to-end';
 import { readUsage, usageTokens } from './usage';
 import { finishRunWorktree, holdRunWorktree, prepareRunWorktree } from './worktree';
 
@@ -50,6 +51,15 @@ const MISSED_GRACE_MS = 10 * 60 * 1000;
 /** Missed due times this recent are coalesced into one run; older ones are skipped and noted. */
 const MISSED_REPLAY_MS = 24 * 60 * 60 * 1000;
 const MAX_CONCURRENT_RUNS = 2;
+/**
+ * A run that failed for a reason that clears by itself (a timeout, the network
+ * down, the provider overloaded) is tried again this much later, at most
+ * {@link JOB_TRANSIENT_RETRIES} times per due time, before it counts as a
+ * failure. A daily brief that hit a slow minute then still arrives that
+ * morning instead of the next one.
+ */
+export const JOB_RETRY_DELAY_MS = 15 * 60 * 1000;
+export const JOB_TRANSIENT_RETRIES = 2;
 const SUMMARY_CHARS = 1_500;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -70,6 +80,8 @@ export interface JobRunnerOptions {
   readonly useWorktrees?: boolean;
   readonly now?: () => number;
   readonly onRun?: ((job: Job, ok: boolean) => void) | undefined;
+  /** A run failed for a reason that clears by itself and runs again at `at`. */
+  readonly onRetry?: ((job: Job, at: number) => void) | undefined;
   /**
    * Where results go for a job that names no chat (made in a terminal): the
    * chat the person last wrote from, when a channel runs. Undefined: none.
@@ -277,6 +289,7 @@ export class JobRunner {
     let ok = false;
     let summary = '';
     let outcomeReached = false;
+    let failure: RunResult['failure'];
     try {
       if (job.until.kind === 'outcome') {
         await session.createGoal(job.prompt, { completionCriterion: job.until.criterion, replace: true });
@@ -294,6 +307,7 @@ export class JobRunner {
       const context = [preparation?.context, waiting].filter((part) => part !== undefined).join('\n');
       const result = await runPromptToEnd(session, renderJobPrompt(job, startedAt, context === '' ? undefined : context));
       ok = result.ok;
+      failure = result.timedOut ? undefined : result.failure;
       summary = result.text.trim().slice(-SUMMARY_CHARS);
       if (result.timedOut) summary = `${summary}\n(Stopped: the run went past its time limit.)`.trim();
       // A run that failed without producing text used to leave `/jobs` with
@@ -301,6 +315,9 @@ export class JobRunner {
       // not act on and the next run inherited as an empty note. Name it.
       if (!ok && summary.length === 0 && !result.timedOut) {
         summary = `(Run failed without an answer: ${result.failedReason ?? 'no reason reported'})`;
+      } else if (!ok && result.failedReason !== undefined && result.failure !== undefined) {
+        // An answer cut off by the error: say what stopped it after the part that came through.
+        summary = `${summary}\n(Stopped: ${result.failedReason})`.trim();
       }
       if (job.until.kind === 'outcome') {
         outcomeReached = (await session.getGoal().catch(() => ({ goal: null }))).goal?.status === 'complete';
@@ -331,7 +348,35 @@ export class JobRunner {
     await this.options.afterRun?.(job, { ok, summary }).catch((error: unknown) => {
       log.warn('host: after a job run', { jobId: job.id, error: String(error) });
     });
+    if (!ok && isTransientFailure(failure) && (job.retries ?? 0) < JOB_TRANSIENT_RETRIES && !this.stopped) {
+      await this.retryLater(job, { at: startedAt, ok: false, sessionId: session.id, summary });
+      return;
+    }
     await this.finish(job, { at: startedAt, ok, sessionId: session.id, summary, notes: summary, outcomeReached });
+  }
+
+  /**
+   * Keep a run that failed for a reason that clears by itself and set it to
+   * run again shortly: not a failure (no streak, no "it failed" message), the
+   * notes untouched. The retries are bounded, so a provider that stays down
+   * still ends as an ordinary failure the person hears about.
+   */
+  private async retryLater(job: Job, run: { at: number; ok: false; sessionId: string; summary: string }): Promise<void> {
+    try {
+      const recorded = await this.store.recordRetry(job.id, run, this.now() + JOB_RETRY_DELAY_MS);
+      for (const dropped of recorded.dropped) {
+        if (dropped.sessionId !== '') await this.options.harness.deleteSession(dropped.sessionId).catch(() => {});
+      }
+      log.info('host: job run will be retried', {
+        jobId: job.id,
+        attempt: recorded.job.retries,
+        at: recorded.job.nextRunAt,
+      });
+      if (recorded.job.nextRunAt !== undefined) this.options.onRetry?.(recorded.job, recorded.job.nextRunAt);
+    } catch (error) {
+      // Deleted while it ran: nothing to record.
+      log.warn('host: could not record a job retry', { jobId: job.id, error: String(error) });
+    }
   }
 
   private async finish(

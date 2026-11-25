@@ -19,7 +19,8 @@ import {
   type LineConfig,
   type WeixinPlatformConfig,
 } from '#/line/config';
-import { readHostStatus, startHostDetached, stopHost } from '#/host/control';
+import { readHostStatus, stopHost } from '#/host/control';
+import { startBackground } from '#/host/service';
 import { offerServiceOnce } from './service';
 import { validateFeishuCredentials } from '#/line/feishu/client';
 import { validateWeixinToken } from '#/line/weixin/client';
@@ -419,7 +420,7 @@ async function doStart(host: SlashCommandHost): Promise<void> {
   }
   host.showStatus(t('line.starting'));
   try {
-    const { pid, alreadyRunning } = await startHostDetached();
+    const { pid, alreadyRunning } = await startBackground();
     host.showStatus(alreadyRunning ? t('line.already_running', { pid: `${pid}` }) : t('line.started', { pid: `${pid}` }));
     host.setAppState({
       lineActive: true,

@@ -26,7 +26,8 @@ import {
   type Job,
 } from '@scream-code/scream-code-sdk';
 
-import { readHostStatus, startHostDetached, wakeHost } from '#/host/control';
+import { readHostStatus, wakeHost } from '#/host/control';
+import { startBackground } from '#/host/service';
 import { pauseAllBackgroundWork } from '#/host/pause-all';
 import { addSelfReviewJob, isSelfReviewJob, selfReviewPrompt } from '#/host/self-review';
 import { loadLastChat } from '#/line/session-driver';
@@ -69,15 +70,23 @@ function stateText(job: Job): string {
   return job.nextRunAt === undefined ? t('jobs.state_ended') : t('jobs.next', { time: localTime(job.nextRunAt) });
 }
 
+/** ✓ done, ✗ failed, ↻ failed for a reason that clears by itself and runs again shortly. */
+function runMark(run: Job['runs'][number]): string {
+  if (run.retrying === true) return '↻';
+  return run.ok ? '✓' : '✗';
+}
+
 function lastRunText(job: Job): string {
   const last = job.runs.at(-1);
   if (last === undefined) return t('jobs.never_ran');
   const ok = job.runs.filter((run) => run.ok).length;
+  // A retried attempt is not a failure: it is the same run, tried again.
+  const failed = job.runs.filter((run) => !run.ok && run.retrying !== true).length;
   return t('jobs.last_run', {
-    mark: last.ok ? '✓' : '✗',
+    mark: runMark(last),
     time: localTime(last.at),
     ok: String(ok),
-    failed: String(job.runs.length - ok),
+    failed: String(failed),
   });
 }
 
@@ -137,7 +146,7 @@ async function openJobsPanel(host: SlashCommandHost): Promise<void> {
   let hostStatus = await readHostStatus();
   if (jobs.some((job) => job.enabled) && !hostStatus.running) {
     // Jobs need the background: start it rather than only saying so.
-    await startHostDetached().catch(() => undefined);
+    await startBackground().catch(() => undefined);
     hostStatus = await readHostStatus();
   }
   let reminderCount = 0;
@@ -242,7 +251,7 @@ async function openJob(host: SlashCommandHost, job: Job): Promise<void> {
   const runs = job.runs
     .slice(-RUN_LINES)
     .toReversed()
-    .map((run) => `${run.ok ? '✓' : '✗'} ${localTime(run.at)}  ${run.summary.split('\n')[0]?.slice(0, 100) ?? ''}`);
+    .map((run) => `${runMark(run)} ${localTime(run.at)}  ${run.summary.split('\n')[0]?.slice(0, 100) ?? ''}`);
   const action = await new Promise<string | undefined>((resolve) => {
     host.mountEditorReplacement(
       new ChoicePickerComponent({
@@ -437,7 +446,7 @@ export async function enableSelfReview(host: SlashCommandHost): Promise<void> {
 async function ensureBackground(host: SlashCommandHost): Promise<void> {
   if ((await readHostStatus()).running) return;
   try {
-    await startHostDetached();
+    await startBackground();
   } catch {
     host.showStatus(t('jobs.host_not_running'), host.state.theme.colors.warning);
   }

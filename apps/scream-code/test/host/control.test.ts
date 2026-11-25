@@ -10,6 +10,7 @@ import {
   getHostLogFile,
   readHostStatus,
   rotateHostLogIfNeeded,
+  hostStopRequestedSince,
   stopHost,
   wakeHost,
 } from '#/host/control';
@@ -139,5 +140,15 @@ describe('rotateHostLogIfNeeded', () => {
     writeFileSync(getHostLogFile(), 'small');
     expect(await rotateHostLogIfNeeded(1024)).toBe(false);
     expect(readFileSync(getHostLogFile(), 'utf8')).toBe('small');
+  });
+});
+
+describe('a stop request', () => {
+  it('is noted, so a service host waiting for the lock stays stopped instead of taking over', async () => {
+    const before = Date.now();
+    await stopHost();
+    expect(hostStopRequestedSince(before)).toBe(true);
+    // A host that started waiting after the stop is not held back by it.
+    expect(hostStopRequestedSince(Date.now() + 1_000)).toBe(false);
   });
 });

@@ -75,6 +75,12 @@ export interface CreateSessionPayload {
    * `.git` / `package.json` ancestor. Defaults to the ancestor walk.
    */
   readonly exactWorkDir?: boolean | undefined;
+  /**
+   * False for a session that only probes the model (`scream host check`): no
+   * MCP servers are started and no plugin session hooks run, so a check does
+   * not launch a browser or a plugin's side effects. Defaults to true.
+   */
+  readonly extensions?: boolean | undefined;
 }
 
 export interface CloseSessionPayload {

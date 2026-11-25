@@ -9,7 +9,7 @@
  * keeping the machine awake forever.
  */
 
-import type { Event, Session } from '@scream-code/scream-code-sdk';
+import type { Event, ScreamErrorPayload, Session } from '@scream-code/scream-code-sdk';
 
 /** Long enough for a goal driven for hours; short enough that a hang ends the same day. */
 export const RUN_DEADLINE_MS = 8 * 60 * 60 * 1000;
@@ -26,6 +26,12 @@ export interface RunResult {
    * wrong instead of recording a silent failure. Absent when it completed.
    */
   readonly failedReason?: string | undefined;
+  /**
+   * The error the last turn ended with (`turn.ended`'s `error`), when it
+   * failed with one: its code tells a timeout or a network that was down —
+   * worth trying again — from a failure that needs the person.
+   */
+  readonly failure?: Pick<ScreamErrorPayload, 'code' | 'message' | 'details'> | undefined;
 }
 
 export function runPromptToEnd(
@@ -40,6 +46,7 @@ export function runPromptToEnd(
     let answer = '';
     let ok = false;
     let failedReason: string | undefined;
+    let failure: RunResult['failure'];
     let finished = false;
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (result: RunResult): void => {
@@ -68,15 +75,26 @@ export function runPromptToEnd(
         answer += (event as { delta?: string }).delta ?? '';
       } else if (event.type === 'turn.ended') {
         running = Math.max(0, running - 1);
-        const ended = event as { reason?: string; tokenCapReached?: unknown };
+        const ended = event as { reason?: string; tokenCapReached?: unknown; error?: ScreamErrorPayload };
         ok = ended.reason === 'completed' && ended.tokenCapReached === undefined;
         // Kept for the caller: a run with no answer and no reason is a failure
-        // nobody can act on, and the next run inherits the same silence.
+        // nobody can act on, and the next run inherits the same silence. The
+        // error's own words and code say more than the reason does ("failed").
+        failure =
+          ok || ended.error === undefined
+            ? undefined
+            : {
+                code: ended.error.code,
+                message: ended.error.message,
+                ...(ended.error.details === undefined ? {} : { details: ended.error.details }),
+              };
         failedReason = ok
           ? undefined
-          : ended.tokenCapReached === undefined
-            ? `the turn ended with reason '${ended.reason ?? 'unknown'}'`
-            : 'the turn ended at the token cap';
+          : failure !== undefined
+            ? `${failure.message.replaceAll(/\s+/g, ' ').trim().slice(0, 200)} [${failure.code}]`
+            : ended.tokenCapReached === undefined
+              ? `the turn ended with reason '${ended.reason ?? 'unknown'}'`
+              : 'the turn ended at the token cap';
         if (running === 0) {
           settleTimer = setTimeout(() => {
             finish({
@@ -84,6 +102,7 @@ export function runPromptToEnd(
               text: answer,
               timedOut: false,
               ...(failedReason === undefined ? {} : { failedReason }),
+              ...(failure === undefined ? {} : { failure }),
             });
           }, settleMs);
         }

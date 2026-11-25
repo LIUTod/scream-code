@@ -5,7 +5,13 @@ import { join } from 'node:path';
 import { JobStore, type Event, type Job, type ScreamHarness, type Session } from '@scream-code/scream-code-sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { JOB_RUN_SESSION_PREFIX, JobRunner, renderJobPrompt } from '#/host/job-runner';
+import {
+  JOB_RETRY_DELAY_MS,
+  JOB_RUN_SESSION_PREFIX,
+  JOB_TRANSIENT_RETRIES,
+  JobRunner,
+  renderJobPrompt,
+} from '#/host/job-runner';
 
 const homes: string[] = [];
 afterEach(() => {
@@ -23,6 +29,8 @@ const NOW = new Date(2026, 10, 18, 9, 0).getTime();
 interface FakeOptions {
   readonly reply?: string;
   readonly reason?: 'completed' | 'failed';
+  /** The error `turn.ended` carries (a failed turn). */
+  readonly error?: Record<string, unknown>;
 }
 
 function fakeHarness(options: FakeOptions = {}) {
@@ -46,7 +54,11 @@ function fakeHarness(options: FakeOptions = {}) {
           setTimeout(() => {
             emit({ type: 'turn.started' });
             emit({ type: 'assistant.delta', delta: options.reply ?? 'All green.' });
-            emit({ type: 'turn.ended', reason: options.reason ?? 'completed' });
+            emit({
+              type: 'turn.ended',
+              reason: options.reason ?? 'completed',
+              ...(options.error === undefined ? {} : { error: options.error }),
+            });
           }, 1);
         },
         async createGoal() {
@@ -292,5 +304,80 @@ describe('JobRunner — a failure that produced no answer', () => {
       ok: false,
       summary: "(Run failed without an answer: the turn ended with reason 'failed')",
     });
+  });
+});
+
+describe('JobRunner — a failure that clears by itself', () => {
+  const timeout = { code: 'provider.timeout', message: 'Request timed out.', retryable: true };
+
+  it('tries again shortly instead of recording a failure, and says nothing yet', async () => {
+    const dir = home();
+    const job = await addDueJob(dir, 'line-feishu-r');
+    const { harness } = fakeHarness({ reason: 'failed', reply: '', error: timeout });
+    const deliver = vi.fn(async () => {});
+    const onRun = vi.fn();
+    const onRetry = vi.fn();
+    const runner = new JobRunner({
+      harness,
+      useWorktrees: false,
+      screamHomeDir: dir,
+      deliver,
+      messages,
+      onRun,
+      onRetry,
+      now: () => NOW,
+    });
+
+    await runner.tick();
+    await waitIdle(runner);
+
+    const after = new JobStore(dir).get(job.id)!;
+    expect(after).toMatchObject({ consecutiveFailures: 0, retries: 1, nextRunAt: NOW + JOB_RETRY_DELAY_MS });
+    expect(after.runs[0]).toMatchObject({
+      ok: false,
+      retrying: true,
+      summary: '(Run failed without an answer: Request timed out. [provider.timeout])',
+    });
+    expect(deliver).not.toHaveBeenCalled();
+    expect(onRun).not.toHaveBeenCalled();
+    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: job.id }), NOW + JOB_RETRY_DELAY_MS);
+  });
+
+  it(`counts it as a failure once ${String(JOB_TRANSIENT_RETRIES)} retries did not help`, async () => {
+    const dir = home();
+    const job = await addDueJob(dir, 'line-feishu-r');
+    const { harness } = fakeHarness({ reason: 'failed', reply: '', error: timeout });
+    const deliver = vi.fn(async () => {});
+    let now = NOW;
+    const runner = new JobRunner({ harness, useWorktrees: false, screamHomeDir: dir, deliver, messages, now: () => now });
+
+    for (let attempt = 0; attempt <= JOB_TRANSIENT_RETRIES; attempt++) {
+      await runner.tick();
+      await waitIdle(runner);
+      now += JOB_RETRY_DELAY_MS;
+    }
+
+    const after = new JobStore(dir).get(job.id)!;
+    expect(after.runs).toHaveLength(JOB_TRANSIENT_RETRIES + 1);
+    expect(after.consecutiveFailures).toBe(1);
+    expect(after.retries).toBeUndefined();
+    expect(deliver).toHaveBeenCalledTimes(1);
+    // Three runs, each waiting the real settle window.
+  }, 15_000);
+
+  it('does not retry a failure that needs the person', async () => {
+    const dir = home();
+    const job = await addDueJob(dir);
+    const { harness } = fakeHarness({
+      reason: 'failed',
+      reply: '',
+      error: { code: 'provider.auth_error', message: 'Invalid API key', retryable: false },
+    });
+    const runner = new JobRunner({ harness, useWorktrees: false, screamHomeDir: dir, messages, now: () => NOW });
+
+    await runner.tick();
+    await waitIdle(runner);
+
+    expect(new JobStore(dir).get(job.id)).toMatchObject({ consecutiveFailures: 1 });
   });
 });

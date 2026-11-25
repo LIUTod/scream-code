@@ -32,7 +32,15 @@ import { promisify } from 'node:util';
 
 import { getDataDir } from '#/utils/paths';
 
-import { getHostLogFile, startHostDetached, stopHost } from './control';
+import { launcherFingerprint, readHostCheck, type HostCheckResult } from './check';
+import {
+  getHostLogFile,
+  HOST_START_TIMEOUT_MS,
+  readHostStatus,
+  startHostDetached,
+  stopHost,
+  waitForHostHolder,
+} from './control';
 
 const execFileAsync = promisify(execFile);
 
@@ -51,6 +59,8 @@ export interface ServiceResult {
   readonly error?: string | undefined;
   /** Linux after install: lingering is off, so the unit waits for a login. */
   readonly lingerOff?: boolean | undefined;
+  /** After install: whether the service's own environment reaches the model. */
+  readonly check?: HostCheckResult | undefined;
 }
 
 interface ServicePaths {
@@ -107,19 +117,78 @@ function servicePaths(platform: NodeJS.Platform = process.platform): ServicePath
 
 // ─── Launcher ────────────────────────────────────────────────────────────
 
+/**
+ * The launcher's shape. Bumped when it changes; a launcher of an older shape
+ * is rewritten in place with the node and scream it already points at (see
+ * {@link planLauncherRefresh}). Format 2 passes its arguments on (so
+ * `scream-host.sh check` runs the check, not a host) and carries the network
+ * settings a service would otherwise lack.
+ */
+export const LAUNCHER_FORMAT = 2;
+const FORMAT_MARK = 'scream-launcher-format';
+
+/**
+ * Settings a service starts without that decide whether the model can be
+ * reached at all: a company CA, a proxy, the locale. Copied from the shell
+ * that writes the launcher when they are set. Keys and tokens never are: a key
+ * belongs in Scream's own credentials (`/login`), not in a script on disk.
+ */
+const PASSTHROUGH_ENV = [
+  'NODE_EXTRA_CA_CERTS',
+  'NODE_USE_ENV_PROXY',
+  'HTTPS_PROXY',
+  'HTTP_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'https_proxy',
+  'http_proxy',
+  'all_proxy',
+  'no_proxy',
+  'LANG',
+  'LC_ALL',
+] as const;
+
+/** The pass-through settings set in `env` (see {@link PASSTHROUGH_ENV}). */
+export function launcherEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of PASSTHROUGH_ENV) {
+    // Windows has one namespace for both spellings.
+    if (platform === 'win32' && name !== name.toUpperCase()) continue;
+    const value = env[name];
+    if (value === undefined || value.trim() === '' || /[\r\n]/.test(value)) continue;
+    // A proxy address with a user name or password in it carries a secret.
+    if (/proxy$/i.test(name) && /^[a-z][a-z0-9+.-]*:\/\/[^/]*@/i.test(value)) continue;
+    picked[name] = value;
+  }
+  return picked;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-/** The launcher script for the current runtime (node, entry file, PATH, home). */
-export function renderLauncher(manager: ServiceManager, input: {
+/** A value inside `set "NAME=value"` in a batch file: `%` would expand. */
+function batchValue(value: string): string {
+  return value.replaceAll('%', '%%');
+}
+
+export interface LauncherInput {
   readonly node: string;
   readonly execArgv: readonly string[];
   readonly entry: string;
   readonly home: string;
   readonly path: string;
   readonly log: string;
-}): string {
+  /** Pass-through settings ({@link launcherEnv}); none when omitted. */
+  readonly env?: Readonly<Record<string, string>> | undefined;
+}
+
+/** The launcher script for a runtime (node, entry file, PATH, home). */
+export function renderLauncher(manager: ServiceManager, input: LauncherInput): string {
+  const env = Object.entries(input.env ?? {});
   if (manager === 'schtasks') {
     const args = [...input.execArgv, input.entry].map((arg) => `"${arg}"`).join(' ');
     return [
@@ -130,44 +199,139 @@ export function renderLauncher(manager: ServiceManager, input: {
       // below. Switching to UTF-8 first makes cmd read the rest as written;
       // everything up to here is ASCII.
       'chcp 65001 >nul',
-      'rem Written by `scream service install`; rewritten when scream or node moves.',
-      `set "PATH=${input.path}"`,
-      `set "SCREAM_CODE_HOME=${input.home}"`,
+      `rem Written by \`scream service install\`. ${FORMAT_MARK} ${String(LAUNCHER_FORMAT)}`,
+      `set "PATH=${batchValue(input.path)}"`,
+      `set "SCREAM_CODE_HOME=${batchValue(input.home)}"`,
       'set "SCREAM_CODE_HOST_SERVICE=1"',
-      `"${input.node}" ${args} host >> "${input.log}" 2>&1`,
+      ...env.map(([name, value]) => `set "${name}=${batchValue(value)}"`),
+      `"${input.node}" ${args} host %* >> "${input.log}" 2>&1`,
       '',
     ].join('\r\n');
   }
   return [
     '#!/bin/sh',
-    '# Written by `scream service install`; rewritten when scream or node moves.',
+    `# Written by \`scream service install\`. ${FORMAT_MARK} ${String(LAUNCHER_FORMAT)}`,
     `PATH=${shellQuote(input.path)}`,
     'export PATH',
     `SCREAM_CODE_HOME=${shellQuote(input.home)}`,
     'export SCREAM_CODE_HOME',
     'SCREAM_CODE_HOST_SERVICE=1',
     'export SCREAM_CODE_HOST_SERVICE',
-    `exec ${[input.node, ...input.execArgv, input.entry].map(shellQuote).join(' ')} host >> ${shellQuote(input.log)} 2>&1`,
+    ...env.flatMap(([name, value]) => [`${name}=${shellQuote(value)}`, `export ${name}`]),
+    `exec ${[input.node, ...input.execArgv, input.entry].map(shellQuote).join(' ')} host "$@" >> ${shellQuote(input.log)} 2>&1`,
     '',
   ].join('\n');
 }
 
-function currentLauncher(manager: ServiceManager): string | undefined {
+/** What a launcher on disk runs: its node, the arguments before scream's entry, the entry, its PATH. */
+export interface LauncherRuntime {
+  readonly format: number;
+  readonly node: string;
+  readonly execArgv: readonly string[];
+  readonly entry: string;
+  readonly path: string | undefined;
+}
+
+/** Read a launcher back (any format); undefined when it is not one of ours. */
+export function parseLauncher(content: string, manager: ServiceManager): LauncherRuntime | undefined {
+  const format = Number(new RegExp(`${FORMAT_MARK} (\\d+)`).exec(content)?.[1] ?? '1');
+  if (manager === 'schtasks') {
+    const command = content.split(/\r?\n/).find((line) => line.startsWith('"') && line.includes(' host'));
+    if (command === undefined) return undefined;
+    const tokens = [...command.slice(0, command.indexOf('" host') + 1).matchAll(/"([^"]*)"/g)].map((m) => m[1]!);
+    const path = /^set "PATH=(.*)"$/m.exec(content)?.[1]?.replaceAll('%%', '%');
+    return tokens.length < 2
+      ? undefined
+      : { format, node: tokens[0]!, execArgv: tokens.slice(1, -1), entry: tokens.at(-1)!, path };
+  }
+  const command = content.split('\n').find((line) => line.startsWith('exec '));
+  if (command === undefined) return undefined;
+  const unquote = (token: string): string => token.slice(1, -1).replaceAll(`'\\''`, "'");
+  const head = command.slice(0, command.indexOf("' host") + 1);
+  const tokens = [...head.matchAll(/'(?:[^']|'\\'')*'/g)].map((m) => unquote(m[0]));
+  const pathToken = /^PATH=('(?:[^']|'\\'')*')$/m.exec(content)?.[1];
+  return tokens.length < 2
+    ? undefined
+    : {
+        format,
+        node: tokens[0]!,
+        execArgv: tokens.slice(1, -1),
+        entry: tokens.at(-1)!,
+        path: pathToken === undefined ? undefined : unquote(pathToken),
+      };
+}
+
+/** Running scream from its sources (`tsx src/main.ts`), not from an install. */
+export function isSourceEntry(entry: string): boolean {
+  return /\.[cm]?tsx?$/i.test(entry);
+}
+
+export type LauncherPlan =
+  | { readonly kind: 'keep' }
+  | { readonly kind: 'write'; readonly input: LauncherInput; readonly reason: 'missing' | 'broken' | 'format' };
+
+/**
+ * Whether a start should rewrite the service's launcher, and with what.
+ *
+ * A launcher is repaired, never re-pointed: it keeps running the scream it
+ * was installed with for as long as that still exists. It used to follow
+ * whichever scream started last, so running a checkout from its sources once
+ * moved the person's resident service onto that checkout, and the next
+ * installed start moved it back. `scream service install` is how a person
+ * points it somewhere else.
+ *
+ * - no launcher, or not one we can read, or its node or entry is gone: write
+ *   the current runtime — unless the current run is from sources, which must
+ *   never become the service;
+ * - an older format: rewrite it in the new shape around the node, arguments,
+ *   entry and PATH it already has;
+ * - otherwise keep it as it is.
+ */
+export function planLauncherRefresh(
+  existing: string | undefined,
+  manager: ServiceManager,
+  current: LauncherInput | undefined,
+  exists: (path: string) => boolean,
+): LauncherPlan {
+  const parsed = existing === undefined ? undefined : parseLauncher(existing, manager);
+  const canUseCurrent = current !== undefined && !isSourceEntry(current.entry);
+  if (parsed === undefined) return canUseCurrent ? { kind: 'write', input: current, reason: 'missing' } : { kind: 'keep' };
+  if (!exists(parsed.node) || !exists(parsed.entry)) {
+    return canUseCurrent ? { kind: 'write', input: current, reason: 'broken' } : { kind: 'keep' };
+  }
+  if (parsed.format < LAUNCHER_FORMAT && current !== undefined) {
+    return {
+      kind: 'write',
+      reason: 'format',
+      input: {
+        ...current,
+        node: parsed.node,
+        execArgv: parsed.execArgv,
+        entry: parsed.entry,
+        path: parsed.path ?? current.path,
+      },
+    };
+  }
+  return { kind: 'keep' };
+}
+
+function currentLauncherInput(): LauncherInput | undefined {
   const entry = process.argv[1];
   if (entry === undefined || entry === '') return undefined;
-  return renderLauncher(manager, {
+  return {
     node: process.execPath,
     execArgv: process.execArgv,
     entry: resolve(entry),
     home: getDataDir(),
     path: process.env['PATH'] ?? '',
     log: getHostLogFile(),
-  });
+    env: launcherEnv(),
+  };
 }
 
-async function writeLauncher(paths: ServicePaths): Promise<boolean> {
-  const content = currentLauncher(paths.manager);
-  if (content === undefined) return false;
+async function writeLauncher(paths: ServicePaths, input: LauncherInput | undefined = currentLauncherInput()): Promise<boolean> {
+  if (input === undefined) return false;
+  const content = renderLauncher(paths.manager, input);
   const existing = await readFile(paths.launcher, 'utf8').catch(() => undefined);
   if (existing === content) return false;
   await mkdir(join(getDataDir(), 'bin'), { recursive: true });
@@ -178,8 +342,9 @@ async function writeLauncher(paths: ServicePaths): Promise<boolean> {
 }
 
 /**
- * Keep an installed service's launcher pointing at the scream that runs now
- * (called on every start). Does nothing when no service is installed.
+ * Keep an installed service's launcher working (called on every start): repair
+ * it when what it runs is gone, bring an old one up to the current shape.
+ * Does nothing when no service is installed (see {@link planLauncherRefresh}).
  */
 export async function refreshServiceLauncher(): Promise<void> {
   const paths = servicePaths();
@@ -195,7 +360,9 @@ export async function refreshServiceLauncher(): Promise<void> {
   // service here" and skip the repair forever, while the definition went on
   // executing a file that did not exist.
   if (!(await serviceDefinitionInstalled(paths))) return;
-  await writeLauncher(paths).catch(() => {});
+  const existing = await readFile(paths.launcher, 'utf8').catch(() => undefined);
+  const plan = planLauncherRefresh(existing, paths.manager, currentLauncherInput(), existsSync);
+  if (plan.kind === 'write') await writeLauncher(paths, plan.input).catch(() => {});
 }
 
 /**
@@ -347,7 +514,7 @@ export async function installService(): Promise<ServiceResult> {
       const legacy = await run('launchctl', ['load', '-w', plist]);
       if (!legacy.ok) return { ok: false, error: loaded.output };
     }
-    return { ok: true };
+    return { ok: true, check: await checkServiceEnvironment() };
   }
 
   if (paths.manager === 'systemd') {
@@ -358,7 +525,7 @@ export async function installService(): Promise<ServiceResult> {
     if (!reload.ok) return { ok: false, error: reload.output };
     const enabled = await run('systemctl', ['--user', 'enable', '--now', paths.name]);
     if (!enabled.ok) return { ok: false, error: enabled.output };
-    return { ok: true, lingerOff: (await ensureLinger()) === false };
+    return { ok: true, lingerOff: (await ensureLinger()) === false, check: await checkServiceEnvironment() };
   }
 
   // Windows: a logon task running the launcher in a hidden console. The task
@@ -382,7 +549,7 @@ export async function installService(): Promise<ServiceResult> {
     // The task exists and runs at the next logon; start this session's host now.
     await startHostDetached().catch(() => {});
   }
-  return { ok: true };
+  return { ok: true, check: await checkServiceEnvironment() };
 }
 
 /** Remove the service (and stop its host). The Scream home and its data stay. */
@@ -411,7 +578,13 @@ export async function uninstallService(): Promise<ServiceResult> {
 export async function restartService(): Promise<ServiceResult> {
   const paths = servicePaths();
   if (paths === undefined) return { ok: false, error: `unsupported platform: ${process.platform}` };
-  await writeLauncher(paths).catch(() => false);
+  // Repair only: a restart from a checkout must not move the service onto it.
+  await refreshServiceLauncher();
+  // A host a terminal started holds the lock: restarting the service would
+  // only make the service's host wait behind it. Stop it first, so the host
+  // that runs afterwards is the service's own.
+  const holder = await readHostStatus();
+  if (holder.running && holder.service !== true) await stopHost().catch(() => false);
   if (paths.manager === 'launchd') {
     const kicked = await run('launchctl', ['kickstart', '-k', `${launchdDomain()}/${paths.name}`]);
     return kicked.ok ? { ok: true } : { ok: false, error: kicked.output };
@@ -423,4 +596,126 @@ export async function restartService(): Promise<ServiceResult> {
   await stopHost().catch(() => false);
   const started = await run('schtasks', ['/Run', '/TN', paths.name]);
   return started.ok ? { ok: true } : { ok: false, error: started.output };
+}
+
+// ─── The service's own environment ───────────────────────────────────────
+
+/**
+ * Roughly what a service starts with on macOS and Linux: launchd and systemd
+ * give a user agent its identity and little else — no shell profile, so no
+ * exported key, CA or proxy. The launcher adds PATH, the home and the
+ * pass-through settings itself. (Windows gives a logon task the user's stored
+ * environment, which this process cannot tell apart from its own: there the
+ * check runs with this environment.)
+ */
+function serviceLikeEnv(): NodeJS.ProcessEnv {
+  if (process.platform === 'win32') return process.env;
+  const kept: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' };
+  for (const name of ['HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS']) {
+    const value = process.env[name];
+    if (value !== undefined) kept[name] = value;
+  }
+  return kept;
+}
+
+/**
+ * Run `scream host check` through the service's launcher, in an environment
+ * like the service's, and return what it found (it records it itself, see
+ * `host/check.ts`). Undefined when there is no launcher of the current format
+ * to run: an older launcher does not pass arguments on, and would start a
+ * host instead of a check.
+ */
+export async function checkServiceEnvironment(): Promise<HostCheckResult | undefined> {
+  const paths = servicePaths();
+  if (paths === undefined) return undefined;
+  const content = await readFile(paths.launcher, 'utf8').catch(() => undefined);
+  const parsed = content === undefined ? undefined : parseLauncher(content, paths.manager);
+  if (parsed === undefined || parsed.format < LAUNCHER_FORMAT) return undefined;
+  const startedAt = Date.now();
+  const options = { env: serviceLikeEnv(), timeout: 150_000, windowsHide: true };
+  // A failed check exits non-zero: its result is in the file either way.
+  if (paths.manager === 'schtasks') {
+    // A batch file runs through cmd.exe; the path is quoted for it.
+    await execFileAsync(`"${paths.launcher}"`, ['check'], { ...options, shell: true }).catch(() => {});
+  } else {
+    await execFileAsync('/bin/sh', [paths.launcher, 'check'], options).catch(() => {});
+  }
+  const result = readHostCheck();
+  return result !== undefined && result.at >= startedAt - 1_000 ? result : undefined;
+}
+
+/**
+ * Whether the installed service may be the one that starts the background:
+ * a service is installed, and the last check run through its current launcher
+ * reached the model. Files only, no subprocess.
+ */
+export async function serviceCanStartBackground(): Promise<boolean> {
+  const paths = servicePaths();
+  if (paths === undefined || !(await serviceDefinitionInstalled(paths))) return false;
+  const content = await readFile(paths.launcher, 'utf8').catch(() => undefined);
+  if (content === undefined) return false;
+  const check = readHostCheck();
+  return check?.ok === true && check.launcher === launcherFingerprint(content);
+}
+
+/** The fingerprint of the service launcher on disk (what a service-run check stamps). */
+export async function serviceLauncherFingerprint(): Promise<string | undefined> {
+  const paths = servicePaths();
+  if (paths === undefined) return undefined;
+  const content = await readFile(paths.launcher, 'utf8').catch(() => undefined);
+  return content === undefined ? undefined : launcherFingerprint(content);
+}
+
+async function startServiceNow(paths: ServicePaths): Promise<boolean> {
+  if (paths.manager === 'launchd') {
+    // Without -k: start it when it is not running, leave it when it is.
+    return (await run('launchctl', ['kickstart', `${launchdDomain()}/${paths.name}`])).ok;
+  }
+  if (paths.manager === 'systemd') return (await run('systemctl', ['--user', 'start', paths.name])).ok;
+  return (await run('schtasks', ['/Run', '/TN', paths.name])).ok;
+}
+
+/**
+ * Start the background: through the installed service when it can be trusted
+ * to reach the model, otherwise as a process of this terminal's own.
+ *
+ * Every place that needs the background up goes through here. While a
+ * service is installed, a host started by a terminal is the one thing that
+ * fights it — the service's host then waits behind a lock it cannot take —
+ * so the service starts it whenever it can. It is trusted only after a check
+ * through its own launcher passed: a terminal has the person's environment, a
+ * service does not, and switching to the service must never turn a working
+ * background into one that cannot find its key. If the service does not come
+ * up in time, the terminal starts the host itself, as before.
+ */
+export async function startBackground(): Promise<{ pid: number; alreadyRunning: boolean }> {
+  const status = await readHostStatus();
+  if (status.running && status.pid !== undefined) return { pid: status.pid, alreadyRunning: true };
+  const paths = servicePaths();
+  if (paths !== undefined && (await serviceCanStartBackground()) && (await startServiceNow(paths))) {
+    const holder = await waitForHostHolder(HOST_START_TIMEOUT_MS);
+    if (holder !== undefined) return { pid: holder, alreadyRunning: false };
+  }
+  return startHostDetached();
+}
+
+/** A failed check is tried again this much later, so a fixed key is noticed without a reinstall. */
+const RECHECK_FAILED_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * On a terminal start: when a service is installed but nothing says yet
+ * whether its environment reaches the model (it was installed by a version
+ * without the check, or its launcher changed since), run the check in the
+ * background. Until it passes the terminal keeps starting the background
+ * itself, as before. Cheap when there is nothing to do: file reads only.
+ */
+export async function ensureServiceChecked(now: number = Date.now()): Promise<void> {
+  const paths = servicePaths();
+  if (paths === undefined || !(await serviceDefinitionInstalled(paths))) return;
+  const content = await readFile(paths.launcher, 'utf8').catch(() => undefined);
+  if (content === undefined) return;
+  const check = readHostCheck();
+  const current = check?.launcher === launcherFingerprint(content);
+  if (current && (check.ok || now - check.at < RECHECK_FAILED_MS)) return;
+  await checkServiceEnvironment();
 }

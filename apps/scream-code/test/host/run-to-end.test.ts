@@ -69,6 +69,25 @@ describe('runPromptToEnd — why a run failed', () => {
     });
   });
 
+  it('names the error the turn failed with, code included, so a timeout can be told apart', async () => {
+    const { value } = session((emit) => {
+      emit({ type: 'turn.started', agentId: 'main' });
+      emit({
+        type: 'turn.ended',
+        agentId: 'main',
+        reason: 'failed',
+        error: { code: 'provider.timeout', message: 'Request timed out.', retryable: true },
+      });
+    });
+    await expect(runPromptToEnd(value, 'go', { settleMs: 10 })).resolves.toEqual({
+      ok: false,
+      text: '',
+      timedOut: false,
+      failedReason: 'Request timed out. [provider.timeout]',
+      failure: { code: 'provider.timeout', message: 'Request timed out.' },
+    });
+  });
+
   it('names the token cap, and says nothing when the turn completed', async () => {
     const capped = session((emit) => {
       emit({ type: 'turn.started', agentId: 'main' });

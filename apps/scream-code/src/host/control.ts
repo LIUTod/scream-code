@@ -28,6 +28,7 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir, open, readFile, rm, stat, truncate } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -56,6 +57,8 @@ const STOP_MARGIN_MS = 10_000;
 const LEGACY_STOP_GRACE_MS = 8_000;
 const STOP_POLL_MS = 250;
 const START_TIMEOUT_MS = 10_000;
+/** How long a start waits for the new host to take the lock. */
+export const HOST_START_TIMEOUT_MS = START_TIMEOUT_MS;
 export const LOG_ROTATE_BYTES = 5 * 1024 * 1024;
 
 export interface HostStatus {
@@ -235,6 +238,7 @@ export async function restartHostInBackground(): Promise<boolean> {
  * did not answer or did not finish in time.
  */
 export async function stopHost(options: { readonly onWaiting?: () => void } = {}): Promise<boolean> {
+  noteStopRequested();
   const query = await queryProcessLock(lockOptions());
   if (!query.held) return stopLegacyDaemon();
 
@@ -361,6 +365,40 @@ async function stopLegacyDaemon(): Promise<boolean> {
 // ─── Internals ────────────────────────────────────────────────────────────
 
 /** The pid of the host holding the lock, once one does. */
+function stopMarkerFile(): string {
+  return join(getHostDir(), 'stop-requested.json');
+}
+
+/**
+ * Leave a note that the background was asked to stop. A service-launched host
+ * waiting for the lock (a terminal's host holds it) would otherwise take the
+ * lock the moment that host stops and bring the background straight back:
+ * `scream host stop` has to mean stopped. Best effort.
+ */
+function noteStopRequested(now: number = Date.now()): void {
+  try {
+    mkdirSync(getHostDir(), { recursive: true });
+    writeFileSync(stopMarkerFile(), `${JSON.stringify({ at: now })}\n`, { encoding: 'utf8', mode: 0o600 });
+  } catch {
+    // The stop itself still happens.
+  }
+}
+
+/** Whether a stop was asked for after `since` (see {@link noteStopRequested}). */
+export function hostStopRequestedSince(since: number): boolean {
+  try {
+    const at = (JSON.parse(readFileSync(stopMarkerFile(), 'utf8')) as { at?: unknown }).at;
+    return typeof at === 'number' && at >= since;
+  } catch {
+    return false;
+  }
+}
+
+/** The pid of the host once one holds the lock, or undefined after `timeoutMs`. */
+export async function waitForHostHolder(timeoutMs: number): Promise<number | undefined> {
+  return waitForHolder(timeoutMs);
+}
+
 async function waitForHolder(timeoutMs: number): Promise<number | undefined> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

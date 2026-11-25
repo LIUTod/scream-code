@@ -13,7 +13,7 @@ export type ServiceCommandHandler = (action: 'install' | 'uninstall' | 'status' 
 export type PluginNodeRunnerHandler = (entry: string, args: readonly string[]) => void;
 
 export type LineCommandHandler = (
-  action: 'run' | 'start' | 'stop' | 'status' | 'restart' | 'pause',
+  action: 'run' | 'start' | 'stop' | 'status' | 'restart' | 'pause' | 'check',
   surface?: 'line' | 'host',
 ) => void;
 
@@ -138,6 +138,7 @@ export function createProgram(
     ['status', t('cli.line.cmd_status')],
     ['restart', t('cli.line.cmd_restart')],
     ['pause', t('cli.host.cmd_pause')],
+    ['check', t('cli.host.cmd_check')],
   ] as const;
   for (const [action, description] of hostActions) {
     hostCmd

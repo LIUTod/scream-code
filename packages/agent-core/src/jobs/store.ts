@@ -59,6 +59,12 @@ export interface JobRun {
   readonly sessionId: string;
   /** The run's final answer, shortened. */
   readonly summary: string;
+  /**
+   * A failure that clears by itself (a timeout, the network down) that the
+   * runner will try again shortly: shown in the history, not counted as a
+   * failure (see {@link JobStore.recordRetry}).
+   */
+  readonly retrying?: boolean | undefined;
 }
 
 export interface Job {
@@ -86,6 +92,8 @@ export interface Job {
   readonly missedRuns?: number | undefined;
   /** Due times skipped because they were missed too long ago (for the brief and the report). */
   readonly lastSkipped?: { readonly count: number; readonly at: number } | undefined;
+  /** Retries already spent on the current due time (cleared by a recorded run). */
+  readonly retries?: number | undefined;
 }
 
 export interface NewJob {
@@ -352,7 +360,37 @@ export class JobStore {
         notes: (run.notes ?? current.notes).slice(0, MAX_NOTES_CHARS),
         nextRunAt,
         missedRuns: undefined,
+        retries: undefined,
         ...(disabledReason === undefined ? {} : { enabled: false, disabledReason }),
+      };
+      jobs[index] = job;
+      return { job, dropped };
+    });
+  }
+
+  /**
+   * Record a run that failed for a reason that clears by itself and set it to
+   * run again at `retryAt` (or at its next regular time, when that comes
+   * first). Nothing else moves: the failure streak, the notes and the missed
+   * runs it stands in for stay as they were, so the retry is the same run
+   * given a second chance, not a new one.
+   */
+  async recordRetry(id: string, run: JobRun, retryAt: number): Promise<{ job: Job; dropped: readonly JobRun[] }> {
+    return withJobsLock(this.screamHomeDir, (jobs) => {
+      const index = jobs.findIndex((job) => job.id === id);
+      if (index === -1) throw new JobError('not_found', `No background task ${id}.`);
+      const current = jobs[index]!;
+      const runs = [
+        ...current.runs,
+        { at: run.at, ok: false, sessionId: run.sessionId, summary: run.summary, retrying: true },
+      ];
+      const dropped = runs.splice(0, Math.max(0, runs.length - JOB_RUNS_KEPT));
+      const regular = current.starts.kind === 'once' ? undefined : nextJobRun(current, run.at);
+      const job: Job = {
+        ...current,
+        runs,
+        retries: (current.retries ?? 0) + 1,
+        nextRunAt: regular === undefined ? retryAt : Math.min(regular, retryAt),
       };
       jobs[index] = job;
       return { job, dropped };

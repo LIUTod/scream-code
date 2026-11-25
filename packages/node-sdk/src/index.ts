@@ -41,6 +41,7 @@ export {
   SCREAM_ERROR_INFO,
   fromScreamErrorPayload,
   isScreamError,
+  isTransientFailure,
   toScreamErrorPayload,
 } from '@scream-code/agent-core';
 

@@ -13,7 +13,8 @@ import { getHostDir } from './control';
 
 export interface ActivityEntry {
   readonly at: number;
-  readonly kind: 'job' | 'continued' | 'waiting';
+  /** `health`: the background itself is in trouble (it keeps crashing, it cannot reach the model). */
+  readonly kind: 'job' | 'continued' | 'waiting' | 'health';
   readonly title: string;
   /** Job run or continued work: whether it finished well. */
   readonly ok?: boolean | undefined;
