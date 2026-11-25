@@ -195,7 +195,10 @@ describe('WaitTool', () => {
   });
 
   it('tail_lines caps the trailing output lines', async () => {
-    const proc = resolvableProcess('l1\nl2\nl3\nl4\nl5\n');
+    // Markers carry a hyphen on purpose: the report repeats the task id at the
+    // top, the id is `bash-` plus eight random base36 characters, and a one-letter
+    // marker appeared inside it often enough to fail this test at random.
+    const proc = resolvableProcess('line-1\nline-2\nline-3\nline-4\nline-5\n');
     const taskId = manager.register(proc, 'echo lines', 'tail cap');
     await new Promise<void>((resolve) => {
       setImmediate(resolve);
@@ -210,8 +213,8 @@ describe('WaitTool', () => {
     );
     const content = toolContentString(result);
     expect(content).toContain('tail (last 2 lines):');
-    expect(content).toContain('l4\nl5');
-    expect(content).not.toContain('l3');
+    expect(content).toContain('line-4\nline-5');
+    expect(content).not.toContain('line-3');
   });
 
   it('a task with no output reports "[no output available]" in the tail', async () => {
