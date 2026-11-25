@@ -1914,6 +1914,7 @@ export const zh: Record<string, string> = {
   'line.reminders_mode_away': '后台 + 离开时的终端',
   'line.reminders_mode_background': '只发后台',
   'line.reminders_mode_off': '关闭',
+  'host.restarted_on_build': '后台已更新到 {version}',
   'host.check.running': '正在检查后台能否连上模型…',
   'host.check.ok': '后台环境：能连上模型（{model}）',
   'host.check.no_model': '后台环境：没有可用的模型。在终端里用 /model 设一个默认模型（只靠 SCREAM_MODEL_* 环境变量配置的模型，后台读不到）',

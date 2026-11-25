@@ -45,6 +45,7 @@ import type { LineSessionDriver } from '#/line/session-driver';
 import {
   claimHostLock,
   getHostDir,
+  HOST_RESTART_EXIT_CODE,
   HOST_SHUTDOWN_GRACE_MS,
   hostStopRequestedSince,
   rotateHostLogIfNeeded,
@@ -236,6 +237,10 @@ export async function runHost(): Promise<void> {
   // `stop` asks through the lock, so a stop is graceful on every platform (on
   // Windows a signal would end the process at once); `sweep` is a terminal
   // saying it just handed work over.
+  // Read by the request handler below, which can run during any await of the
+  // boot: declared here so it never touches them before they exist.
+  let driver: LineSessionDriver | undefined;
+  let shuttingDown = false;
   lock.onRequest((request) => {
     if (request.type === 'stop') {
       setImmediate(() => {
@@ -272,6 +277,20 @@ export async function runHost(): Promise<void> {
         return { ok };
       })();
     }
+    // A terminal runs a newer build than this host (an upgrade does not restart
+    // it): leave now if nothing is in flight. A service-launched host exits
+    // with HOST_RESTART_EXIT_CODE so the service starts the new build; another
+    // is started again by the terminal that asked.
+    if (request.type === 'restart-if-idle') {
+      if (shuttingDown) return { ok: false, error: 'shutting_down' };
+      const busy =
+        (resumer?.busy() ?? false) || (jobsRef?.busy() ?? false) || (driver?.pendingTurnCount() ?? 0) > 0;
+      if (busy) return { ok: false, busy: true };
+      setImmediate(() => {
+        shutdownRun('restart on the installed build', serviceLaunched ? HOST_RESTART_EXIT_CODE : 0);
+      });
+      return { ok: true, service: serviceLaunched };
+    }
     if (request.type === 'sweep') {
       lastBusyAt = Date.now();
       void resumer?.sweep();
@@ -285,7 +304,6 @@ export async function runHost(): Promise<void> {
     void rotateHostLogIfNeeded();
   }, LOG_ROTATE_CHECK_MS).unref();
 
-  let driver: LineSessionDriver | undefined;
   const harness = new ScreamHarness({
     homeDir: resolveScreamHome(),
     identity: createScreamCodeHostIdentity(),
@@ -315,8 +333,7 @@ export async function runHost(): Promise<void> {
   const handles: PlatformHandle[] = [];
   const failures: string[] = [];
 
-  let shuttingDown = false;
-  function shutdownRun(reason: string): void {
+  function shutdownRun(reason: string, exitCode = 0): void {
     if (shuttingDown) return;
     shuttingDown = true;
     keepAwakeRef?.release();
@@ -331,7 +348,7 @@ export async function runHost(): Promise<void> {
     void gracefulShutdown(handles, driver, resumer, jobsRef, outboxRef).finally(() => {
       clearTimeout(forceTimer);
       markHostStartClean(startsFile, process.pid, startedAt);
-      process.exit(0);
+      process.exit(exitCode);
     });
   }
   // Uncaught exception: broken state — a hard exit. The lock is released by

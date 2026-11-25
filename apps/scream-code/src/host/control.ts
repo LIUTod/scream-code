@@ -59,6 +59,14 @@ const STOP_POLL_MS = 250;
 const START_TIMEOUT_MS = 10_000;
 /** How long a start waits for the new host to take the lock. */
 export const HOST_START_TIMEOUT_MS = START_TIMEOUT_MS;
+/**
+ * The exit code of a service-launched host that leaves to be restarted on a
+ * new build. launchd (`KeepAlive.SuccessfulExit=false`) and systemd
+ * (`Restart=on-failure`) restart any non-zero exit; 75 (EX_TEMPFAIL) says
+ * "try again", and the host marks the exit clean, so the crash guard does
+ * not count it.
+ */
+export const HOST_RESTART_EXIT_CODE = 75;
 export const LOG_ROTATE_BYTES = 5 * 1024 * 1024;
 
 export interface HostStatus {
@@ -159,6 +167,30 @@ export async function remindHost(reminder: Readonly<Record<string, unknown>>, ke
     () => undefined,
   )) as { ok?: boolean } | undefined;
   return reply?.ok === true;
+}
+
+/**
+ * Ask the background to restart on the build now installed, when it has
+ * nothing in flight. `busy`: it is working (ask again later). `service`: a
+ * service launched it, and the service restarts it; otherwise the caller
+ * starts the new one.
+ */
+export async function restartHostIfIdle(): Promise<{
+  ok: boolean;
+  busy?: boolean;
+  service?: boolean;
+  /** A host from before this request: it cannot say whether it is idle. */
+  unsupported?: boolean;
+}> {
+  const reply = (await requestProcessLock(lockOptions(), { type: 'restart-if-idle', token: controlToken() }).catch(
+    () => undefined,
+  )) as { ok?: boolean; busy?: boolean; service?: boolean; error?: string } | undefined;
+  return {
+    ok: reply?.ok === true,
+    ...(reply?.busy === true ? { busy: true } : {}),
+    ...(reply?.service === true ? { service: true } : {}),
+    ...(reply?.error === 'unsupported' ? { unsupported: true } : {}),
+  };
 }
 
 export interface HostSessionPeek {

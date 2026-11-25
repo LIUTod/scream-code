@@ -40,6 +40,8 @@ import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
 import { readActivitySince } from '#/host/activity';
+import { restartStaleBackground } from '#/host/stale-build';
+import { getVersion } from '#/cli/version';
 import { hostShowsDesktopNotifications } from '#/host/desktop-notify';
 import { readHostSettings } from '#/host/settings';
 import { installTerminalThemeTracking } from '../utils/terminal-theme';
@@ -360,6 +362,14 @@ export class LifecycleController {
       this.host.setAppState({ jobsEnabled: status.enabled, jobsWaiting: status.waiting, jobsHostRunning: status.hostRunning });
     };
     const sync = (): void => {
+      // An upgrade leaves the background on the build it loaded: move it to
+      // this one once it is idle (host/stale-build.ts; asked at most every
+      // few minutes, and only when the background is older).
+      void restartStaleBackground().then((outcome) => {
+        if (outcome === 'restarted') {
+          this.host.showStatus(t('host.restarted_on_build', { version: getVersion() }), this.host.state.theme.colors.textDim);
+        }
+      });
       void readJobsFooterStatus().then(async (status) => {
         apply(status);
         if (await ensureBackgroundForJobs(status)) {

@@ -1923,6 +1923,7 @@ export const en: Record<string, string> = {
   'line.reminders_mode_away': 'background and away',
   'line.reminders_mode_background': 'background only',
   'line.reminders_mode_off': 'off',
+  'host.restarted_on_build': 'The background now runs {version}',
   'host.check.running': 'Checking whether the background can reach the model…',
   'host.check.ok': 'Background: reaches the model ({model})',
   'host.check.no_model': 'Background: no model to use. Set a default model with /model (a model set only through SCREAM_MODEL_* variables is not visible to the background)',

@@ -383,10 +383,10 @@ function xmlEscape(value: string): string {
 
 export function renderLaunchAgent(label: string, launcher: string): string {
   // KeepAlive.SuccessfulExit=false: restarted after a crash, left stopped after
-  // a clean `scream host stop` (exit 0) until the next login. So `scream host`
-  // must exit 0 once *any* host it was meant to be is running — including "the
-  // service's own host already holds the lock" — and only keep exiting non-zero
-  // while a terminal's host owns it, which is the one case worth retrying.
+  // a clean `scream host stop` (exit 0) until the next login. The exit code is
+  // the contract: 0 = stay stopped (a stop, or another host already runs);
+  // non-zero = start me again — a crash, or HOST_RESTART_EXIT_CODE (75) on
+  // purpose, to come back on a newly installed build. Never non-zero to retry.
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -415,8 +415,9 @@ export function renderLaunchAgent(label: string, launcher: string): string {
 }
 
 export function renderSystemdUnit(launcher: string): string {
-  // Restart=on-failure: restarted after a crash, left stopped after a clean
-  // `scream host stop` (exit 0).
+  // Restart=on-failure: restarted after a crash or a restart on purpose
+  // (exit 75, a new build), left stopped after a clean `scream host stop`
+  // (exit 0). See renderLaunchAgent for the exit code contract.
   return `[Unit]
 Description=Scream background host
 After=network-online.target
@@ -718,4 +719,16 @@ export async function ensureServiceChecked(now: number = Date.now()): Promise<vo
   const current = check?.launcher === launcherFingerprint(content);
   if (current && (check.ok || now - check.at < RECHECK_FAILED_MS)) return;
   await checkServiceEnvironment();
+}
+
+/**
+ * Whether the installed service runs `entry` (the scream of this process):
+ * only then does restarting the service bring this build up.
+ */
+export async function serviceRunsEntry(entry: string): Promise<boolean> {
+  const paths = servicePaths();
+  if (paths === undefined) return false;
+  const content = await readFile(paths.launcher, 'utf8').catch(() => undefined);
+  const parsed = content === undefined ? undefined : parseLauncher(content, paths.manager);
+  return parsed !== undefined && resolve(parsed.entry) === resolve(entry);
 }
