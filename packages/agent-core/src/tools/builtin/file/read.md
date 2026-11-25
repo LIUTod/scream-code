@@ -8,7 +8,7 @@ When you need several files, prefer to read them in parallel: emit multiple `Rea
 - Sensitive files (`.env` files, credential stores, SSH keys, and similar secrets) are refused to protect secrets; do not attempt to read them.
 - Only UTF-8 text files can be read. Non-UTF-8 encodings, binary files, and files containing NUL bytes are refused; use `ReadMediaFile` for images or video, and Bash or an MCP tool for other binary formats.
 - Output format: `<line-number>\t<content>` per line.
-- A `<system>...</system>` status block is appended after the file content; it summarizes how much was read (line and byte counts, truncation, line-ending notes) and is not part of the file itself. The status block includes an `Anchor: <hash>` value that can be passed to `Edit.anchor` to verify the file has not changed before editing.
+- A `<system>...</system>` status block is appended after the file content; it summarizes how much was read (line and byte counts, truncation, line-ending notes) and is not part of the file itself. The status block includes an `Anchor: <hash>` value: pass it as `Edit.anchor` with a line-range edit (`start_line` / `end_line`) so Edit knows which view the line numbers refer to. A string edit (`old_string`) needs no anchor.
 - Pure CRLF files are displayed with LF line endings; `Edit` matches this output and preserves CRLF when writing back.
 - Mixed or lone carriage-return line endings are shown as `\r` and require exact `Edit.old_string` escapes.
 - After a successful `Edit`/`Write`, do not re-read solely to prove the write landed. When the task depends on an exact file, API, or output shape, inspect the final external contract before finishing.

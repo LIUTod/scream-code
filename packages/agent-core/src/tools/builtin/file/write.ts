@@ -17,6 +17,7 @@ import type { ToolResultDisplay } from '../../display';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { countLines, fileDiffDetails } from '../../support/file-diff';
 import type { EditRecoveryQueue } from '../../support/edit-recovery-queue';
+import type { EditSnapshotStore } from '../../support/edit-snapshot-store';
 import { renameArgAliases } from '../../support/arg-aliases';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
@@ -24,6 +25,7 @@ import { withFileMutationLock } from './mutation-queue';
 import { scanCache } from '../../support/scan-cache';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { scanConflictLines } from './conflict-detect';
+import { computeAnchor, toModelTextView } from './line-endings';
 import {
   fetchDiagnostics,
   formatDiagnosticsHint,
@@ -110,6 +112,12 @@ export class WriteTool implements BuiltinTool<WriteInput> {
      * observation that path gets.
      */
     private readonly editRecovery?: EditRecoveryQueue,
+    /**
+     * Session snapshot store: what a Write leaves on disk is a view the model
+     * produced itself, so a later Edit still carrying the anchor of an
+     * earlier Read is recognised as working across its own change.
+     */
+    private readonly editSnapshots?: EditSnapshotStore,
   ) {}
 
   async resolveExecution(args: WriteInput): Promise<ToolExecution> {
@@ -178,6 +186,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
         await this.jian.writeText(safePath, args.content);
       }
       scanCache.clear();
+      this.rememberWrittenView(mode === 'append' ? (existing.kind === 'text' ? existing.text + args.content : undefined) : args.content, safePath);
       // Report the number of UTF-8 bytes this call wrote to disk. The string
       // length would only equal the byte count for pure ASCII content, so it
       // is not used here.
@@ -232,6 +241,13 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     if (existing.kind === 'unavailable') return undefined;
     const before = existing.kind === 'missing' ? '' : existing.text;
     return fileDiffDisplay(before, before + content, content);
+  }
+
+  /** Record what is now on disk as the model's own view (unknown append bases are skipped). */
+  private rememberWrittenView(text: string | undefined, safePath: string): void {
+    if (text === undefined || this.editSnapshots === undefined) return;
+    const view = toModelTextView(text).text;
+    this.editSnapshots.remember(safePath, { content: view, anchor: computeAnchor(view), recordedAt: 'edit' });
   }
 
   /**

@@ -126,7 +126,7 @@ describe('EditTool', () => {
     expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'alpha gamma');
   });
 
-  it('fails when the provided anchor does not match the current file content', async () => {
+  it('applies a string edit whose old_string still matches despite a stale anchor, and says the file changed', async () => {
     const writeText = vi.fn().mockResolvedValue(0);
     const tool = new EditTool(
       createFakeJian({
@@ -145,9 +145,10 @@ describe('EditTool', () => {
       }),
     );
 
-    expect(result.isError).toBe(true);
-    expect(result.output).toContain('anchor no longer matches');
-    expect(writeText).not.toHaveBeenCalled();
+    // old_string is its own proof: it matched the current text exactly.
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'alpha gamma');
+    expect(result.output).toContain('changed since the Read your anchor came from (not by your edits)');
   });
 
   it('replaces a unique first occurrence and writes the updated content', async () => {
@@ -570,8 +571,11 @@ describe('EditTool', () => {
         anchor: sharedAnchor,
       }),
     );
+    // The text it targets is gone (the first edit replaced it): a miss,
+    // which also says the anchor's view is out of date.
     expect(second.isError).toBe(true);
-    expect(second.output).toContain('anchor no longer matches');
+    expect(second.output).toContain('old_string not found');
+    expect(second.output).toContain('changed since the Read your anchor came from');
   });
 
   it('refuses to edit strictly inside an unresolved merge conflict block', async () => {
@@ -2188,6 +2192,9 @@ describe('EditTool stale-anchor recovery', () => {
     '/tmp/recover-empty-store.txt',
     '/tmp/recover-no-store.txt',
     '/tmp/recover-str.txt',
+    '/tmp/recover-own.txt',
+    '/tmp/recover-own-range.txt',
+    '/tmp/recover-own-touch.txt',
     '/tmp/recover-anchor.txt',
     '/tmp/recover-rollback.ts',
     '/tmp/recover-stable.ts',
@@ -2517,7 +2524,7 @@ describe('EditTool stale-anchor recovery', () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('hard-rejects str_replace mode even with a usable snapshot', async () => {
+  it('applies a string edit against the current text when the file changed under an unknown anchor', async () => {
     const read = 'alpha beta';
     const changed = 'alpha beta!';
     const store = new EditSnapshotStore();
@@ -2534,11 +2541,93 @@ describe('EditTool stale-anchor recovery', () => {
       }),
     );
 
-    expect(result.isError).toBe(true);
-    expect(result.output).toBe(
-      `File has changed since last read. The anchor no longer matches (expected deadbeef, got ${computeAnchor(changed)}). Please re-read the file and retry.`,
+    expect(result.isError).toBeFalsy();
+    // The external change ("!") is kept: the replacement runs on the current text.
+    expect(writeText).toHaveBeenCalledWith('/tmp/recover-str.txt', 'X beta!');
+    expect(result.output).toContain('not by your edits');
+  });
+
+  it('applies a string edit carrying the anchor from before its own earlier edit, without a warning', async () => {
+    let disk = 'one\ntwo\nthree\n';
+    const store = new EditSnapshotStore();
+    const readAnchor = readSnapshotOf(disk).anchor;
+    store.remember('/tmp/recover-own.txt', { ...readSnapshotOf(disk), recordedAt: 'read' });
+    const writeText = vi.fn().mockImplementation(async (_path: string, text: string) => {
+      disk = text;
+      return 0;
+    });
+    const tool = new EditTool(
+      createFakeJian({ readText: vi.fn().mockImplementation(() => Promise.resolve(disk)), writeText }),
+      PERMISSIVE_WORKSPACE,
+      undefined,
+      undefined,
+      store,
     );
-    expect(writeText).not.toHaveBeenCalled();
+
+    const first = await executeTool(tool, context({ path: '/tmp/recover-own.txt', old_string: 'one', new_string: 'ONE', anchor: readAnchor }));
+    const second = await executeTool(tool, context({ path: '/tmp/recover-own.txt', old_string: 'three', new_string: 'THREE', anchor: readAnchor }));
+
+    expect(first.isError).toBeFalsy();
+    expect(second.isError).toBeFalsy();
+    expect(disk).toBe('ONE\ntwo\nTHREE\n');
+    expect(second.output).not.toContain('changed since');
+  });
+
+  it('carries a line range across the model’s own earlier edit of the same file', async () => {
+    let disk = 'a\nb\nc\nd\ne\n';
+    const store = new EditSnapshotStore();
+    const readAnchor = readSnapshotOf(disk).anchor;
+    store.remember('/tmp/recover-own-range.txt', { ...readSnapshotOf(disk), recordedAt: 'read' });
+    const writeText = vi.fn().mockImplementation(async (_path: string, text: string) => {
+      disk = text;
+      return 0;
+    });
+    const tool = new EditTool(
+      createFakeJian({ readText: vi.fn().mockImplementation(() => Promise.resolve(disk)), writeText }),
+      PERMISSIVE_WORKSPACE,
+      undefined,
+      undefined,
+      store,
+    );
+
+    // Insert two lines at the top, then target "d" by its number in the Read (4).
+    await executeTool(tool, context({ path: '/tmp/recover-own-range.txt', old_string: 'a\n', new_string: 'x\ny\na\n', anchor: readAnchor }));
+    const range = await executeTool(
+      tool,
+      context({ path: '/tmp/recover-own-range.txt', new_string: 'D', start_line: 4, end_line: 4, anchor: readAnchor }),
+    );
+
+    expect(range.isError).toBeFalsy();
+    expect(disk).toBe('x\ny\na\nb\nc\nD\ne\n');
+    expect(range.output).toContain('carried across your earlier edit');
+  });
+
+  it('refuses a line range whose lines the model’s own edit already changed, and says so', async () => {
+    let disk = 'a\nb\nc\n';
+    const store = new EditSnapshotStore();
+    const readAnchor = readSnapshotOf(disk).anchor;
+    store.remember('/tmp/recover-own-touch.txt', { ...readSnapshotOf(disk), recordedAt: 'read' });
+    const writeText = vi.fn().mockImplementation(async (_path: string, text: string) => {
+      disk = text;
+      return 0;
+    });
+    const tool = new EditTool(
+      createFakeJian({ readText: vi.fn().mockImplementation(() => Promise.resolve(disk)), writeText }),
+      PERMISSIVE_WORKSPACE,
+      undefined,
+      undefined,
+      store,
+    );
+
+    await executeTool(tool, context({ path: '/tmp/recover-own-touch.txt', old_string: 'b', new_string: 'B', anchor: readAnchor }));
+    const range = await executeTool(
+      tool,
+      context({ path: '/tmp/recover-own-touch.txt', new_string: 'Z', start_line: 2, end_line: 2, anchor: readAnchor }),
+    );
+
+    expect(range.isError).toBe(true);
+    expect(range.output).toContain('Your earlier edit changed the lines you are targeting');
+    expect(disk).toBe('a\nB\nc\n');
   });
 
   it('hard-rejects when the snapshot anchor differs from the supplied anchor', async () => {

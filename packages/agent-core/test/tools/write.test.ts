@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type WriteInput, WriteInputSchema, WriteTool } from '../../src/tools/builtin/file/write';
 import { fileDiffSummary } from '../../src/tools/support/file-diff';
+import { EditSnapshotStore } from '../../src/tools/support/edit-snapshot-store';
+import { computeAnchor } from '../../src/tools/builtin/file/line-endings';
 import {
   EDIT_RECOVERY_INSTRUCTION,
   EditRecoveryQueue,
@@ -111,6 +113,19 @@ describe('WriteTool', () => {
     expect(tool.description).toMatch(/large/i);
     expect(tool.description).toMatch(/split[^.]*multiple calls/i);
     expect(tool.description).toMatch(/first[^.]*overwrite[^.]*then[^.]*append/i);
+  });
+
+  it('records what it wrote as the model’s own view, so later edits know the change was theirs', async () => {
+    const store = new EditSnapshotStore();
+    store.remember('/tmp/new.txt', { content: 'old\n', anchor: computeAnchor('old\n'), recordedAt: 'read' });
+    const writeText = vi.fn().mockResolvedValue(6);
+    const tool = new WriteTool(createFakeJian({ writeText, stat: DIR_STAT }), PERMISSIVE_WORKSPACE, undefined, undefined, store);
+
+    const result = await executeTool(tool, context({ path: '/tmp/new.txt', content: 'fresh\n' }));
+
+    expect(result.isError).toBeFalsy();
+    expect(store.recall('/tmp/new.txt')).toEqual({ content: 'fresh\n', anchor: computeAnchor('fresh\n'), recordedAt: 'edit' });
+    expect(store.changedOnlyByOwnEdits('/tmp/new.txt', computeAnchor('old\n'), 'fresh\n')).toBe(true);
   });
 
   it('writes content through jian and reports bytes written', async () => {

@@ -22,7 +22,7 @@ export class WorkingSetInjector extends DynamicInjector {
       'Files this task is likely to involve:',
       ...paths.map((p) => `- ${p}`),
       '',
-      'Check these first, and do not re-read files that have not changed.',
+      'Check these first. Read a file again only when the part you need is no longer in view; after your own edits you do not need to.',
     ].join('\n');
 
     if (this.injectedAt !== null && text === this.lastInjectedText) return undefined;

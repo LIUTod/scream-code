@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  EDIT_SNAPSHOT_HISTORY,
   EDIT_SNAPSHOT_MAX_PATHS,
+  EDIT_SNAPSHOT_TOTAL_BYTES,
   EditSnapshotStore,
   type EditSnapshot,
 } from '../../src/tools/support/edit-snapshot-store';
@@ -69,5 +71,51 @@ describe('EditSnapshotStore', () => {
     store.remember('/small.ts', snapshotOf('S'));
     store.remember('/big.ts', snapshotOf(oversized));
     expect(store.recall('/small.ts')).toEqual(snapshotOf('S'));
+  });
+
+  it('keeps the views before the latest, so an older anchor still resolves', () => {
+    const store = new EditSnapshotStore();
+    store.remember('/a.ts', snapshotOf('read'));
+    store.remember('/a.ts', snapshotOf('edit1', 'edit'));
+    store.remember('/a.ts', snapshotOf('edit2', 'edit'));
+
+    expect(store.recall('/a.ts')).toEqual(snapshotOf('edit2', 'edit'));
+    expect(store.recallAnchor('/a.ts', 'anchor-read')).toEqual(snapshotOf('read'));
+    expect(store.recallAnchor('/a.ts', 'anchor-nope')).toBeUndefined();
+  });
+
+  it('tells a change made only by the model’s own edits from any other', () => {
+    const store = new EditSnapshotStore();
+    store.remember('/a.ts', snapshotOf('read'));
+    store.remember('/a.ts', snapshotOf('mine', 'edit'));
+
+    expect(store.changedOnlyByOwnEdits('/a.ts', 'anchor-read', 'mine')).toBe(true);
+    // The disk holds something else than our last apply: someone else changed it.
+    expect(store.changedOnlyByOwnEdits('/a.ts', 'anchor-read', 'theirs')).toBe(false);
+    // A Read after the anchor's view is not an own edit.
+    store.remember('/b.ts', snapshotOf('first'));
+    store.remember('/b.ts', snapshotOf('second'));
+    expect(store.changedOnlyByOwnEdits('/b.ts', 'anchor-first', 'second')).toBe(false);
+  });
+
+  it('keeps a bounded history per path and re-reads do not fill it twice', () => {
+    const store = new EditSnapshotStore();
+    store.remember('/a.ts', snapshotOf('read'));
+    store.remember('/a.ts', snapshotOf('read'));
+    for (let i = 0; i < EDIT_SNAPSHOT_HISTORY; i += 1) store.remember('/a.ts', snapshotOf(`e${String(i)}`, 'edit'));
+
+    // The oldest view fell out of the history; the newest ones remain.
+    expect(store.recallAnchor('/a.ts', 'anchor-read')).toBeUndefined();
+    expect(store.recallAnchor('/a.ts', `anchor-e${String(EDIT_SNAPSHOT_HISTORY - 1)}`)).toBeDefined();
+  });
+
+  it('drops older views first when the total budget is exceeded', () => {
+    const store = new EditSnapshotStore();
+    const chunk = 'x'.repeat(2 * 1024 * 1024 - 16);
+    const count = Math.ceil(EDIT_SNAPSHOT_TOTAL_BYTES / chunk.length) + 2;
+    for (let i = 0; i < count; i += 1) store.remember(`/p${String(i)}.ts`, snapshotOf(`${chunk}${String(i)}`));
+    // The newest path always survives; the oldest went to stay within budget.
+    expect(store.recall(`/p${String(count - 1)}.ts`)).toBeDefined();
+    expect(store.recall('/p0.ts')).toBeUndefined();
   });
 });

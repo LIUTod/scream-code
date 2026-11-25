@@ -111,7 +111,7 @@ export const EditInputSchema = z
       .string()
       .optional()
       .describe(
-        'Content anchor from the most recent Read of this file. When provided, Edit verifies the file content has not changed before applying the replacement. Required for line-range edits.',
+        'Content anchor from a Read of this file. Required for line-range edits: it tells Edit which view your line numbers refer to, so they are carried across your own later edits. Not needed for old_string edits, which match the current text themselves.',
       ),
   })
   .superRefine((args, ctx) => {
@@ -283,6 +283,8 @@ interface RecoveryContext {
   readonly originalEndLine: number;
   readonly preApplyErrorCount: number | undefined;
   readonly preApplyText: string;
+  /** The change since the model's Read was its own edits, not someone else's. */
+  readonly ownChange: boolean;
 }
 
 /**
@@ -529,26 +531,33 @@ export class EditTool implements BuiltinTool<EditInput> {
         }
       }
 
-      if (args.anchor !== undefined) {
-        if (currentAnchor !== args.anchor) {
-          // replace_range gets one recovery attempt: the snapshot store may
-          // still hold the view the model's line numbers refer to, and a
-          // window can be remapped across an external change. old_string mode
-          // stays a hard reject — an exact-match replace has no meaningful
-          // remap.
-          if (startLine !== undefined && endLine !== undefined) {
-            return await this.attemptStaleAnchorRecovery(
-              args,
-              startLine,
-              endLine,
-              content,
-              modelView,
-              raw,
-              safePath,
-            );
-          }
-          return anchorMismatchError(args.anchor, currentAnchor);
+      // A string edit carries its own proof: old_string either matches the
+      // current text or it does not. A stale anchor on one (models pass the
+      // anchor of their last Read on every Edit, and their own earlier edit
+      // changes it) is therefore not a reason to refuse — refusing it was the
+      // most common Edit failure, and the one that pushed models to edit files
+      // through the shell instead. It only shapes what the result says.
+      let staleAnchorNote: string | undefined;
+      if (args.anchor !== undefined && currentAnchor !== args.anchor) {
+        // replace_range gets one recovery attempt: the snapshot store may
+        // still hold the view the model's line numbers refer to, and a
+        // window can be remapped across the change since.
+        if (startLine !== undefined && endLine !== undefined) {
+          return await this.attemptStaleAnchorRecovery(
+            args,
+            startLine,
+            endLine,
+            content,
+            modelView,
+            raw,
+            safePath,
+          );
         }
+        const ownChange = this.editSnapshots?.changedOnlyByOwnEdits(safePath, args.anchor, content) === true;
+        staleAnchorNote = ownChange
+          ? undefined
+          : `Note: ${args.path} changed since the Read your anchor came from (not by your edits). ` +
+            'The replacement matched the current text; Read the file again before relying on other parts of that earlier view.';
       }
 
       if (startLine !== undefined && endLine !== undefined) {
@@ -582,10 +591,14 @@ export class EditTool implements BuiltinTool<EditInput> {
 
         if (count === 0) {
           const lineCount = content.split('\n').length;
+          const changedSinceAnchor =
+            args.anchor !== undefined && currentAnchor !== args.anchor
+              ? 'The file changed since the Read your anchor came from. '
+              : '';
           return {
             isError: true,
             output:
-              `old_string not found in ${args.path} (file has ${String(lineCount)} lines). ` +
+              `old_string not found in ${args.path} (file has ${String(lineCount)} lines). ${changedSinceAnchor}` +
               'The file contents may be out of date — re-read with the Read tool. ' +
               'If you already re-read, verify old_string matches exactly: indentation, trailing whitespace, and line endings (LF vs CRLF) must all match the Read output view.',
           };
@@ -617,7 +630,7 @@ export class EditTool implements BuiltinTool<EditInput> {
         // fix-then-re-verify gate still picks the edit up.
         const output = assembleEditOutput(
           `Replaced 1 occurrence in ${args.path}`,
-          this.staleReadWarning(args, safePath),
+          staleAnchorNote ?? this.staleReadWarning(args, safePath),
           notice,
         );
         const message = hint.length > 0 ? hint : undefined;
@@ -655,7 +668,7 @@ export class EditTool implements BuiltinTool<EditInput> {
       // fix-then-re-verify gate still picks the edit up.
       const output = assembleEditOutput(
         `Replaced ${String(replacementCount)} occurrences in ${args.path}`,
-        this.staleReadWarning(args, safePath),
+        staleAnchorNote ?? this.staleReadWarning(args, safePath),
         notice,
       );
       const message = hint.length > 0 ? hint : undefined;
@@ -696,12 +709,13 @@ export class EditTool implements BuiltinTool<EditInput> {
     const hardReject = (): ExecutableToolResult =>
       anchorMismatchError(args.anchor ?? '', computeAnchor(content));
 
-    const snapshot = this.editSnapshots?.recall(safePath);
-    if (snapshot === undefined) return hardReject();
     // The model's line numbers describe the view its anchor was computed
-    // from. A snapshot from a different view (e.g. our own post-edit record
-    // when the model skipped re-reading) cannot remap them.
-    if (snapshot.anchor !== args.anchor) return hardReject();
+    // from: find that view in the file's history. It is often the model's own
+    // Read from before its own earlier edits, which the remap below carries
+    // the numbers across like any other change.
+    const snapshot = this.editSnapshots?.recallAnchor(safePath, args.anchor ?? '');
+    if (snapshot === undefined) return hardReject();
+    const ownChange = this.editSnapshots?.changedOnlyByOwnEdits(safePath, args.anchor ?? '', content) === true;
     // Identical content would have matched the anchor above, so reaching this
     // point with equal texts is a data anomaly — refuse rather than remap
     // against untrusted state.
@@ -728,10 +742,12 @@ export class EditTool implements BuiltinTool<EditInput> {
 
     const guardAError = (externalEdit: string): ExecutableToolResult => ({
       isError: true,
-      output:
-        `The file changed externally in the region you are targeting (your lines ` +
-        `${String(startLine)}-${String(endLine)} shifted by the external edit ${externalEdit}). ` +
-        'Re-read the file and re-anchor before retrying.',
+      output: ownChange
+        ? `Your earlier edit changed the lines you are targeting (lines ${String(startLine)}-${String(endLine)} ` +
+          `of your last Read; the change ${externalEdit}). Use old_string for this edit, or Read the file again for current line numbers.`
+        : `The file changed externally in the region you are targeting (your lines ` +
+          `${String(startLine)}-${String(endLine)} shifted by the external edit ${externalEdit}). ` +
+          'Re-read the file and re-anchor before retrying.',
     });
 
     const mappedStart = mapping.mapSnapshotLine(startLine);
@@ -806,6 +822,7 @@ export class EditTool implements BuiltinTool<EditInput> {
         originalEndLine: endLine,
         preApplyErrorCount,
         preApplyText: raw,
+        ownChange,
       },
     );
   }
@@ -930,9 +947,13 @@ export class EditTool implements BuiltinTool<EditInput> {
     const recoveryNote =
       recovery === undefined
         ? undefined
-        : `Note: the file changed externally since your read; your line range was remapped ` +
-          `(snapshot lines ${String(recovery.originalStartLine)}-${String(recovery.originalEndLine)} → ` +
-          `current lines ${String(startLine)}-${String(endLine)}). Verify the result before continuing.`;
+        : recovery.ownChange
+          ? `Note: your line range was carried across your earlier edit of this file ` +
+            `(lines ${String(recovery.originalStartLine)}-${String(recovery.originalEndLine)} of your last Read → ` +
+            `current lines ${String(startLine)}-${String(endLine)}).`
+          : `Note: the file changed externally since your read; your line range was remapped ` +
+            `(snapshot lines ${String(recovery.originalStartLine)}-${String(recovery.originalEndLine)} → ` +
+            `current lines ${String(startLine)}-${String(endLine)}). Verify the result before continuing.`;
 
     // Diagnostics are appended to the (model-visible) output so the model
     // can self-correct in the same turn; the install hint travels on the
