@@ -1,12 +1,12 @@
 /**
  * Renders a user message in the transcript.
  *
- * With `/hl` on (the default) the message sits on a faint band — the
- * terminal's own background stepped a little lighter or darker
- * (`userMessageBg`, see `theme/code-surface.ts`) — only as tall as its text,
- * with the `■` mark in the user colour and the text in the normal colour. Off
- * (or below 256 colours, where a band cannot be drawn faintly), the message
- * keeps its plain look: the mark and the text in the user colour.
+ * The mark and the text are in the user colour (yellow on dark themes,
+ * orange-red on light ones), bold. With `/hl` on (the default) they sit on a
+ * soft band — a light grey on a dark terminal, a soft dark grey on a light
+ * one, derived from its own background (`userMessageBg`, see
+ * `theme/code-surface.ts`) — only as tall as the text. Off (or below 256
+ * colours, where a band cannot be drawn softly) there is no band.
  *
  * A very long message (a pasted log) shows its head and tail with the number
  * of lines in between, so it cannot fill the screen; the full text stays in
@@ -35,7 +35,7 @@ export class UserMessageComponent implements Component {
   private readonly isSystemReminder: boolean;
   private readonly textComponent: Text;
   private readonly textContent: string;
-  /** What the text is styled with now: the palette colour and whether it is on a band. */
+  /** The colour the text is styled with now (the palette can change under it). */
   private textStyle: string | undefined;
   private readonly spacerComponent: Spacer;
   private readonly imageThumbnails: ImageThumbnail[];
@@ -73,10 +73,10 @@ export class UserMessageComponent implements Component {
     // no per-frame disk IO); the cache key carries it and the colours in use,
     // so a toggle or a theme change shows on the next frame.
     const banded = !this.isSystemReminder && isUserMessageHighlightEnabled() && chalk.level >= 2;
-    const key = [width, banded, colors.roleUser, colors.text, colors.userMessageBg, colors.textDim].join('|');
+    const key = [width, banded, colors.roleUser, colors.userMessageBg, colors.textDim].join('|');
     if (this.cachedLines !== undefined && this.cachedKey === key) return this.cachedLines;
 
-    this.styleText(banded ? `band:${colors.text}` : `plain:${colors.roleUser}`, banded);
+    this.styleText(colors.roleUser);
     const mark = chalk.hex(colors.roleUser).bold(USER_MESSAGE_BULLET);
     const markWidth = visibleWidth(mark);
     const contentWidth = Math.max(1, width - markWidth);
@@ -109,16 +109,11 @@ export class UserMessageComponent implements Component {
     return lines;
   }
 
-  /** Restyles the text only when the look changed: rewrapping on every frame is not free. */
-  private styleText(style: string, banded: boolean): void {
-    if (this.textStyle === style) return;
-    this.textStyle = style;
-    // On the band the text is the reply's own colour at normal weight — the
-    // band and the mark already set it apart; without one, the user colour
-    // in bold does that job.
-    this.textComponent.setText(
-      banded ? chalk.hex(this.colors.text)(this.textContent) : chalk.bold(chalk.hex(this.colors.roleUser)(this.textContent)),
-    );
+  /** Restyles the text only when its colour changed: rewrapping on every frame is not free. */
+  private styleText(color: string): void {
+    if (this.textStyle === color) return;
+    this.textStyle = color;
+    this.textComponent.setText(chalk.bold(chalk.hex(color)(this.textContent)));
     this.textComponent.invalidate();
   }
 

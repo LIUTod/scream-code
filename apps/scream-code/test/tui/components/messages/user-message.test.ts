@@ -42,7 +42,7 @@ describe('UserMessageComponent', () => {
     expect(out).toContain('[video #1 sample.mov]');
   });
 
-  it('puts the message on a faint full-width band only as tall as its text, the mark in the user colour', () => {
+  it('puts the message on a soft full-width band only as tall as its text, in the user colour', () => {
     const rows = new UserMessageComponent('first line\nsecond line', darkColors).render(60);
 
     // One spacer row above, then exactly the two text rows: no padding rows.
@@ -55,9 +55,10 @@ describe('UserMessageComponent', () => {
     }
     expect(stripAnsi(rows[1]!)).toMatch(/^■ first line +$/);
     expect(stripAnsi(rows[2]!)).toMatch(/^ {2}second line +$/);
-    // The mark keeps the user colour; the text is the reply's own, not bold.
+    // The mark and the text keep the user colour, bold; only the background changed.
     expect(rows[1]).toContain(fg(darkColors.roleUser));
-    expect(rows[1]).toContain(fg(darkColors.text));
+    expect(rows[1]).not.toContain(fg(darkColors.text));
+    expect(rows[1]).toContain('\u001B[1m');
     expect(rows[1]).not.toContain(bg('#f7e308'));
   });
 
@@ -81,10 +82,14 @@ describe('UserMessageComponent', () => {
   it('follows a theme change made in place, without being rebuilt', () => {
     const colors: ColorPalette = { ...darkColors };
     const component = new UserMessageComponent('hello', colors);
-    expect(component.render(40)[1]).toContain(bg(darkColors.userMessageBg));
+    const dark = component.render(40)[1]!;
+    expect(dark).toContain(bg(darkColors.userMessageBg));
+    expect(dark).toContain(fg(darkColors.roleUser));
 
     Object.assign(colors, lightColors);
-    expect(component.render(40)[1]).toContain(bg(lightColors.userMessageBg));
+    const light = component.render(40)[1]!;
+    expect(light).toContain(bg(lightColors.userMessageBg));
+    expect(light).toContain(fg(lightColors.roleUser));
   });
 
   it('shows the head and tail of a very long message with the rows between counted', () => {
