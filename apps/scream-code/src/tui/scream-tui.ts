@@ -90,7 +90,7 @@ import { createTUIState, type TUIState } from './tui-state';
 import { formatErrorMessage } from './utils/event-payload';
 import { ImageAttachmentStore } from './utils/image-attachment-store';
 import { hasPatchChanges } from './utils/object-patch';
-import { setProcessTitle } from './utils/proctitle';
+import { TerminalTitle } from './utils/terminal-title';
 import type { SubagentInstanceInfo, SubagentInstanceRow } from './utils/subagent-instances';
 import type { SubagentSlot } from './utils/subagent-slots';
 import type { SessionRow } from './components/dialogs/session-picker';
@@ -206,6 +206,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   aborted = false;
   private isShuttingDown = false;
   private readonly startedAt = Date.now();
+  /** The terminal's title: the session name, with what it is doing in front of it. */
+  private readonly terminalTitle = new TerminalTitle(() => this.state.appState);
   readonly reverseRpcDisposers: Array<() => void> = [];
   startupNotice: string | undefined;
   /** Interval handle for the periodic provider-balance refresh. */
@@ -570,6 +572,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.reverseRpcDisposers.length = 0;
     this.lifecycleController.disposeTerminalTracking();
     this.inputController.dispose();
+    this.terminalTitle.stop();
     this.state.footer.dispose();
     this.state.sidebarContainer.dispose();
     // Clean shutdown: clear the crash marker before any teardown awaits. If a
@@ -1133,6 +1136,14 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     if ('permissionMode' in patch) {
       this.state.editor.permissionMode = patch.permissionMode ?? 'yolo';
     }
+    if (
+      'streamingPhase' in patch ||
+      'pendingUserAction' in patch ||
+      'isCompacting' in patch ||
+      'sessionTitle' in patch
+    ) {
+      this.terminalTitle.sync();
+    }
     if ('streamingPhase' in patch || 'pendingUserAction' in patch) {
       const app = this.state.appState;
       this.state.editor.activity =
@@ -1234,7 +1245,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   refreshSessionTitle(): void {
-    setProcessTitle(this.state.appState.sessionTitle, this.state.appState.sessionId);
+    this.terminalTitle.refresh();
   }
 
   resetSessionRuntime(): void {

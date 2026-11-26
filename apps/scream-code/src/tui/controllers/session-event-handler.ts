@@ -75,7 +75,6 @@ import {
 } from '../utils/mcp-server-status';
 import { openUrl } from '../utils/open-url';
 import { McpOAuthAuthorizationUrlOpener } from '../utils/mcp-oauth';
-import { setProcessTitle } from '../utils/proctitle';
 import { formatStepDebugTiming } from '#/utils/usage/debug-timing';
 import { nextTranscriptId } from '../utils/transcript-id';
 import { canTransitionTo } from '../streaming-phase';
@@ -1307,8 +1306,8 @@ export class SessionEventHandler {
   private handleSessionMetaChanged(event: SessionMetaUpdatedEvent): void {
     const title = event.title ?? stringValue(event.patch?.['title']);
     if (title !== undefined) {
+      // The title in the terminal follows `sessionTitle` (see TerminalTitle).
       this.host.setAppState({ sessionTitle: title });
-      setProcessTitle(title, this.host.state.appState.sessionId);
     }
   }
 
