@@ -38,7 +38,6 @@ describe('approval adapter', () => {
       '批准一次',
       '批准（当前会话）',
       '拒绝',
-      '拒绝并反馈',
     ]);
   });
 
@@ -221,11 +220,7 @@ describe('approval adapter', () => {
       grantOptions: ['once'],
     });
 
-    expect(adapted.choices.map((choice) => choice.response)).toEqual([
-      'approved',
-      'rejected',
-      'rejected',
-    ]);
+    expect(adapted.choices.map((choice) => choice.response)).toEqual(['approved', 'rejected']);
     expect(adapted.reasons).toEqual(['dangerous command: recursive force delete']);
   });
 
@@ -240,7 +235,6 @@ describe('approval adapter', () => {
     expect(adapted.choices.map((choice) => choice.response)).toEqual([
       'approved',
       'approved_for_session',
-      'rejected',
       'rejected',
     ]);
     expect(adapted).not.toHaveProperty('reasons');

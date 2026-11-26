@@ -374,6 +374,7 @@ export class DialogManager {
         this.openApprovalPreview(panel, block);
       },
       this.host.state.ui,
+      () => this.host.state.terminal.rows,
     );
     this.activeApprovalPanel = panel;
     this.mountEditorReplacement(panel);

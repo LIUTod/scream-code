@@ -13,8 +13,9 @@ function getDefaultApprovalChoices(): ApprovalPanelChoice[] {
   return [
     { label: t('approval.allow_once'), response: 'approved' },
     { label: t('approval.allow_session'), response: 'approved_for_session' },
+    // A refusal can carry a note (Tab on this row), so there is no separate
+    // "deny with feedback" row.
     { label: t('approval.deny'), response: 'rejected' },
-    { label: t('approval.deny_feedback'), response: 'rejected', requires_feedback: true },
   ];
 }
 

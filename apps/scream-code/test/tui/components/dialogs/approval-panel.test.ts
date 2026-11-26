@@ -61,7 +61,7 @@ describe('ApprovalPanelComponent', () => {
   it('renders only numeric approval shortcuts in the hint', () => {
     const { dialog } = makeDialog();
     const out = strip(dialog.render(80).join('\n'));
-    expect(out).toContain('1/2/3/4 choose');
+    expect(out).toContain('1/2/3/4 直选');
     expect(out).not.toContain('y/a/n/f');
   });
 
@@ -87,7 +87,7 @@ describe('ApprovalPanelComponent', () => {
     const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS);
 
     const out = strip(dialog.render(80).join('\n'));
-    expect(out).toContain('Dangerous: recursive delete');
+    expect(out).toContain('危险：recursive delete');
     expect(out).not.toContain('potentially destructive');
     expect(out).not.toContain('⚠');
   });
@@ -242,7 +242,7 @@ describe('ApprovalPanelComponent', () => {
     const before = strip(dialog.render(120).join('\n'));
     expect(before).toContain('+30');
     expect(before).toContain('-30');
-    expect(before).toContain('ctrl+e preview');
+    expect(before).toContain('ctrl+e 预览');
     expect(before).not.toContain('new30'); // compact view stays compact
 
     dialog.handleInput('\u0005'); // Ctrl+E
@@ -250,7 +250,7 @@ describe('ApprovalPanelComponent', () => {
     // The panel itself does not expand; it delegates to the host.
     const after = strip(dialog.render(120).join('\n'));
     expect(after).not.toContain('new30');
-    expect(after).toContain('ctrl+e preview');
+    expect(after).toContain('ctrl+e 预览');
     expect(previewCalls).toEqual([diffBlock]);
     // The unrelated forward-only callbacks must not fire for ctrl+e.
     expect(planToggles).toBe(0);
@@ -284,7 +284,7 @@ describe('ApprovalPanelComponent', () => {
 
     const after = strip(dialog.render(120).join('\n'));
     expect(globalToggleCalls).toBe(1);
-    expect(after).toContain('ctrl+e preview');
+    expect(after).toContain('ctrl+e 预览');
     expect(after).not.toContain('new30');
   });
 
@@ -357,8 +357,8 @@ describe('ApprovalPanelComponent', () => {
     expect(collapsed).toContain('const x1 = 1;');
     expect(collapsed).toContain('const x10 = 10;');
     expect(collapsed).not.toContain('const x25 = 25;');
-    expect(collapsed).toContain('20 more lines hidden (ctrl+e to preview)');
-    expect(collapsed).toContain('ctrl+e preview');
+    expect(collapsed).toContain('另有 20 行已折叠');
+    expect(collapsed).toContain('ctrl+e 预览');
 
     dialog.handleInput('\u0005'); // Ctrl+E hands off to the host preview.
     const after = strip(dialog.render(120).join('\n'));
@@ -555,5 +555,194 @@ describe('ApprovalPanelComponent — selection pulse', () => {
     // pass: indent + label + text leave two columns of slack.
     expect(visibleWidth(summaryLine ?? '')).toBeLessThanOrEqual(58);
     expect((summaryLine ?? '').trimEnd().endsWith('...')).toBe(true);
+  });
+});
+
+describe('ApprovalPanelComponent — layout', () => {
+  const editPending = (): PendingApproval => ({
+    data: {
+      id: 'approval_layout',
+      tool_call_id: 'tool_layout',
+      tool_name: 'Edit',
+      action: 'edit',
+      description: '',
+      display: [
+        {
+          type: 'diff',
+          path: 'src/server/config.ts',
+          old_text: "export const config = {\n  port: 3000,\n  host: 'localhost',\n};",
+          new_text: "export const config = {\n  port: 8080,\n  host: 'localhost',\n};",
+          old_start: 9,
+          new_start: 9,
+        },
+      ],
+      choices: [
+        { label: '批准一次', response: 'approved' },
+        { label: '批准（当前会话）', response: 'approved_for_session' },
+        { label: '拒绝', response: 'rejected' },
+      ],
+      source_label: '来源：main · Edit',
+      request_summary: '把端口改成 8080',
+    },
+  });
+
+  it('puts the file and the size of the change on the title row', () => {
+    const dialog = new ApprovalPanelComponent(editPending(), () => {}, COLORS);
+    const lines = dialog.render(100).map(strip);
+    const title = lines[1] ?? '';
+    expect(title).toContain('编辑文件');
+    expect(title).toContain('src/server/config.ts');
+    expect(title).toMatch(/\+1 -1\s*$/);
+    expect(visibleWidth(title)).toBeLessThanOrEqual(100);
+  });
+
+  it('draws the diff the way the activity block does: file line numbers, signs, a dashed frame', () => {
+    const dialog = new ApprovalPanelComponent(editPending(), () => {}, COLORS);
+    const text = dialog.render(100).map(strip).join('\n');
+    expect(text).toContain('╌╌╌╌');
+    expect(text).toMatch(/\n\s+10 - {3}port: 3000,/);
+    expect(text).toMatch(/\n\s+10 \+ {3}port: 8080,/);
+    expect(text).toMatch(/\n\s+9 {3}export const config = \{/);
+  });
+
+  it('asks the question directly above the choices', () => {
+    const dialog = new ApprovalPanelComponent(editPending(), () => {}, COLORS);
+    const lines = dialog.render(100).map(strip);
+    const question = lines.findIndex((line) => line.includes('是否应用这些编辑？'));
+    const first = lines.findIndex((line) => line.includes('1. 批准一次'));
+    expect(question).toBeGreaterThan(0);
+    expect(first).toBe(question + 1);
+  });
+
+  it('keeps the source and the request on one quiet line', () => {
+    const dialog = new ApprovalPanelComponent(editPending(), () => {}, COLORS);
+    const lines = dialog.render(100).map(strip);
+    expect(lines[2]).toContain('来源：main · Edit');
+    expect(lines[2]).toContain('本回合请求： 把端口改成 8080');
+  });
+
+  it('puts the hint in the interface language, with Esc, and leaves English words out', () => {
+    const dialog = new ApprovalPanelComponent(editPending(), () => {}, COLORS);
+    const hint = dialog.render(100).map(strip).find((line) => line.includes('直选')) ?? '';
+    expect(hint).toContain('↑↓ 选择');
+    expect(hint).toContain('1/2/3 直选');
+    expect(hint).toContain('Esc 拒绝');
+    expect(hint).toContain('ctrl+e 预览');
+    expect(hint).not.toMatch(/select|choose|confirm/);
+  });
+
+  it('offers a note only while a refusal is focused, and sends it with the refusal', () => {
+    const responses: Array<{ response: string; feedback?: string | undefined }> = [];
+    const dialog = new ApprovalPanelComponent(editPending(), (r) => responses.push(r), COLORS);
+    const hintOf = (): string => dialog.render(100).map(strip).find((line) => line.includes('直选')) ?? '';
+
+    expect(hintOf()).not.toContain('Tab');
+    dialog.handleInput('\t'); // Tab on an approval does nothing
+    expect(dialog.render(100).map(strip).join('\n')).not.toContain('输入反馈');
+
+    dialog.handleInput('\u001B[B'); // down
+    dialog.handleInput('\u001B[B'); // down → the refusal
+    expect(hintOf()).toContain('Tab 附加说明');
+    dialog.handleInput('\t');
+    expect(dialog.render(100).map(strip).join('\n')).toContain('输入反馈');
+    for (const ch of 'nope') dialog.handleInput(ch);
+    dialog.handleInput('\r');
+    expect(responses).toEqual([{ response: 'rejected', feedback: 'nope', selected_label: undefined }]);
+  });
+
+  it('keeps the choices, the question and the hint on a short terminal and stays inside the room it has', () => {
+    const pending = editPending();
+    pending.data.display = [
+      {
+        type: 'diff',
+        path: 'src/big.ts',
+        old_text: Array.from({ length: 30 }, (_, i) => `old${String(i + 1)}`).join('\n'),
+        new_text: Array.from({ length: 30 }, (_, i) => `new${String(i + 1)}`).join('\n'),
+      },
+    ];
+    for (const rows of [14, 18, 24, 40]) {
+      const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS, undefined, undefined, undefined, undefined, () => rows);
+      const lines = dialog.render(80).map(strip);
+      const room = Math.max(6, rows - 1 - 2 - 1);
+      expect(lines.length, `rows ${String(rows)}`).toBeLessThanOrEqual(room);
+      const text = lines.join('\n');
+      expect(text).toContain('1. 批准一次');
+      expect(text).toContain('3. 拒绝');
+      expect(text).toContain('是否应用这些编辑？');
+      expect(text).toContain('直选');
+    }
+  });
+
+  it('is roomy only when the terminal is: the dashed frame and the source line give way first', () => {
+    const roomy = new ApprovalPanelComponent(editPending(), () => {}, COLORS, undefined, undefined, undefined, undefined, () => 40);
+    const tight = new ApprovalPanelComponent(editPending(), () => {}, COLORS, undefined, undefined, undefined, undefined, () => 14);
+    const roomyText = roomy.render(80).map(strip).join('\n');
+    const tightText = tight.render(80).map(strip).join('\n');
+    expect(roomyText).toContain('╌╌╌╌');
+    expect(roomyText).toContain('来源：main');
+    expect(tightText).not.toContain('╌╌╌╌');
+    expect(tightText).toContain('10 - ');
+    expect(tightText).toContain('10 + ');
+  });
+
+  it('puts a command first, then the danger, and localizes the labels', () => {
+    const pending: PendingApproval = {
+      data: {
+        id: 'approval_cmd',
+        tool_call_id: 'tool_cmd',
+        tool_name: 'Bash',
+        action: 'run',
+        description: '',
+        display: [
+          {
+            type: 'shell',
+            language: 'bash',
+            command: 'rm -rf node_modules && pnpm install',
+            cwd: '/work/app',
+            description: '重新安装依赖',
+            danger: '将删除 node_modules 目录',
+          },
+        ],
+        choices: [{ label: '批准一次', response: 'approved' }],
+        reasons: ['命令包含 rm -rf'],
+      },
+    };
+    const lines = new ApprovalPanelComponent(pending, () => {}, COLORS).render(100).map(strip);
+    const at = (needle: string): number => lines.findIndex((line) => line.includes(needle));
+    expect(at('$ rm -rf node_modules')).toBeLessThan(at('风险提示：命令包含 rm -rf'));
+    expect(at('风险提示：命令包含 rm -rf')).toBeLessThan(at('危险：将删除 node_modules 目录'));
+    expect(at('危险：将删除 node_modules 目录')).toBeLessThan(at('是否执行此命令？'));
+    expect(lines.join('\n')).toContain('目录 /work/app');
+    expect(lines.join('\n')).not.toMatch(/Dangerous|cwd:/);
+  });
+});
+
+describe('ApprovalPanelComponent — very short terminal', () => {
+  it('drops the closing rule rather than a choice when even the tightest layout is over', () => {
+    const pending: PendingApproval = {
+      data: {
+        id: 'approval_tiny',
+        tool_call_id: 'tool_tiny',
+        tool_name: 'Bash',
+        action: 'run',
+        description: '',
+        display: [
+          { type: 'shell', language: 'bash', command: 'rm -rf node_modules', danger: '将删除 node_modules 目录' },
+        ],
+        choices: [
+          { label: '批准一次', response: 'approved' },
+          { label: '批准（当前会话）', response: 'approved_for_session' },
+          { label: '拒绝', response: 'rejected' },
+        ],
+        reasons: ['命令包含 rm -rf'],
+      },
+    };
+    const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS, undefined, undefined, undefined, undefined, () => 14);
+    const lines = dialog.render(60).map(strip);
+    expect(lines.length).toBeLessThanOrEqual(14 - 1 - 2 - 1);
+    const text = lines.join('\n');
+    expect(text).toContain('3. 拒绝');
+    expect(text).toContain('直选');
+    expect(lines.at(-1)).not.toMatch(/^─+$/);
   });
 });

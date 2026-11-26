@@ -20,8 +20,14 @@ import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
 import { highlightLines, langFromPath } from '#/tui/components/media/code-highlight';
-import { renderDiffLinesClustered } from '#/tui/components/media/diff-preview';
-import { PIXEL_PULSE_FRAMES, PIXEL_PULSE_INTERVAL_MS } from '#/tui/constant/rendering';
+import { changeFromTexts, renderFileChange, type FileChange } from '#/tui/components/messages/file-change';
+import {
+  DOCK_FOOTER_ROWS,
+  DOCK_STATUS_ROWS,
+  PANEL_MIN_TRANSCRIPT_ROWS,
+  PIXEL_PULSE_FRAMES,
+  PIXEL_PULSE_INTERVAL_MS,
+} from '#/tui/constant/rendering';
 import type {
   ApprovalPanelChoice,
   DiffDisplayBlock,
@@ -44,10 +50,26 @@ function truncateOneLine(text: string, max: number): string {
   return firstLine.length > max ? firstLine.slice(0, max - 1) + '…' : firstLine;
 }
 
-const DIFF_SUMMARY_MAX_LINES = 10;
 const CONTENT_SUMMARY_MAX_LINES = 10;
 
+/**
+ * How much of the panel is drawn. The panel replaces the editor, so on a short
+ * terminal it must give rows back, and it does so by level. The choices, the
+ * question and the key hints stay at every level; the rest yields:
+ *  0  roomy: source line, a dashed frame and the unchanged lines around a diff,
+ *     a command's description and directory;
+ *  1  no frame, only the changed lines of a diff (capped), no directory;
+ *  2  no source line, no description; the diff shrinks to whatever is left.
+ */
+type DetailLevel = 0 | 1 | 2;
+
+/** Changed/context rows a roomy panel draws for a diff, and a folded one. */
+const DIFF_ROWS_ROOMY = 12;
+const DIFF_ROWS_FOLDED = 8;
+const DIFF_ROWS_TIGHT = 6;
+
 interface BlockStyles {
+  colors: ColorPalette;
   strong: (s: string) => string;
   dim: (s: string) => string;
   accent: (s: string) => string;
@@ -57,6 +79,7 @@ interface BlockStyles {
 
 function makeBlockStyles(colors: ColorPalette): BlockStyles {
   return {
+    colors,
     strong: (s) => chalk.hex(colors.textStrong)(s),
     dim: (s) => chalk.hex(colors.textDim)(s),
     accent: (s) => chalk.hex(colors.accent)(s),
@@ -65,66 +88,47 @@ function makeBlockStyles(colors: ColorPalette): BlockStyles {
   };
 }
 
-function renderDisplayBlock(
-  block: DisplayBlock,
-  s: BlockStyles,
-  colors: ColorPalette,
-): string[] {
+function renderDisplayBlock(block: DisplayBlock, s: BlockStyles, level: DetailLevel): string[] {
   switch (block.type) {
     case 'diff':
-      return renderDiffLinesClustered(
-        replaceTabs(block.old_text),
-        replaceTabs(block.new_text),
-        block.path,
-        colors,
-        {
-          contextLines: 3,
-          expandKeyHint: 'ctrl+e to preview',
-          maxLines: DIFF_SUMMARY_MAX_LINES,
-        },
-      );
+      // Drawn by the panel (see `diffRows`): it owns the header row and the frame.
+      return [];
     case 'file_content': {
       const lang = block.language ?? langFromPath(block.path);
       const content = replaceTabs(block.content);
-      const allLines = highlightLines(content, lang, colors);
-      const shown = allLines.slice(0, CONTENT_SUMMARY_MAX_LINES);
+      const allLines = highlightLines(content, lang, s.colors);
+      const cap = level === 0 ? CONTENT_SUMMARY_MAX_LINES : level === 1 ? 6 : 3;
+      const shown = allLines.slice(0, cap);
       const lines = [s.strong(block.path)];
       for (const [i, line] of shown.entries()) {
         lines.push(s.gutter(String(i + 1).padStart(4) + '  ') + line);
       }
       const remaining = allLines.length - shown.length;
       if (remaining > 0) {
-        lines.push(
-          s.dim(
-            `     … ${String(remaining)} more line${remaining > 1 ? 's' : ''} hidden (ctrl+e to preview)`,
-          ),
-        );
+        lines.push(s.dim(`     ${t('approval.more_lines', { count: String(remaining) })} (ctrl+e)`));
       }
       return lines;
     }
     case 'shell': {
+      // The command first, then what a person decides on: the danger, then
+      // the notes that can go when the terminal is short.
       const lines: string[] = [];
-      if (block.cwd !== undefined && block.cwd.length > 0) {
-        lines.push(s.dim(`cwd: ${block.cwd}`));
-      }
-      if (block.danger !== undefined) {
-        lines.push(s.errorBold(`Dangerous: ${block.danger}`));
-      }
       const command = replaceTabs(block.command);
       const cmdLines = command.length > 0 ? command.split('\n') : [''];
-      const shownCmd = cmdLines.slice(0, CONTENT_SUMMARY_MAX_LINES);
+      const shownCmd = cmdLines.slice(0, level === 0 ? CONTENT_SUMMARY_MAX_LINES : 4);
       shownCmd.forEach((cmdLine, idx) => {
         const prefix = idx === 0 ? s.accent('$') : s.dim('·');
         lines.push(`${prefix} ${s.strong(cmdLine)}`);
       });
       const remainingCmd = cmdLines.length - shownCmd.length;
       if (remainingCmd > 0) {
-        lines.push(
-          s.dim(`  … ${String(remainingCmd)} more line${remainingCmd > 1 ? 's' : ''} hidden`),
-        );
+        lines.push(s.dim(`  ${t('approval.more_lines', { count: String(remainingCmd) })}`));
       }
-      if (block.description !== undefined && block.description.length > 0) {
+      if (block.description !== undefined && block.description.length > 0 && level < 2) {
         lines.push(`  ${s.dim(replaceTabs(block.description))}`);
+      }
+      if (block.cwd !== undefined && block.cwd.length > 0 && level === 0) {
+        lines.push(`  ${s.dim(`${t('approval.cwd')} ${block.cwd}`)}`);
       }
       return lines;
     }
@@ -184,6 +188,7 @@ function isDuplicateBriefBlock(block: DisplayBlock, description: string): boolea
   return normalizeApprovalText(blockLines.slice(1).join('\n')) === normalizedDescription;
 }
 
+/** The question the choices answer. */
 function headerFor(toolName: string): string {
   switch (toolName) {
     case 'Bash':
@@ -201,6 +206,32 @@ function headerFor(toolName: string): string {
   }
 }
 
+/** What the panel is about, as a noun: the title row. */
+function titleFor(toolName: string): string {
+  switch (toolName) {
+    case 'Bash':
+      return t('approval.title.command');
+    case 'Write':
+      return t('approval.title.file_write');
+    case 'Edit':
+      return t('approval.title.file_edit');
+    case 'TaskStop':
+      return t('approval.title.stop_task');
+    case 'ExitPlanMode':
+      return t('approval.title.plan');
+    default:
+      return toolName;
+  }
+}
+
+/** `text` cut to `max` columns keeping its end — a path is told apart by its tail. */
+function truncateStart(text: string, max: number): string {
+  if (visibleWidth(text) <= max) return text;
+  let tail = text;
+  while (tail.length > 0 && visibleWidth(tail) > max - 1) tail = tail.slice(1);
+  return `…${tail}`;
+}
+
 export class ApprovalPanelComponent extends Container implements Focusable {
   focused = false;
   private selectedIndex = 0;
@@ -215,6 +246,10 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     | ((block: DiffDisplayBlock | FileContentDisplayBlock) => void)
     | undefined;
   private readonly ui: TUI | undefined;
+  /** Terminal height, read on every render; unknown in tests and previews. */
+  private readonly viewportRows: (() => number) | undefined;
+  /** The diff of each Edit block, computed once: the pulse repaints the panel every tick. */
+  private readonly changes = new WeakMap<DiffDisplayBlock, FileChange | null>();
   private animFrame = 0;
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -226,8 +261,10 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     onTogglePlanExpand?: () => void,
     onOpenPreview?: (block: DiffDisplayBlock | FileContentDisplayBlock) => void,
     ui?: TUI,
+    viewportRows?: () => number,
   ) {
     super();
+    this.viewportRows = viewportRows;
     this.request = request;
     this.onResponse = onResponse;
     this.colors = colors;
@@ -337,6 +374,12 @@ export class ApprovalPanelComponent extends Container implements Focusable {
       this.selectAndSubmit(this.selectedIndex);
       return;
     }
+    if (matchesKey(data, Key.tab)) {
+      // A note travels with a refusal only: the core hands it to the model as
+      // the reason, and drops one sent with an approval.
+      if (this.selectedChoiceRejects()) this.feedbackMode = true;
+      return;
+    }
 
     const printable = decodeKittyPrintable(data) ?? data;
     const numericIndex = Number(printable) - 1;
@@ -349,6 +392,33 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     this.clear();
     this.ensureValidSelection();
     this.feedbackInput.focused = this.focused && this.feedbackMode;
+
+    const budget = this.rowBudget();
+    // The roomiest level that fits; the last one shrinks the diff until it does.
+    for (const level of [0, 1] as const) {
+      const lines = this.compose(width, level, level === 0 ? DIFF_ROWS_ROOMY : DIFF_ROWS_FOLDED);
+      if (lines.length <= budget) return lines;
+    }
+    let limit = DIFF_ROWS_TIGHT;
+    let lines = this.compose(width, 2, limit);
+    while (lines.length > budget && limit > 0) {
+      limit -= 1;
+      lines = this.compose(width, 2, limit);
+    }
+    // Still over (a command with a warning on a very short terminal): the
+    // closing rule is the one row that carries nothing.
+    if (lines.length > budget) lines.pop();
+    return lines;
+  }
+
+  /** Rows the panel may take: the terminal minus the dock below it and a few transcript rows above. */
+  private rowBudget(): number {
+    const rows = this.viewportRows?.();
+    if (rows === undefined || !Number.isFinite(rows)) return Number.POSITIVE_INFINITY;
+    return Math.max(6, rows - DOCK_STATUS_ROWS - DOCK_FOOTER_ROWS - PANEL_MIN_TRANSCRIPT_ROWS);
+  }
+
+  private compose(width: number, level: DetailLevel, diffLimit: number): string[] {
     const { data } = this.request;
     const blockStyles = makeBlockStyles(this.colors);
     // Frame and focus share the brand fluorescent green: pastel borderFocus
@@ -357,40 +427,10 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     const borderColor = chalk.hex(this.colors.primary);
     const borderColorBold = chalk.bold.hex(this.colors.primary);
     const dim = chalk.hex(this.colors.textDim);
+    const strong = chalk.hex(this.colors.textStrong);
     const horizontalBar = borderColor('─'.repeat(width));
     const indent = (s: string): string => `  ${s}`;
-
-    const title = headerFor(data.tool_name);
-    const lines: string[] = [
-      horizontalBar,
-      indent(`${borderColorBold('→')} ${borderColorBold(title)}`),
-    ];
-    if (data.source_label !== undefined && data.source_label.length > 0) {
-      lines.push(indent(dim(truncateToWidth(data.source_label, Math.max(width - 4, 1)))));
-    }
-    if (data.request_summary !== undefined && data.request_summary.length > 0) {
-      // Budget like the sibling rows: indent + prefix + 2 columns of slack,
-      // so the row still ends in a visible ellipsis instead of being clipped
-      // silently by the final width pass.
-      const prefix = `${t('approval.request_summary')} `;
-      lines.push(
-        indent(
-          dim(
-            `${prefix}${truncateToWidth(
-              replaceTabs(data.request_summary),
-              Math.max(width - 4 - visibleWidth(prefix), 1),
-            )}`,
-          ),
-        ),
-      );
-    }
-    if (data.reasons !== undefined && data.reasons.length > 0) {
-      const warning = chalk.hex(this.colors.warning);
-      lines.push(indent(warning(t('approval.warnings_title'))));
-      for (const reason of data.reasons) {
-        lines.push(indent(warning(`· ${truncateToWidth(replaceTabs(reason), Math.max(width - 6, 1))}`)));
-      }
-    }
+    const inner = Math.max(width - 4, 1);
 
     const dedupedBlocks = data.display.filter(
       (block) => !isDuplicateBriefBlock(block, data.description),
@@ -399,23 +439,71 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     const hasPreviewable = visibleBlocks.some(
       (block) => block.type === 'diff' || block.type === 'file_content',
     );
+    const diffBlock = visibleBlocks.find((block): block is DiffDisplayBlock => block.type === 'diff');
+    const change = diffBlock === undefined ? undefined : this.changeOf(diffBlock);
 
-    if (visibleBlocks.length > 0) {
-      lines.push('');
-      for (const block of visibleBlocks) {
-        const blockLines = renderDisplayBlock(block, blockStyles, this.colors);
-        for (const line of blockLines) {
-          lines.push(indent(line));
-        }
+    // Title: the noun, then — for an edit — which file and how much changed.
+    const title = borderColorBold(titleFor(data.tool_name));
+    let titleRow: string;
+    if (diffBlock !== undefined && change !== undefined) {
+      const added = change.rows.filter((row) => row.kind === 'add').length;
+      const removed = change.rows.filter((row) => row.kind === 'delete').length;
+      const counts = `${chalk.bold.hex(this.colors.diffAddedStrong)(`+${String(added)}`)} ${chalk.bold.hex(this.colors.diffRemovedStrong)(`-${String(removed)}`)}`;
+      const left = `${title}  `;
+      const room = Math.max(width - 4 - visibleWidth(left) - visibleWidth(counts) - 2, 4);
+      const path = strong(truncateStart(diffBlock.path, room));
+      const gap = Math.max(1, width - 4 - visibleWidth(left) - visibleWidth(path) - visibleWidth(counts));
+      titleRow = indent(`${left}${path}${' '.repeat(gap)}${counts}`);
+    } else {
+      titleRow = indent(title);
+    }
+    const lines: string[] = [horizontalBar, titleRow];
+
+    // One quiet line for where it came from and what was asked.
+    if (level < 2) {
+      const meta: string[] = [];
+      if (data.source_label !== undefined && data.source_label.length > 0) meta.push(data.source_label);
+      if (data.request_summary !== undefined && data.request_summary.length > 0) {
+        meta.push(`${t('approval.request_summary')} ${replaceTabs(data.request_summary)}`);
       }
-    } else if (data.description) {
-      lines.push('');
-      for (const descLine of data.description.split('\n')) {
-        lines.push(indent(dim(descLine)));
-      }
+      if (meta.length > 0) lines.push(indent(dim(truncateToWidth(meta.join('  ·  '), inner))));
     }
 
-    lines.push('');
+    // What is shown: the diff (or the other blocks), then the warnings.
+    const body: string[] = [];
+    if (diffBlock !== undefined && change !== undefined && diffLimit > 0) {
+      const view = level === 0 ? 'expanded' : 'folded';
+      const dashes = level === 0 ? [chalk.hex(this.colors.border)('╌'.repeat(inner))] : [];
+      body.push(...dashes);
+      for (const row of renderFileChange(change, view, diffLimit, inner, this.colors)) body.push(row);
+      body.push(...dashes);
+    }
+    for (const block of visibleBlocks) {
+      if (block.type === 'diff') continue;
+      body.push(...renderDisplayBlock(block, blockStyles, level));
+    }
+    if (visibleBlocks.length === 0 && data.description) {
+      for (const descLine of data.description.split('\n')) body.push(dim(descLine));
+    }
+    const warning = chalk.hex(this.colors.warning);
+    const reasons = data.reasons ?? [];
+    if (reasons.length === 1) {
+      body.push(warning(t('approval.warning_line', { reason: truncateToWidth(replaceTabs(reasons[0]!), Math.max(inner - 8, 1)) })));
+    } else if (reasons.length > 1) {
+      body.push(warning(t('approval.warnings_title')));
+      for (const reason of reasons) {
+        body.push(warning(`· ${truncateToWidth(replaceTabs(reason), Math.max(inner - 2, 1))}`));
+      }
+    }
+    for (const block of visibleBlocks) {
+      if (block.type === 'shell' && block.danger !== undefined) {
+        body.push(blockStyles.errorBold(t('approval.danger', { reason: block.danger })));
+      }
+    }
+    for (const line of body) lines.push(indent(line));
+
+    // The question sits right above the choices it is asked of.
+    lines.push(indent(chalk.bold.hex(this.colors.textStrong)(headerFor(data.tool_name))));
     for (let idx = 0; idx < data.choices.length; idx++) {
       const option = data.choices[idx];
       if (option === undefined) continue;
@@ -423,7 +511,7 @@ export class ApprovalPanelComponent extends Container implements Focusable {
       const num = idx + 1;
 
       const labelWithNum = `${String(num)}. ${option.label}`;
-      if (this.feedbackMode && option.requires_feedback === true && isSelected) {
+      if (this.feedbackMode && isSelected) {
         lines.push(selectedRow(this.colors, indent(this.renderInlineFeedbackLine(width - 2, labelWithNum)), width));
       } else if (isSelected) {
         // The shared selection bar; the pointer is the breathing pixel block
@@ -436,22 +524,39 @@ export class ApprovalPanelComponent extends Container implements Focusable {
       }
     }
 
-    lines.push('');
     if (this.feedbackMode) {
       lines.push(indent(dim(t('approval.feedback_hint'))));
     } else {
-      const expandHint = hasPreviewable ? ' · ctrl+e preview' : '';
-      lines.push(
-        indent(
-          dim(
-            `↑/↓ select · ${buildNumericHint(data.choices.length)} choose · ↵ confirm${expandHint}`,
-          ),
-        ),
-      );
+      const parts = [
+        t('approval.hint.select'),
+        t('approval.hint.choose', { keys: buildNumericHint(data.choices.length) }),
+        t('approval.hint.confirm'),
+        t('approval.hint.reject'),
+      ];
+      if (this.selectedChoiceRejects() && level < 2) parts.push(t('approval.hint.note'));
+      if (hasPreviewable && level < 2) parts.push(t('approval.hint.preview'));
+      lines.push(indent(dim(parts.join(' · '))));
     }
     lines.push(horizontalBar);
 
     return lines.map((line) => truncateToWidth(line, width));
+  }
+
+  /** The Edit block as the activity block draws it, once per block. */
+  private changeOf(block: DiffDisplayBlock): FileChange | undefined {
+    const known = this.changes.get(block);
+    if (known !== undefined) return known ?? undefined;
+    const change = changeFromTexts(replaceTabs(block.old_text), replaceTabs(block.new_text), {
+      path: block.path,
+      oldStart: block.old_start,
+      newStart: block.new_start,
+    });
+    this.changes.set(block, change ?? null);
+    return change;
+  }
+
+  private selectedChoiceRejects(): boolean {
+    return this.choiceAt(this.selectedIndex)?.response === 'rejected';
   }
 
   private findPreviewableBlock(): DiffDisplayBlock | FileContentDisplayBlock | undefined {

@@ -73,3 +73,13 @@ const backwardFrames = Array.from({ length: PULSE_WAVE_CELLS - 2 }, (_, i) => ({
 }));
 export const PULSE_WAVE_FRAMES = [...forwardFrames, ...backwardFrames];
 export const PULSE_WAVE_INTERVAL_MS = 80;
+
+// Rows the dock keeps below the transcript: the status row above the editor
+// keeps one row even when it renders nothing (a minSize 0 would let the dock's
+// shrink pass squeeze it away), and the footer renders exactly two rows.
+// Panels that replace the editor size themselves against what is left.
+export const DOCK_STATUS_ROWS = 1;
+export const DOCK_FOOTER_ROWS = 2;
+// Transcript rows a replacement panel leaves visible above itself: the last
+// message, so the person still sees what is being decided on.
+export const PANEL_MIN_TRANSCRIPT_ROWS = 1;

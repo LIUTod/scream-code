@@ -106,10 +106,17 @@ function shellChangeOf(files: readonly ShellChangedFile[]): FileChange | undefin
   return total === 0 ? undefined : { rows, total, lang: undefined };
 }
 
-/** Changed lines of two strings plus the unchanged ones around them, unnumbered. */
-function rowsFromStrings(oldText: string, newText: string): ChangeRow[] {
+/**
+ * Changed lines of two strings plus the unchanged ones around them. Numbered
+ * (file line numbers) only when the caller knows where the text starts.
+ */
+function rowsFromStrings(
+  oldText: string,
+  newText: string,
+  start?: { readonly old: number; readonly new: number },
+): ChangeRow[] {
   if (oldText.length === 0 && newText.length === 0) return [];
-  const lines = computeDiffLines(oldText, newText);
+  const lines = computeDiffLines(oldText, newText, start?.old ?? 1, start?.new ?? 1);
   const near = new Set<number>();
   lines.forEach((line, index) => {
     if (line.kind === 'context') return;
@@ -124,9 +131,33 @@ function rowsFromStrings(oldText: string, newText: string): ChangeRow[] {
     }
     if (skipped > 0 && rows.length > 0) rows.push({ kind: 'gap', count: skipped });
     skipped = 0;
-    rows.push({ kind: line.kind, text: line.code });
+    rows.push(
+      start === undefined
+        ? { kind: line.kind, text: line.code }
+        : { kind: line.kind, line: line.lineNum, text: line.code },
+    );
   });
   return rows;
+}
+
+/**
+ * The change between two texts, as the activity block draws it. Used where a
+ * change is shown before it happened (the approval panel), so the same diff
+ * looks the same in both places. Undefined when nothing changed.
+ */
+export function changeFromTexts(
+  oldText: string,
+  newText: string,
+  options: { readonly path?: string | undefined; readonly oldStart?: number | undefined; readonly newStart?: number | undefined } = {},
+): FileChange | undefined {
+  const start =
+    options.oldStart !== undefined || options.newStart !== undefined
+      ? { old: options.oldStart ?? options.newStart ?? 1, new: options.newStart ?? options.oldStart ?? 1 }
+      : undefined;
+  const rows = rowsFromStrings(oldText, newText, start);
+  const total = rows.filter((row) => row.kind === 'add' || row.kind === 'delete').length;
+  if (total === 0) return undefined;
+  return { rows, total, lang: options.path === undefined ? undefined : langFromPath(options.path) };
 }
 
 /** One drawn row: a line, a run of removed lines whose text is unknown, a gap or the count. */

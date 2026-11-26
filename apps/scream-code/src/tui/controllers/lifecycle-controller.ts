@@ -21,7 +21,7 @@ import { agentsPanel } from '../components/sidebar/panels/agents-panel';
 import { goalPanel } from '../components/sidebar/panels/goal-panel';
 import { hubPanel } from '../components/sidebar/panels/hub-panel';
 import { buildHubSamples, createHubProbe } from '../utils/hub-probe';
-import { CHROME_GUTTER } from '../constant/rendering';
+import { CHROME_GUTTER, DOCK_FOOTER_ROWS, DOCK_STATUS_ROWS } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
 import type { SessionReplayRenderer } from './session-replay';
@@ -133,11 +133,10 @@ const MCP_ACTIVITY_TTL_MS = 3_000;
 const GIT_DIFF_TTL_MS = 15_000;
 /** Window after a command-driven line write during which the poll stands down. */
 const MANUAL_LINE_WRITE_GRACE_MS = 5_000;
-/** Footer renders exactly two rows (footer.ts); the dock must reserve both. */
-export const DOCK_FOOTER_ROWS = 2;
-/** The status row above the editor keeps one row even when it renders nothing
- *  (hidden modes); minSize 0 would let the dock's shrink pass squeeze it away. */
-export const DOCK_STATUS_ROWS = 1;
+/** Footer renders exactly two rows (footer.ts); the dock must reserve both.
+ *  The status row keeps one row even when it renders nothing. Both live in
+ *  constant/rendering so panels can size against them; re-exported here. */
+export { DOCK_FOOTER_ROWS, DOCK_STATUS_ROWS };
 
 export class LifecycleController {
   private signalCleanupHandlers: Array<() => void> = [];
