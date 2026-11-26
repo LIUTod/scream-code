@@ -57,16 +57,18 @@ export const CODE_SURFACE_FALLBACK: Readonly<Record<ResolvedTheme, string>> = {
 
 /**
  * The band behind a user message: the same derivation as a code panel, a
- * light grey on a dark ground and a soft dark grey on a light one, so a
- * message reads as set apart from the reply without the weight of a
- * coloured block.
+ * lighter grey on a dark ground and a darker grey on a light one. The step
+ * is wide on purpose: at 9-11 L* the band was a dark grey on a dark ground
+ * and a light grey on a light one — present, but hard to tell from the page.
+ * Here it crosses over to a mid grey (about #4c4c4c on #1e1e1e, #d6d6d6 on
+ * white) while the user-colour text stays above its contrast floor.
  */
-const USER_MESSAGE_DELTA_LIGHT = 9;
-const USER_MESSAGE_DELTA_DARK = 11;
+const USER_MESSAGE_DELTA_LIGHT = 13;
+const USER_MESSAGE_DELTA_DARK = 22;
 
 export const USER_MESSAGE_SURFACE_FALLBACK: Readonly<Record<ResolvedTheme, string>> = {
-  light: '#e2e4e7',
-  dark: '#383b40',
+  light: '#d8dadd',
+  dark: '#4a4d52',
 };
 
 /** The surface behind user messages on `backgroundHex` (see {@link codeSurfaceFor}). */
