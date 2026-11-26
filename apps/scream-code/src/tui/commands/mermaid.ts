@@ -15,6 +15,7 @@ import { getMermaidDisplay, setMermaidDisplay, type MermaidDisplay } from '../ut
 import { repaintTranscript } from '../utils/transcript-repaint';
 import { syncDiagramCapabilityPrompt } from '../utils/terminal-diagram-prompt';
 
+import { flashStatus } from '../utils/flash-status';
 import type { SlashCommandHost } from './dispatch';
 
 const DISPLAYS: readonly MermaidDisplay[] = ['on', 'ascii', 'off'];
@@ -36,7 +37,8 @@ function buildOptions(): ChoiceOption[] {
 async function applyDisplay(host: SlashCommandHost, value: MermaidDisplay): Promise<void> {
   const previous = getMermaidDisplay();
   setMermaidDisplay(value);
-  host.showStatus(
+  flashStatus(
+    host,
     t('mermaid.applied', { mode: optionLabel(value) }),
     value === 'off' ? host.state.theme.colors.textDim : host.state.theme.colors.success,
   );
@@ -84,7 +86,8 @@ export async function handleMermaidCommand(host: SlashCommandHost, args: string)
       },
       onCancel: () => {
         host.restoreEditor();
-        host.showStatus(
+        flashStatus(
+          host,
           t('mermaid.picker_cancelled', { mode: optionLabel(getMermaidDisplay()) }),
           host.state.theme.colors.textDim,
         );

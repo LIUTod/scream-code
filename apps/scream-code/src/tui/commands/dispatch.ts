@@ -135,6 +135,8 @@ export interface SlashCommandHost {
   deferUserMessages: boolean;
 
   setAppState(patch: Partial<AppState>): void;
+  /** A confirmation that clears itself (see `utils/flash-status`); absent where no view can show one. */
+  flash?(message: string): void;
   /**
    * Marks a command-driven line-state write (`/line start|stop|uninstall`) so
    * the 30s liveness poll cannot overwrite it with a stale in-flight read.

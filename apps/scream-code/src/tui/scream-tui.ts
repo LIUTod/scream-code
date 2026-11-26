@@ -47,6 +47,7 @@ import { clearGoalState } from './commands/goal';
 import { clearEvalPanelState } from './commands/eval';
 import { clearInfoPanelState } from './commands/info';
 import { disposeChildren } from './utils/component-capabilities';
+import { FLASH_STATUS_MS } from './utils/flash-status';
 
 import type { HelpPanelCommand } from './components/dialogs/help-panel';
 import { AuthFlowController } from './controllers/auth-flow';
@@ -1390,6 +1391,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   showStatus(message: string, color?: string): void {
     this.transcriptController.showStatus(message, color);
+  }
+
+  flash(message: string): void {
+    this.state.ui.flash(message, FLASH_STATUS_MS);
   }
 
   forceUpdateStatusBar(): void {

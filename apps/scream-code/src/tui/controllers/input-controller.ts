@@ -26,6 +26,7 @@ import type { TUIState } from '../tui-state';
 import { formatErrorMessage } from '../utils/event-payload';
 import { isBusy, isStreaming } from '../utils/app-state';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
+import { flashStatus } from '../utils/flash-status';
 import { extractMediaAttachments } from '../utils/image-placeholder';
 import { BREATHE_CYCLE_MS, getBreathingFrame, resetBreathingClock } from '#/tui/utils/breathing-clock';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
@@ -136,7 +137,7 @@ export class InputController {
       } else {
         const pending = this.pendingLargeInput;
         this.pendingLargeInput = null;
-        this.host.showStatus(t('input.large_cancelled'), this.host.state.theme.colors.textDim);
+        flashStatus(this.host, t('input.large_cancelled'), this.host.state.theme.colors.textDim);
         // If the user typed something other than a plain "n"/"no" cancellation
         // (e.g. a slash command like /help), process it as new input
         if (answer !== 'n' && answer !== 'no' && text.trim().length > 0) {

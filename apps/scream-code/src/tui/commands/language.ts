@@ -3,6 +3,7 @@ import { t, setLocale, getLocale, type Locale } from '@scream-code/config';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { loadTuiConfig, saveTuiConfig } from '../config';
 import { formatErrorMessage } from '../utils/event-payload';
+import { flashStatus } from '../utils/flash-status';
 import type { SlashCommandHost } from './dispatch';
 
 const LANGUAGE_OPTIONS: readonly ChoiceOption[] = [
@@ -35,7 +36,7 @@ export function handleLanguageCommand(host: SlashCommandHost, back?: () => void)
 
 async function applyLanguageChoice(host: SlashCommandHost, locale: Locale): Promise<void> {
   if (locale === getLocale()) {
-    host.showStatus(t('language.unchanged', { locale }));
+    flashStatus(host, t('language.unchanged', { locale }));
     return;
   }
 

@@ -7,10 +7,11 @@
 import { t } from '@scream-code/config';
 
 import { toggleTurnElapsed } from '../utils/ui-preferences';
+import { flashStatus } from '../utils/flash-status';
 import type { SlashCommandHost } from './dispatch';
 
 export async function handleSnapTimerCommand(host: SlashCommandHost, _args: string): Promise<void> {
   const enabled = toggleTurnElapsed();
   const status = enabled ? t('snaptimer.enabled') : t('snaptimer.disabled');
-  host.showStatus(status, enabled ? host.state.theme.colors.success : host.state.theme.colors.textDim);
+  flashStatus(host, status, enabled ? host.state.theme.colors.success : host.state.theme.colors.textDim);
 }

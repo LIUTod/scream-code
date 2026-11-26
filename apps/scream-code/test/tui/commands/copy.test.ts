@@ -104,3 +104,17 @@ describe('/copy', () => {
     expect(showStatus).not.toHaveBeenCalled();
   });
 });
+
+describe('/copy — toast', () => {
+  it('confirms with a toast, not a transcript row, when the view can show one', async () => {
+    clipboard.writeTextClipboard.mockClear();
+    const { host, showStatus } = makeHost([{ kind: 'assistant', content: 'an answer' }]);
+    const flash = vi.fn();
+    (host as { flash?: (message: string) => void }).flash = flash;
+
+    await handleCopyCommand(host);
+
+    expect(flash).toHaveBeenCalledWith(t('tui.copy_done'));
+    expect(showStatus).not.toHaveBeenCalled();
+  });
+});

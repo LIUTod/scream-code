@@ -12,11 +12,13 @@ import { t } from '@scream-code/config';
 import { toggleCodeBlockPanel } from '../utils/ui-preferences';
 import { repaintTranscript } from '../utils/transcript-repaint';
 
+import { flashStatus } from '../utils/flash-status';
 import type { SlashCommandHost } from './dispatch';
 
 export async function handleCodeBgCommand(host: SlashCommandHost, _args: string): Promise<void> {
   const enabled = toggleCodeBlockPanel();
-  host.showStatus(
+  flashStatus(
+    host,
     enabled ? t('codebg.enabled') : t('codebg.disabled'),
     enabled ? host.state.theme.colors.success : host.state.theme.colors.textDim,
   );

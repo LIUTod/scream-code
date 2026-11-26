@@ -13,6 +13,7 @@ import {
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent } from '../components/dialogs/choice-picker';
 import { getDataDir } from '#/utils/paths';
+import { flashStatus } from '../utils/flash-status';
 
 function promptTextInput(
   host: SlashCommandHost,
@@ -131,7 +132,7 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
     allowEmpty: true,
   });
   if (nickname === undefined) {
-    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
+    flashStatus(host, t('like.cancelled'), host.state.theme.colors.textDim);
     return;
   }
 
@@ -142,7 +143,7 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
     allowEmpty: true,
   });
   if (tone === undefined) {
-    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
+    flashStatus(host, t('like.cancelled'), host.state.theme.colors.textDim);
     return;
   }
 
@@ -153,7 +154,7 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
     allowEmpty: true,
   });
   if (other === undefined) {
-    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
+    flashStatus(host, t('like.cancelled'), host.state.theme.colors.textDim);
     return;
   }
 
@@ -164,7 +165,7 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
     allowEmpty: true,
   });
   if (doNot === undefined) {
-    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
+    flashStatus(host, t('like.cancelled'), host.state.theme.colors.textDim);
     return;
   }
 
@@ -172,7 +173,7 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
   // Reuses the choice picker; the selection is persisted with the other prefs.
   const toolPriority = await promptToolPriority(host, current.toolPriority);
   if (toolPriority === undefined) {
-    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
+    flashStatus(host, t('like.cancelled'), host.state.theme.colors.textDim);
     return;
   }
 

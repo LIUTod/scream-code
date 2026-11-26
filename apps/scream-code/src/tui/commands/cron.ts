@@ -17,6 +17,7 @@ import type { CronTaskInfo } from '@scream-code/scream-code-sdk';
 
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
+import { flashStatus } from '../utils/flash-status';
 import { formatErrorMessage } from '../utils/event-payload';
 
 import type { SlashCommandHost } from './dispatch';
@@ -327,7 +328,7 @@ async function pickKind(host: SlashCommandHost): Promise<boolean | undefined> {
 async function runWizard(host: SlashCommandHost, session: CronSession): Promise<void> {
   const cron = await pickSchedule(host);
   if (cron === undefined) {
-    host.showStatus(t('cron.cancelled'), host.state.theme.colors.textDim);
+    flashStatus(host, t('cron.cancelled'), host.state.theme.colors.textDim);
     await openPanel(host, session);
     return;
   }
@@ -338,14 +339,14 @@ async function runWizard(host: SlashCommandHost, session: CronSession): Promise<
   });
   const trimmedPrompt = prompt?.trim();
   if (trimmedPrompt === undefined || trimmedPrompt.length === 0) {
-    host.showStatus(t('cron.cancelled'), host.state.theme.colors.textDim);
+    flashStatus(host, t('cron.cancelled'), host.state.theme.colors.textDim);
     await openPanel(host, session);
     return;
   }
 
   const recurring = await pickKind(host);
   if (recurring === undefined) {
-    host.showStatus(t('cron.cancelled'), host.state.theme.colors.textDim);
+    flashStatus(host, t('cron.cancelled'), host.state.theme.colors.textDim);
     await openPanel(host, session);
     return;
   }

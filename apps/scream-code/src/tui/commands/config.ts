@@ -20,6 +20,7 @@ import { readExistingImageConfig } from '../utils/image-config';
 import { showUsage } from './info';
 import { refreshProviderBalance } from '../api-balance';
 import type { AppState, PlanModeState } from '../types';
+import { flashStatus } from '../utils/flash-status';
 import type { SlashCommandHost } from './dispatch';
 import type { AuthFlowController } from '../controllers/auth-flow';
 import type { TUIState } from '../tui-state';
@@ -551,7 +552,7 @@ function showEditorPicker(host: SlashCommandHost, back?: () => void): void {
 async function applyEditorChoice(host: SlashCommandHost, value: string): Promise<void> {
   const previous = host.state.appState.editorCommand ?? '';
   if (value === previous && value.length > 0) {
-    host.showStatus(t('editor.unchanged', { value }));
+    flashStatus(host, t('editor.unchanged', { value }));
     return;
   }
 
@@ -855,7 +856,7 @@ function showThemePicker(host: SlashCommandHost, back?: () => void): void {
 async function applyThemeChoice(host: SlashCommandHost, theme: Theme): Promise<void> {
   if (theme === host.state.appState.theme) {
     if (theme === 'auto') host.refreshTerminalThemeTracking();
-    host.showStatus(`Theme unchanged: "${theme}".`);
+    flashStatus(host, `Theme unchanged: "${theme}".`);
     return;
   }
   try {
@@ -907,7 +908,7 @@ export function showPermissionPicker(host: SlashCommandHost, back?: () => void):
 
 async function applyPermissionChoice(host: SlashCommandHost, mode: PermissionMode): Promise<void> {
   if (mode === host.state.appState.permissionMode) {
-    host.showStatus(`Permission mode unchanged: ${mode}.`);
+    flashStatus(host, `Permission mode unchanged: ${mode}.`);
     return;
   }
 

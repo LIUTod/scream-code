@@ -20,6 +20,7 @@ import {
 import { repaintTranscript } from '../utils/transcript-repaint';
 
 import type { ActivityLineKey } from '../utils/ui-preferences';
+import { flashStatus } from '../utils/flash-status';
 import type { SlashCommandHost } from './dispatch';
 
 function showSettingPicker(host: SlashCommandHost): void {
@@ -67,7 +68,8 @@ function showValuePicker(host: SlashCommandHost, key: ActivityLineKey): void {
         const resized = parsed !== getActivityLineValue(key);
         setActivityLineValue(key, parsed);
         host.restoreEditor();
-        host.showStatus(
+        flashStatus(
+          host,
           t('blockrows.saved', { label: t(setting.label), value: String(parsed) }),
           host.state.theme.colors.success,
         );

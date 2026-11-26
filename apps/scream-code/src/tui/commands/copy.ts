@@ -1,6 +1,7 @@
 import { t } from '@scream-code/config';
 
 import { writeTextClipboard } from '#/utils/clipboard/clipboard-text';
+import { flashStatus } from '../utils/flash-status';
 import type { SlashCommandHost } from './dispatch';
 
 /**
@@ -23,13 +24,13 @@ export async function handleCopyCommand(host: SlashCommandHost): Promise<void> {
   }
 
   if (latest === undefined) {
-    host.showStatus(t('tui.copy_empty'));
+    flashStatus(host, t('tui.copy_empty'));
     return;
   }
 
   try {
     await writeTextClipboard(latest);
-    host.showStatus(t('tui.copy_done'));
+    flashStatus(host, t('tui.copy_done'));
   } catch (error: unknown) {
     host.showError(
       t('tui.copy_failed', { msg: error instanceof Error ? error.message : String(error) }),

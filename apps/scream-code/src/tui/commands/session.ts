@@ -15,6 +15,7 @@ import { formatErrorMessage } from '../utils/event-payload';
 import { buildExportMarkdown } from '../utils/export-markdown';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
+import { flashStatus } from '../utils/flash-status';
 import type { SlashCommandHost } from './dispatch';
 
 // ---------------------------------------------------------------------------
@@ -203,7 +204,7 @@ export async function handleInitCommand(host: SlashCommandHost): Promise<void> {
     ? workDir
     : await selectInitTargetDir(host, workDir, projectRoot);
   if (targetDir === undefined) {
-    host.showStatus(t('init.cancelled'));
+    flashStatus(host, t('init.cancelled'));
     return;
   }
 
