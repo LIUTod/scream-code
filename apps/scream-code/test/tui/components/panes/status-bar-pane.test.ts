@@ -295,3 +295,36 @@ describe('StatusBarPaneComponent', () => {
     });
   });
 });
+
+describe('StatusBarPaneComponent — scroll cue', () => {
+  it('shows the cue after the wave while the transcript is scrolled up', () => {
+    const pane = new StatusBarPaneComponent({
+      mode: 'thinking',
+      label: '',
+      pulseWave: fakeWave(),
+      scrollCue: activity('↓ 2 new messages'),
+    });
+    expect(strip(pane.render(80)[0] ?? '').trimEnd()).toBe(' ⬝  ↓ 2 new messages');
+  });
+
+  it('is mounted on an idle row too, and disappears when the cue ends', () => {
+    let cue: { text: string } | null = { text: '↓ 1 new message' };
+    const pane = new StatusBarPaneComponent({ mode: 'idle', label: '', scrollCue: () => cue });
+    expect(strip(pane.render(80)[0] ?? '').trimEnd()).toBe(' ↓ 1 new message');
+    cue = null;
+    expect(pane.render(80)).toEqual([]);
+  });
+
+  it('outranks the collaboration ticker and the label when the row is short', () => {
+    const pane = new StatusBarPaneComponent({
+      mode: 'thinking',
+      label: 'a long reconnect label that would take the row',
+      pulseWave: fakeWave(),
+      scrollCue: activity('↓ 3 new messages'),
+      activity: activity('agent a → agent b: please review this change'),
+    });
+    const line = strip(pane.render(34)[0] ?? '');
+    expect(line).toContain('↓ 3 new messages');
+    expect(visibleWidth(line)).toBeLessThanOrEqual(34);
+  });
+});

@@ -46,6 +46,13 @@ export interface StatusBarPaneOptions {
    * fired reminder; it expires on its own TTL like every other chip here.
    */
   readonly notice?: () => StatusChipLine | null;
+  /**
+   * Shown while the transcript is scrolled up and the session goes on below it
+   * ("↓ 2 new messages"). Read live like the other chips, drawn right after
+   * the wave: it is what the person scrolled away from, so it ranks above the
+   * collaboration ticker and below a fired reminder.
+   */
+  readonly scrollCue?: () => StatusChipLine | null;
 }
 
 /** One piece of the status row. Lower `rank` = higher priority; rank 0 (the wave) is never dropped. */
@@ -64,8 +71,9 @@ const STATUS_ROW_SEPARATOR = 2;
  * The lowest-priority part goes first: it is truncated (single `…`) when it
  * would still keep at least {@link MIN_TRUNCATED_CHIP_COLS} columns, otherwise
  * dropped whole, so a chip never shows up as a bare `...`. Priority: wave
- * (never dropped) > reminder > collaboration ticker > MCP notice > label. The
- * last part standing is clipped by the caller's width truncation instead.
+ * (never dropped) > reminder > scroll cue > collaboration ticker > MCP notice
+ * > label. The last part standing is clipped by the caller's width truncation
+ * instead.
  */
 export function fitStatusRow(parts: readonly StatusRowPart[], width: number): string {
   const available = Math.max(1, width - 1); // leading space
@@ -108,6 +116,7 @@ class StatusLine implements Component {
     private readonly reminder: (() => StatusChipLine | null) | undefined,
     private readonly activity: (() => StatusChipLine | null) | undefined,
     private readonly notice: (() => StatusChipLine | null) | undefined,
+    private readonly scrollCue: (() => StatusChipLine | null) | undefined,
     /** Idle rows: an actionable collaboration notice supersedes the rotating
      * tip, which would otherwise eat the whole row and truncate the notice
      * away. Informational MCP notices do NOT collapse the tip — they append
@@ -120,6 +129,7 @@ class StatusLine implements Component {
     const reminder = this.reminder?.() ?? null;
     const activity = this.activity?.() ?? null;
     const notice = this.notice?.() ?? null;
+    const cue = this.scrollCue?.() ?? null;
     const showLabel = !(this.labelCollapsesOnChip && (reminder !== null || activity !== null));
 
     const waveText = this.wave !== undefined ? this.wave.getFrameText() : null;
@@ -130,6 +140,7 @@ class StatusLine implements Component {
     const reminderText = paintChip(reminder);
     const activityText = paintChip(activity);
     const noticeText = paintChip(notice);
+    const cueText = paintChip(cue);
     let labelText: string | null =
       showLabel && this.label.length > 0
         ? this.labelColor === undefined
@@ -141,6 +152,7 @@ class StatusLine implements Component {
     // priority — see fitStatusRow.
     const parts: StatusRowPart[] = [];
     if (waveText !== null) parts.push({ text: waveText, rank: 0 });
+    if (cueText !== null) parts.push({ text: cueText, rank: 1.5 });
     if (labelText !== null && labelText.length > 0) parts.push({ text: labelText, rank: 4 });
     if (reminderText !== null) parts.push({ text: reminderText, rank: 1 });
     if (activityText !== null) parts.push({ text: activityText, rank: 2 });
@@ -186,7 +198,8 @@ export class StatusBarPaneComponent extends Container {
         options.label.length > 0 ||
         options.reminder !== undefined ||
         options.activity !== undefined ||
-        options.notice !== undefined
+        options.notice !== undefined ||
+        options.scrollCue !== undefined
       ) {
         this.addChild(
           new StatusLine(
@@ -196,6 +209,7 @@ export class StatusBarPaneComponent extends Container {
             options.reminder,
             options.activity,
             options.notice,
+            options.scrollCue,
             true,
           ),
         );
@@ -211,6 +225,7 @@ export class StatusBarPaneComponent extends Container {
           options.reminder,
           options.activity,
           options.notice,
+          options.scrollCue,
         ),
       );
       return;

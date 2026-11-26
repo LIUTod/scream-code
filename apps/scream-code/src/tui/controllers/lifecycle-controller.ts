@@ -1,11 +1,13 @@
 import type { Session, ScreamHarness, TokenUsage } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import { Container, HStack, ScrollView, VStack } from '@liutod-scream/pi-tui';
+import chalk from 'chalk';
 import { composeTipLabel, pickTipIndex } from '../utils/tip-hyperlink';
 import { GutterContainer } from '../components/chrome/gutter-container';
 import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
 import { SESSION_TIPS, TIP_ROTATION_INTERVAL_MS } from '../constant/scream-tui';
-import { StatusBarPaneComponent } from '../components/panes/status-bar-pane';
+import { StatusBarPaneComponent, type StatusChipLine } from '../components/panes/status-bar-pane';
+import { ScrollCue } from '../utils/scroll-cue';
 import {
   SIDEBAR_MIN_VIEWPORT_WIDTH,
   type SidebarData,
@@ -162,6 +164,8 @@ export class LifecycleController {
   /** The active status-bar loader (PulseWaveLoader or MoonLoader). Owned by
    * this controller; stopped before replacement to avoid leaking timers. */
   private statusBarLoader: PulseWaveLoader | undefined;
+  /** Counts the replies that arrive while the transcript is scrolled up. */
+  private readonly scrollCue = new ScrollCue();
   /** Single-slot collaboration ticker (subagent ↔ main agent traffic). */
   private collabActivity: { text: string; color: string } | null = null;
   private collabTimer: ReturnType<typeof setTimeout> | undefined;
@@ -878,6 +882,7 @@ export class LifecycleController {
               reminder: () => this.getReminderActivity(),
               activity: () => this.getCollabActivity(),
               notice: () => this.getMcpActivity(),
+              scrollCue: () => this.getScrollCue(),
             }),
           );
         }
@@ -911,6 +916,7 @@ export class LifecycleController {
             reminder: () => this.getReminderActivity(),
             activity: () => this.getCollabActivity(),
             notice: () => this.getMcpActivity(),
+            scrollCue: () => this.getScrollCue(),
           }),
         );
         if (tip !== undefined) this.startTipRotation();
@@ -918,6 +924,18 @@ export class LifecycleController {
       }
     }
     state.ui.requestRender();
+  }
+
+  /** "↓ 2 new messages" while the transcript is scrolled up and the session goes on below. */
+  private getScrollCue(): StatusChipLine | null {
+    const { state } = this.host;
+    const cue = this.scrollCue.read(state.ui.isFollowingOutput, state.transcriptEntries);
+    if (cue === null) return null;
+    const colors = state.theme.colors;
+    const hint = chalk.hex(colors.textDim)(t('scrollcue.back'));
+    if (cue.newReplies === 0) return { text: `${chalk.hex(colors.primary).bold('↓')} ${hint}` };
+    const news = cue.newReplies === 1 ? t('scrollcue.one') : t('scrollcue.many', { count: String(cue.newReplies) });
+    return { text: `${chalk.hex(colors.primary).bold(news)} ${chalk.hex(colors.textDim)('·')} ${hint}` };
   }
 
   /** The idle tip line delegates its optional domain link to composeTipLabel
