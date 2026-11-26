@@ -6,7 +6,7 @@
  */
 
 import type { Component, MarkdownOptions, MarkdownTheme, TUI } from '@liutod-scream/pi-tui';
-import { Container, Markdown, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
+import { Container, copyContentStart, Markdown, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { MESSAGE_INDENT } from '#/tui/constant/rendering';
@@ -149,7 +149,7 @@ export class AssistantMessageComponent implements Component {
         i === 0 && this.showBullet
           ? chalk.hex(activeBulletColor)(STATUS_BULLET)
           : MESSAGE_INDENT;
-      lines.push(p + contentLines[i]);
+      lines.push(p + copyContentStart() + contentLines[i]);
     }
 
     const rendered = lines.map((line) => truncateToWidth(line, safeWidth, '…'));

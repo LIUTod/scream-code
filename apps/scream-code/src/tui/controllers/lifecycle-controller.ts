@@ -24,6 +24,7 @@ import { goalPanel } from '../components/sidebar/panels/goal-panel';
 import { hubPanel } from '../components/sidebar/panels/hub-panel';
 import { buildHubSamples, createHubProbe } from '../utils/hub-probe';
 import { CHROME_GUTTER, DOCK_FOOTER_ROWS, DOCK_STATUS_ROWS } from '../constant/rendering';
+import { USER_MESSAGE_BULLET } from '../constant/symbols';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
 import type { SessionReplayRenderer } from './session-replay';
@@ -490,6 +491,10 @@ export class LifecycleController {
       follow: 'end',
       primary: true,
       scrollbar: 'auto',
+      // Scrolled up past a prompt, the first row keeps saying what the stretch
+      // on screen is an answer to. Quieter than the prompt itself: it is a
+      // reminder, not another message.
+      stickyPrompt: (text) => this.stickyPromptRow(text),
     });
     const dock = new VStack([
       // Hide the todo panel on narrow terminals so the editor and footer
@@ -924,6 +929,13 @@ export class LifecycleController {
       }
     }
     state.ui.requestRender();
+  }
+
+  /** The pinned prompt row at the top of a scrolled-up transcript. */
+  private stickyPromptRow(text: string): string {
+    const colors = this.host.state.theme.colors;
+    const gutter = ' '.repeat(CHROME_GUTTER);
+    return `${gutter}${chalk.hex(colors.roleUser)(USER_MESSAGE_BULLET)}${chalk.hex(colors.textDim)(text)}`;
   }
 
   /** "↓ 2 new messages" while the transcript is scrolled up and the session goes on below. */

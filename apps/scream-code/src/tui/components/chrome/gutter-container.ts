@@ -9,7 +9,7 @@
  * the edge and adding them would just churn the diff renderer.
  */
 
-import { Container } from '@liutod-scream/pi-tui';
+import { Container, copyContentStart } from '@liutod-scream/pi-tui';
 
 /**
  * OSC 133 zone markers at the head of a row ("a prompt starts here"). The
@@ -17,6 +17,14 @@ import { Container } from '@liutod-scream/pi-tui';
  * prompts, so the gutter goes after them, not before.
  */
 const ZONE_MARKERS = /^(?:\u001B\]133;[ABC](?:\u0007|\u001B\\))+/;
+
+/**
+ * A row's own "my text starts here" marker (see the terminal view's row
+ * markers). A child that marked one has already said where its decoration ends,
+ * further right than the gutter; a row that did not gets the gutter as its
+ * decoration, so a copy does not carry the padding along.
+ */
+const HAS_CONTENT_START = '\u001B]9911';
 
 export class GutterContainer extends Container {
   constructor(
@@ -33,7 +41,9 @@ export class GutterContainer extends Container {
     for (const child of this.children) {
       for (const line of child.render(inner)) {
         const markers = ZONE_MARKERS.exec(line)?.[0] ?? '';
-        out.push(markers + lead + line.slice(markers.length));
+        const rest = line.slice(markers.length);
+        const edge = this.leftPad > 0 && !rest.includes(HAS_CONTENT_START) ? copyContentStart() : '';
+        out.push(markers + lead + edge + rest);
       }
     }
     return out;

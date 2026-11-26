@@ -28,7 +28,8 @@ import {
 } from '#/tui/utils/ui-preferences';
 
 const FENCE = '```';
-const ANSI = /\u001B\[[0-9;]*m/g;
+// Colour codes, and the invisible row markers a rendered reply carries for copy.
+const ANSI = /\u001B\[[0-9;]*m|\u001B\](?:9911|9913|9912;\d+)(?:\u0007|\u001B\\)/g;
 
 const FLOW = [
   'flowchart LR',

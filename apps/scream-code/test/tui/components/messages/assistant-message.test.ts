@@ -1,4 +1,4 @@
-import { visibleWidth } from '@liutod-scream/pi-tui';
+import { readRowCopyInfo, visibleWidth } from '@liutod-scream/pi-tui';
 import type { TUI } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { describe, expect, it, vi } from 'vitest';
@@ -11,9 +11,10 @@ import { toggleCodeBlockPanel } from '#/tui/utils/ui-preferences';
 import { FADE_MS } from '#/tui/utils/streaming-fade';
 
 import { captureProcessWrite } from '../../../helpers/process';
+import { withoutRowMarkers } from '../../../helpers/row-markers';
 
 function strip(text: string): string {
-  return text.replaceAll(/\u001B\[[0-9;]*m/g, '');
+  return withoutRowMarkers(text.replaceAll(/\u001B\[[0-9;]*m/g, ''));
 }
 
 // Extract the first truecolor foreground RGB from a line, as "r;g;b".
@@ -351,5 +352,53 @@ describe('fenced code panel', () => {
     expect(strip(theme.codeBlockBorder?.('```ts') ?? '')).toContain('ts');
     expect(strip(line)).not.toContain('ts');
     expect(theme.codeBlockBorder?.('```')).toBeNull();
+  });
+});
+
+describe('copy markers', () => {
+  function render(text: string, width = 60): string[] {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+    component.updateContent(text);
+    return component.render(width);
+  }
+
+  it('marks where the text starts, after the bullet, so a copy leaves the bullet out', () => {
+    const rows = render('hello world');
+    const row = rows.find((candidate) => strip(candidate).includes('hello world')) ?? '';
+    expect(readRowCopyInfo(row)?.contentStart).toBe(visibleWidth(STATUS_BULLET));
+  });
+
+  it('marks a row the wrapper broke off a paragraph as its continuation, with the dropped space', () => {
+    const rows = render('the quick brown fox jumps over the lazy dog and keeps running far away', 24);
+    const body = rows.filter((row) => strip(row).trim().length > 0);
+    expect(body.length).toBeGreaterThan(2);
+    expect(readRowCopyInfo(body[0]!)?.softWrapGap).toBeUndefined();
+    for (const row of body.slice(1)) expect(readRowCopyInfo(row)?.softWrapGap).toBe(1);
+  });
+
+  it('leaves the language caption of a code block out of a copy', () => {
+    const rows = render(['before', '', '```ts', 'const a = 1;', '```'].join('\n'));
+    const caption = rows.find((row) => strip(row).trim() === 'ts') ?? '';
+    const code = rows.find((row) => strip(row).includes('const a = 1;')) ?? '';
+    expect(readRowCopyInfo(caption)?.hidden).toBe(true);
+    expect(readRowCopyInfo(code)?.hidden).toBe(false);
+    expect(readRowCopyInfo(code)?.contentStart).toBeGreaterThan(0);
+  });
+
+  it('joins a code line cut by the panel width back together, spaces included', () => {
+    const line = 'echo one two three four five six seven eight nine ten';
+    const rows = render(['before', '', '```sh', line, '```'].join('\n'), 24);
+    const afterCaption = rows.slice(rows.findIndex((row) => readRowCopyInfo(row)?.hidden === true) + 1);
+    const pieces = afterCaption.filter((row) => strip(row).trim().length > 0);
+    expect(pieces.length).toBeGreaterThan(1);
+    // Rebuild the way a selection does: each row's text past the content edge, trimmed, joined by its gap.
+    let rebuilt = '';
+    for (const row of pieces) {
+      const info = readRowCopyInfo(row)!;
+      // The command is ASCII, so cells and characters are the same thing here.
+      const text = strip(row).slice(info.contentStart).trimEnd();
+      rebuilt += info.softWrapGap === undefined ? (rebuilt === '' ? '' : '\n') + text : ' '.repeat(info.softWrapGap) + text;
+    }
+    expect(rebuilt).toBe(line);
   });
 });

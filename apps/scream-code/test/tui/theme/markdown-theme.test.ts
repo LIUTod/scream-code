@@ -14,6 +14,8 @@ import chalk from 'chalk';
 import { darkColors, lightColors } from '#/tui/theme/colors';
 import { createMarkdownTheme } from '#/tui/theme/pi-tui-theme';
 
+import { withoutRowMarkers } from '../../helpers/row-markers';
+
 /** SGR prefix chalk emits for a hex colour at level 3. */
 function sgr(hex: string): string {
   const value = Number.parseInt(hex.replace('#', ''), 16);
@@ -94,7 +96,7 @@ describe('markdown theme colours', () => {
  *  2. no columns are reserved for it — the wrap point depends only on width.
  */
 describe('code block language caption', () => {
-  const strip = (value: string): string => value.replaceAll(/\u001B\[[0-9;]*m/g, '');
+  const strip = (value: string): string => withoutRowMarkers(value.replaceAll(/\u001B\[[0-9;]*m/g, ''));
 
   for (const [name, colors] of [
     ['dark', darkColors],
@@ -161,7 +163,7 @@ describe('code block language caption', () => {
 });
 
 describe('code rows survive absurd widths', () => {
-  const strip = (value: string): string => value.replaceAll(/\u001B\[[0-9;]*m/g, '');
+  const strip = (value: string): string => withoutRowMarkers(value.replaceAll(/\u001B\[[0-9;]*m/g, ''));
   const rowsOf = (source: string, width: number): string[] =>
     (
       createMarkdownTheme(darkColors).codeBlockLine?.(source, {

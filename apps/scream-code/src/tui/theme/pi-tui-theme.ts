@@ -6,7 +6,15 @@
  */
 
 import type { MarkdownTheme, EditorTheme } from '@liutod-scream/pi-tui';
-import { sliceByColumn, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
+import {
+  copyContentStart,
+  copyHiddenRow,
+  copySoftWrap,
+  sliceByColumn,
+  stripTerminalSequences,
+  truncateToWidth,
+  visibleWidth,
+} from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { highlight, supportsLanguage, type Theme } from 'cli-highlight';
 
@@ -138,6 +146,11 @@ function sliceCodeRows(line: string, width: number): string[] {
   return rows;
 }
 
+/** Spaces at the end of a plain-text row. */
+function trailingSpaces(text: string): number {
+  return text.length - text.trimEnd().length;
+}
+
 export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
   const stripHash = (text: string): string => text.replace(HEADING_HASH_PREFIX, '$1');
   // pi-tui renders a heading as `heading(bold(text))`. Since `bold` now carries
@@ -172,7 +185,8 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
       // The library wraps whatever the hook returns, so an over-wide caption
       // would become a second, unstyled row instead of a caption. Clip by
       // columns (not code units — 16 CJK characters are 32 cells).
-      return ` ${chalk.hex(colors.mdCodeBlockBorder).italic(truncateToWidth(lang, 16))}`;
+      // The caption is interface, not code: a copy leaves the row out.
+      return `${copyHiddenRow()} ${chalk.hex(colors.mdCodeBlockBorder).italic(truncateToWidth(lang, 16))}`;
     },
     codeBlockIndent: ' ',
     codeBlockLine: (line, { width }) => {
@@ -193,9 +207,14 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
       const panelled = isCodeBlockPanelEnabled();
       const paint = panelled ? chalk.bgHex(colors.mdCodeBlockBg) : (text: string): string => text;
       return rows
-        .map((row) => {
+        .map((row, index) => {
           const padCells = Math.max(0, width - visibleWidth(row) - gutter);
-          return `${paint(' ')}${paint(row)}${paint(' '.repeat(padCells))}`;
+          // A copy skips the gutter, and a row cut from a long source line is
+          // joined back to the one above — with the spaces the cut fell after,
+          // which the panel's own padding makes impossible to tell apart.
+          const joined =
+            index === 0 ? '' : copySoftWrap(trailingSpaces(stripTerminalSequences(rows[index - 1] ?? '')));
+          return `${joined}${paint(' ')}${copyContentStart()}${paint(row)}${paint(' '.repeat(padCells))}`;
         })
         .join('\n');
     },

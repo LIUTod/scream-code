@@ -14,7 +14,7 @@
  */
 
 import type { Component } from '@liutod-scream/pi-tui';
-import { Spacer, Text, visibleWidth } from '@liutod-scream/pi-tui';
+import { copyContentStart, Spacer, Text, visibleWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
@@ -60,7 +60,8 @@ export class UserMessageComponent implements Component {
     // real user messages — they never get the band.
     this.isSystemReminder = text.trimStart().startsWith('<system-reminder>');
     this.textContent = text;
-    this.textComponent = new Text('', 0, 0);
+    // Rows the wrapper breaks are tagged, so a copy joins them back into the line that was typed.
+    this.textComponent = new Text('', 0, 0, undefined, { copyMarkers: true });
     this.spacerComponent = new Spacer(1);
     this.imageThumbnails = images?.map((img) => new ImageThumbnail(img, colors)) ?? [];
   }
@@ -97,12 +98,12 @@ export class UserMessageComponent implements Component {
       // Only a real message is a prompt; a system reminder is not.
       const start = index === 0 && !this.isSystemReminder ? PROMPT_START : '';
       if (!banded) {
-        lines.push(start + prefix + row);
+        lines.push(start + prefix + copyContentStart() + row);
         return;
       }
       // The band runs across the row: re-opened after any reset inside the
       // styled text, padded to the full width, and closed at the end.
-      const body = `${prefix}${row}`.replaceAll(SGR_RESET_RE, (reset) => reset + bandOpen);
+      const body = `${prefix}${copyContentStart()}${row}`.replaceAll(SGR_RESET_RE, (reset) => reset + bandOpen);
       const pad = ' '.repeat(Math.max(0, width - visibleWidth(body)));
       lines.push(`${start}${bandOpen}${body}${pad}\u001B[49m`);
     });

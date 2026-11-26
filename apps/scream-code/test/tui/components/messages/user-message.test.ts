@@ -1,4 +1,4 @@
-import { visibleWidth } from '@liutod-scream/pi-tui';
+import { readRowCopyInfo, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,11 +11,13 @@ vi.mock('#/tui/utils/ui-preferences', async (importOriginal) => {
 import { UserMessageComponent } from '#/tui/components/messages/user-message';
 import { darkColors, lightColors, type ColorPalette } from '#/tui/theme/colors';
 
+import { withoutRowMarkers } from '../../../helpers/row-markers';
+
 /** Head of the first row of a real message: the terminal view's "prompt starts here" marker. */
 const PROMPT = '\u001B]133;A\u0007';
 
 function stripAnsi(text: string): string {
-  return text.replaceAll(/\u001B\[[0-9;]*m/g, '').replaceAll(PROMPT, '');
+  return withoutRowMarkers(text.replaceAll(/\u001B\[[0-9;]*m/g, '').replaceAll(PROMPT, ''));
 }
 const bg = (hex: string): string => {
   const [r, g, b] = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
@@ -159,5 +161,28 @@ describe('UserMessageComponent — prompt marker', () => {
   it('does not mark a system reminder: it is not something the person said', () => {
     const rows = new UserMessageComponent('<system-reminder>be careful</system-reminder>', darkColors).render(60);
     expect(rows.join('')).not.toContain(PROMPT);
+  });
+});
+
+describe('UserMessageComponent — copy markers', () => {
+  it('marks where the text starts, after the role marker, on every row', () => {
+    const rows = new UserMessageComponent('first line\nsecond line', darkColors).render(60);
+    const message = rows.filter((row) => row.includes('line'));
+    expect(message).toHaveLength(2);
+    for (const row of message) expect(readRowCopyInfo(row)?.contentStart).toBe(2);
+  });
+
+  it('marks a row the wrapper broke as the continuation of the one above', () => {
+    const rows = new UserMessageComponent('alpha bravo charlie delta echo foxtrot golf', darkColors).render(20);
+    const message = rows.filter((row) => /[a-z]/.test(withoutRowMarkers(row)));
+    expect(message.length).toBeGreaterThan(1);
+    expect(readRowCopyInfo(message[0]!)?.softWrapGap).toBeUndefined();
+    for (const row of message.slice(1)) expect(readRowCopyInfo(row)?.softWrapGap).toBe(1);
+  });
+
+  it('does not mark a row after a real newline as a continuation', () => {
+    const rows = new UserMessageComponent('one\ntwo', darkColors).render(60);
+    const message = rows.filter((row) => /[a-z]/.test(withoutRowMarkers(row)));
+    for (const row of message) expect(readRowCopyInfo(row)?.softWrapGap).toBeUndefined();
   });
 });

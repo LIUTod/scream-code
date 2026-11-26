@@ -28,6 +28,8 @@ export function diagramMarkdownOptions(
 ): MarkdownOptions {
   const theme = createDiagramTheme(colors);
   return {
+    // A copy joins the rows the wrapper broke and leaves the layout out.
+    copyMarkers: true,
     transform: createMarkdownTransform(messageKind, isStreaming, [
       createMermaidTransformer({ getTheme: () => theme }),
     ]),
