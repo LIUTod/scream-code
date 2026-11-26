@@ -16,6 +16,7 @@ import {
 } from '@scream-code/scream-code-sdk';
 
 import { BUILT_IN_CATALOG_JSON } from '../../built-in-catalog';
+import { CUSTOM_PROVIDER_PREFIX } from '../../constant/app';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 
 import { resolveConnectCatalogRequest } from '../utils/connect-catalog';
@@ -317,7 +318,7 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   if (audioEnabled === undefined) return;
 
   // Build a provider ID from the model name
-  const providerId = `custom-${modelId.replaceAll(/[^A-Za-z0-9._-]/g, '-')}`;
+  const providerId = `${CUSTOM_PROVIDER_PREFIX}${modelId.replaceAll(/[^A-Za-z0-9._-]/g, '-')}`;
 
   // Build a minimal catalog model entry
   const catalogModel: CatalogModel = {

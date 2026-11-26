@@ -17,6 +17,11 @@ export const SCREAM_CODE_COMMAND_USAGE_FILE_NAME = 'command-usage.json';
 // Managed Scream auth provider key shared with OAuth/SDK config.
 export const DEFAULT_OAUTH_PROVIDER_NAME = 'managed:scream-code';
 
+// A provider made by `/config diy` is named `custom-<model id>`. Its name only
+// repeats the model's own, so the model list shows this label for all of them.
+export const CUSTOM_PROVIDER_PREFIX = 'custom-';
+export const CUSTOM_PROVIDER_LABEL = 'diy';
+
 // GitHub — sole source of truth for the project.
 export const SCREAM_CODE_PLUGIN_MARKETPLACE_URL =
   'https://raw.githubusercontent.com/LIUTod/scream-code/main/plugins/marketplace.json';

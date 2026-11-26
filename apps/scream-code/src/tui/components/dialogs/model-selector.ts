@@ -11,7 +11,12 @@ import {
 } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
-import { DEFAULT_OAUTH_PROVIDER_NAME, PRODUCT_NAME } from '#/constant/app';
+import {
+  CUSTOM_PROVIDER_LABEL,
+  CUSTOM_PROVIDER_PREFIX,
+  DEFAULT_OAUTH_PROVIDER_NAME,
+  PRODUCT_NAME,
+} from '#/constant/app';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { panelRowBudget } from '#/tui/utils/panel-rows';
 import { SearchableList } from '#/tui/utils/searchable-list';
@@ -41,6 +46,8 @@ export function modelDisplayName(alias: string, model: ModelAlias | undefined): 
 
 export function providerDisplayName(provider: string): string {
   if (provider === DEFAULT_OAUTH_PROVIDER_NAME) return PRODUCT_NAME;
+  // Made by /config diy, and named after the model it holds: say what it is, not the generated id.
+  if (provider.startsWith(CUSTOM_PROVIDER_PREFIX)) return CUSTOM_PROVIDER_LABEL;
   if (provider.startsWith('managed:')) return provider.slice('managed:'.length);
   return provider;
 }

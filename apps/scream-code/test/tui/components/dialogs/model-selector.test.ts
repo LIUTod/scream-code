@@ -1,7 +1,11 @@
 import { visibleWidth } from '@liutod-scream/pi-tui';
 import { describe, expect, it } from 'vitest';
 
-import { formatContextSize, ModelSelectorComponent } from '#/tui/components/dialogs/model-selector';
+import {
+  formatContextSize,
+  ModelSelectorComponent,
+  providerDisplayName,
+} from '#/tui/components/dialogs/model-selector';
 import { getColorPalette } from '#/tui/theme/colors';
 
 const COLORS = getColorPalette('dark');
@@ -173,5 +177,49 @@ describe('ModelSelectorComponent — narrow key hint', () => {
     expect(hint).toContain('Esc 取消');
     expect(hint).not.toContain('…');
     expect(hint).not.toContain('PgUp');
+  });
+});
+
+describe('ModelSelectorComponent — models added with /config diy', () => {
+  const entry = (provider: string, model: string, displayName: string, capabilities: string[]) =>
+    ({ provider, model, displayName, maxContextSize: 1_000_000, capabilities }) as never;
+  function diyModels(): Record<string, never> {
+    return {
+      'my-model-0417': entry('custom-my-model-0417', 'my-model-0417', 'my-model-0417', ['thinking', 'image_in']),
+      'my-model:free': entry('custom-my-model-free', 'my-model:free', 'my-model:free', ['thinking']),
+      'alpha-1': entry('acme', 'alpha-1', 'Alpha 1', ['thinking']),
+    } as Record<string, never>;
+  }
+
+  it('shows one short label for the provider instead of the generated id that repeats the model name', () => {
+    const text = make({ models: diyModels(), currentValue: 'alpha-1' }).render(100).map(strip);
+    const rows = ['my-model-0417', 'my-model:free'].map((name) => text.find((line) => line.includes(name)) ?? '');
+    for (const row of rows) {
+      expect(row).toContain('diy');
+      expect(row).not.toContain('custom-');
+    }
+    // A provider that is not custom keeps its own name.
+    expect(text.find((line) => line.includes('Alpha 1')) ?? '').toContain('acme');
+  });
+
+  it('finds the custom models by typing the label', () => {
+    const selector = make({ models: diyModels(), currentValue: 'alpha-1' });
+    for (const ch of 'diy') selector.handleInput(ch);
+    const text = selector.render(100).map(strip).join('\n');
+    expect(text).toContain('my-model-0417');
+    expect(text).toContain('my-model:free');
+    expect(text).not.toContain('Alpha 1');
+  });
+});
+
+describe('providerDisplayName', () => {
+  it('calls every provider made by /config diy the same short name', () => {
+    expect(providerDisplayName('custom-my-model-0417')).toBe('diy');
+    expect(providerDisplayName('custom-x')).toBe('diy');
+  });
+
+  it('leaves other providers as they were', () => {
+    expect(providerDisplayName('acme')).toBe('acme');
+    expect(providerDisplayName('managed:nimbus')).toBe('nimbus');
   });
 });
