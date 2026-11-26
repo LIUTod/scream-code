@@ -39,20 +39,42 @@ import {
   fuzzyFilter,
   fuzzyMatch,
   truncateToWidth,
+  visibleWidth,
   type AutocompleteItem,
   type AutocompleteProvider,
   type AutocompleteSuggestions,
   type SlashCommand,
 } from '@liutod-scream/pi-tui';
 
+import { commandUsageWeight, mostUsedCommands } from '#/tui/utils/command-usage';
 import type { GitLsFilesCache, GitSnapshot } from '#/utils/git/git-ls-files';
 
+/**
+ * Widest command name the menu gives a column. The editor's menu caps its name
+ * column at 20 cells (two of them a gap), so every label is padded to the same
+ * width up to this: the descriptions then stay put while the list is filtered
+ * instead of shifting left each time the longest visible name goes away.
+ */
+const SLASH_LABEL_MAX_WIDTH = 18;
 const MAX_SUGGESTIONS_WHEN_QUERY = 50;
 const MAX_SUGGESTIONS_WHEN_EMPTY = 15;
 
 // Mirrors pi-tui's PATH_DELIMITERS. Keeping a local copy so @-detection
 // stays aligned even if pi-tui extends its set.
 const PATH_DELIMITERS = new Set([' ', '\t', '"', "'", '=']);
+
+/** What the menu knows about the commands the person runs. */
+export interface CommandUsageSource {
+  /** How much `name` has been used lately; 0 when never. */
+  weight(name: string): number;
+  /** The most used of `names`, heaviest first. */
+  mostUsed(names: readonly string[]): string[];
+}
+
+const RECORDED_USAGE: CommandUsageSource = {
+  weight: (name) => commandUsageWeight(name),
+  mostUsed: (names) => mostUsedCommands(names),
+};
 
 export class FileMentionProvider implements AutocompleteProvider {
   private readonly inner: CombinedAutocompleteProvider;
@@ -63,6 +85,7 @@ export class FileMentionProvider implements AutocompleteProvider {
     workDir: string,
     private readonly fdPath: string | null,
     private readonly gitCache: GitLsFilesCache,
+    private readonly usage: CommandUsageSource = RECORDED_USAGE,
   ) {
     this.slashCommandItems = slashCommands.map((cmd) => {
       const ac = cmd as AutocompleteItem;
@@ -83,6 +106,14 @@ export class FileMentionProvider implements AutocompleteProvider {
       // one-item-per-row assumption and corrupts the scroll viewport.
       const shortDesc = described ? truncateToWidth(described, 60, '…') : '';
       return { value: name, label: `/${name}`, description: shortDesc === '' ? undefined : shortDesc };
+    });
+    const labelWidth = Math.min(
+      SLASH_LABEL_MAX_WIDTH,
+      Math.max(0, ...this.slashCommandItems.map((item) => visibleWidth(item.label ?? item.value))),
+    );
+    this.slashCommandItems = this.slashCommandItems.map((item) => {
+      const label = item.label ?? item.value;
+      return { ...item, label: label + ' '.repeat(Math.max(0, labelWidth - visibleWidth(label))) };
     });
     this.inner = new CombinedAutocompleteProvider(slashCommands, workDir, fdPath);
   }
@@ -108,11 +139,14 @@ export class FileMentionProvider implements AutocompleteProvider {
       // MAX_SUGGESTIONS_WHEN_QUERY), the command list is bounded by the
       // registry + installed skills and the menu scrolls, so capping at 50
       // only made the tail (skills) unreachable.
-      const filtered = fuzzyFilter(this.slashCommandItems, query, (item) =>
+      const textOf = (item: AutocompleteItem): string =>
         !query.startsWith('skill:') && item.value.startsWith('skill:')
           ? item.value.slice('skill:'.length)
-          : item.value,
-      );
+          : item.value;
+      const filtered =
+        query.length === 0
+          ? this.withRecentFirst(this.slashCommandItems)
+          : this.rankedByUse(fuzzyFilter(this.slashCommandItems, query, textOf), query, textOf);
       if (filtered.length === 0) return null;
       return { items: filtered, prefix: textBeforeCursor };
     }
@@ -152,6 +186,43 @@ export class FileMentionProvider implements AutocompleteProvider {
       return this.inner.getSuggestions(lines, cursorLine, cursorCol, options);
     }
     return { items, prefix: atPrefix };
+  }
+
+  /** The commands run most lately first, marked as such; the rest in registry order. */
+  private withRecentFirst(items: readonly AutocompleteItem[]): AutocompleteItem[] {
+    const recent = this.usage.mostUsed(items.map((item) => item.value));
+    if (recent.length === 0) return [...items];
+    const byValue = new Map(items.map((item) => [item.value, item]));
+    const mark = t('slash.recent');
+    const head = recent.flatMap((value) => {
+      const item = byValue.get(value);
+      if (item === undefined) return [];
+      const description = item.description === undefined ? mark : `${item.description}  · ${mark}`;
+      return [{ ...item, description }];
+    });
+    const taken = new Set(recent);
+    return [...head, ...items.filter((item) => !taken.has(item.value))];
+  }
+
+  /**
+   * Fuzzy order, with ties — the same score, as for a one-letter query that
+   * every name starts with — settled by what the person runs, not by the
+   * registry's alphabet.
+   */
+  private rankedByUse(
+    items: readonly AutocompleteItem[],
+    query: string,
+    textOf: (item: AutocompleteItem) => string,
+  ): AutocompleteItem[] {
+    const tokens = query.trim().split(/[\s/]+/).filter((token) => token.length > 0);
+    const scored = items.map((item, index) => ({
+      item,
+      index,
+      score: tokens.reduce((sum, token) => sum + fuzzyMatch(token, textOf(item)).score, 0),
+      use: this.usage.weight(item.value),
+    }));
+    scored.sort((a, b) => a.score - b.score || b.use - a.use || a.index - b.index);
+    return scored.map((entry) => entry.item);
   }
 
   applyCompletion(

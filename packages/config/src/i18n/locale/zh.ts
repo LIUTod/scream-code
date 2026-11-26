@@ -83,6 +83,7 @@ export const zh: Record<string, string> = {
   'approval.header.generic': '是否批准 {name}？',
   'approval.feedback_hint': '输入反馈 · ↵ 提交。',
   'approval.warnings_title': '风险提示',
+  'slash.recent': '最近',
   'approval.request_summary': '本回合请求：',
   'approval.title.command': '执行命令',
   'approval.title.file_write': '写入文件',

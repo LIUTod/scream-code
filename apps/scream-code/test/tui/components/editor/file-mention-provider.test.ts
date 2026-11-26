@@ -266,3 +266,61 @@ describe('FileMentionProvider — slash-command ranking', () => {
     expect(result?.items.at(-1)?.value).toBe('cmd-59');
   });
 });
+
+describe('FileMentionProvider — slash menu order and layout', () => {
+  const commands = [
+    { name: 'auto', description: 'auto mode', aliases: [] },
+    { name: 'memory', description: 'memory memos', aliases: ['memo'] },
+    { name: 'model', description: 'switch model', aliases: [] },
+    { name: 'plan', description: 'plan mode', aliases: [] },
+    { name: 'rlm-max-depth', description: 'depth limit', aliases: [] },
+  ];
+  const usage = (weights: Record<string, number>) => ({
+    weight: (name: string) => weights[name] ?? 0,
+    mostUsed: (names: readonly string[]) =>
+      names
+        .filter((name) => (weights[name] ?? 0) > 0)
+        .toSorted((a, b) => (weights[b] ?? 0) - (weights[a] ?? 0))
+        .slice(0, 5),
+  });
+  const suggest = async (provider: FileMentionProvider, text: string) => {
+    const result = await provider.getSuggestions([text], 0, text.length, { signal: ctrl() });
+    return result?.items ?? [];
+  };
+
+  it('puts the commands run most lately first on a bare slash, marked, and the rest after them', async () => {
+    const provider = new FileMentionProvider(commands as never, '/repo', NO_FD, stubGitCache([]), usage({ model: 3, plan: 1 }));
+    const items = await suggest(provider, '/');
+    expect(items.map((item) => item.value)).toEqual(['model', 'plan', 'auto', 'memory', 'rlm-max-depth']);
+    expect(items[0]?.description).toContain('最近');
+    expect(items[1]?.description).toContain('最近');
+    expect(items[2]?.description ?? '').not.toContain('最近');
+  });
+
+  it('keeps registry order on a bare slash when nothing has been run', async () => {
+    const provider = new FileMentionProvider(commands as never, '/repo', NO_FD, stubGitCache([]), usage({}));
+    const items = await suggest(provider, '/');
+    expect(items.map((item) => item.value)).toEqual(['auto', 'memory', 'model', 'plan', 'rlm-max-depth']);
+  });
+
+  it('settles a tie by use: "m" matches memory and model alike, the one run more comes first', async () => {
+    const quiet = new FileMentionProvider(commands as never, '/repo', NO_FD, stubGitCache([]), usage({}));
+    expect((await suggest(quiet, '/m')).map((item) => item.value).slice(0, 2)).toEqual(['memory', 'model']);
+    const used = new FileMentionProvider(commands as never, '/repo', NO_FD, stubGitCache([]), usage({ model: 4 }));
+    expect((await suggest(used, '/m')).map((item) => item.value).slice(0, 2)).toEqual(['model', 'memory']);
+  });
+
+  it('does not let use beat a better match', async () => {
+    const provider = new FileMentionProvider(commands as never, '/repo', NO_FD, stubGitCache([]), usage({ memory: 50 }));
+    expect((await suggest(provider, '/mod'))[0]?.value).toBe('model');
+  });
+
+  it('gives every command one label width, so the descriptions stay put while filtering', async () => {
+    const provider = new FileMentionProvider(commands as never, '/repo', NO_FD, stubGitCache([]), usage({}));
+    const widths = new Set((await suggest(provider, '/')).map((item) => (item.label ?? '').length));
+    expect(widths.size).toBe(1);
+    const filtered = await suggest(provider, '/mod');
+    expect(filtered.map((item) => (item.label ?? '').length)).toEqual([...widths]);
+    expect((filtered[0]?.label ?? '').trimEnd()).toBe('/model');
+  });
+});

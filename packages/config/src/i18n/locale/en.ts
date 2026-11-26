@@ -83,6 +83,7 @@ export const en: Record<string, string> = {
   'approval.header.generic': 'Approve {name}?',
   'approval.feedback_hint': 'Enter feedback · ↵ to submit.',
   'approval.warnings_title': 'Warnings',
+  'slash.recent': 'recent',
   'approval.request_summary': 'Request:',
   'approval.title.command': 'Run command',
   'approval.title.file_write': 'Write file',

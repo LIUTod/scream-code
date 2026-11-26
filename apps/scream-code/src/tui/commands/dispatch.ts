@@ -8,6 +8,7 @@ import type { ResolvedTheme } from '../theme/colors';
 import {
   getLlmNotSetMessage,
 } from '../constant/scream-tui';
+import { recordCommandUse } from '../utils/command-usage';
 import { formatErrorMessage } from '../utils/event-payload';
 import { parseSlashInput } from './parse';
 import {
@@ -213,6 +214,7 @@ async function executeSlashCommand(host: SlashCommandHost, input: string): Promi
       host.showError(slashBusyMessage(intent.commandName, intent.reason));
       return;
     case 'skill': {
+      recordCommandUse(parsedCommand?.name ?? '');
       const session = host.session;
       if (host.state.appState.model.trim().length === 0 || session === undefined) {
         host.showError(getLlmNotSetMessage());
@@ -225,6 +227,7 @@ async function executeSlashCommand(host: SlashCommandHost, input: string): Promi
       host.sendNormalUserInput(intent.input);
       return;
     case 'builtin':
+      recordCommandUse(intent.name);
       try {
         const args = intent.name === 'goal' && parsedCommand?.name === 'goaloff' ? 'off' : intent.args;
         await handleBuiltInSlashCommand(host, intent.name, args);
