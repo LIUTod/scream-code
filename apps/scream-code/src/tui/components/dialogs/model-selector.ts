@@ -367,14 +367,19 @@ function fitNav(parts: ReadonlyArray<{ text: string; rank: number }>, width: num
 const MODELS_PER_PAGE = 8;
 const MIN_MODELS_PER_PAGE = 3;
 
-/** One glyph per level: a scale that fills up. */
+/**
+ * One glyph per level: a scale that fills up. All from the Geometric Shapes
+ * block, which every terminal font that draws the interface's other glyphs
+ * (■ ●) has — a mathematical-symbols glyph shows as a box in some Windows
+ * console fonts.
+ */
 const THINKING_GLYPH: Readonly<Record<string, string>> = {
   off: '-',
   low: '○',
   medium: '◐',
   high: '●',
-  xhigh: '⦿',
-  max: '◉',
+  xhigh: '◉',
+  max: '◈',
 };
 
 /** `128000` and `131072` are both "128K": the nearer of the decimal and binary reading. */

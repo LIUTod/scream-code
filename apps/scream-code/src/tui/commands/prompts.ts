@@ -13,6 +13,7 @@ import { ApiKeyInputDialogComponent, type ApiKeyInputResult } from '../component
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { ModelSelectorComponent } from '../components/dialogs/model-selector';
 import { TextInputDialogComponent, type TextInputResult } from '../components/dialogs/text-input-dialog';
+import { panelViewportRows } from '../utils/panel-rows';
 import type { SlashCommandHost } from './dispatch';
 
 export function promptLogoutProviderSelection(
@@ -118,7 +119,7 @@ export function runModelSelector(
       currentThinkingLevel: initialThinkingLevel,
       colors: host.state.theme.colors,
       searchable: true,
-      viewportRows: () => host.state.terminal.rows,
+      viewportRows: () => panelViewportRows(host.state),
       onSelect: ({ alias, thinkingLevel }) => {
         host.restoreEditor();
         resolve({ alias, thinkingLevel });

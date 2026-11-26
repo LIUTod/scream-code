@@ -97,6 +97,7 @@ export const zh: Record<string, string> = {
   'approval.danger': '危险：{reason}',
   'approval.warning_line': '风险提示：{reason}',
   'approval.more_lines': '… 另有 {count} 行已折叠',
+  'approval.more_items': '… 另有 {count} 项未显示',
   'approval.hint.select': '↑↓ 选择',
   'approval.hint.choose': '{keys} 直选',
   'approval.hint.confirm': '↵ 确认',

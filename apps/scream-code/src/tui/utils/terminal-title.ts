@@ -56,6 +56,8 @@ export class TerminalTitle {
   private timer: ReturnType<typeof setInterval> | undefined;
   private frame = 0;
   private written: string | undefined;
+  /** Set by `stop()`: the session is closing, and a late state change must not bring the spinner back. */
+  private stopped = false;
 
   constructor(
     private readonly read: () => TitleState,
@@ -64,6 +66,7 @@ export class TerminalTitle {
 
   /** The state changed: write the title if it differs, start or stop the spinner. */
   sync(): void {
+    if (this.stopped) return;
     const state = this.read();
     const spinning = titleActivity(state) === 'working' && motionEnabled();
     if (spinning && this.timer === undefined) {
@@ -88,6 +91,7 @@ export class TerminalTitle {
 
   /** Stop the spinner and leave the plain name behind, never a frame of it. */
   stop(): void {
+    this.stopped = true;
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
     const state = this.read();

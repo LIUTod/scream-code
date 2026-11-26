@@ -14,7 +14,7 @@
  */
 
 import type { Component } from '@liutod-scream/pi-tui';
-import { copyContentStart, Spacer, Text, visibleWidth } from '@liutod-scream/pi-tui';
+import { copyContentStart, copyHiddenRow, Spacer, Text, visibleWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
@@ -133,10 +133,16 @@ export class UserMessageComponent implements Component {
     if (rows.length <= MAX_ROWS) return rows;
     const hidden = rows.length - HEAD_ROWS - TAIL_ROWS;
     const marker = chalk.hex(this.colors.textDim)(t('usermessage.rows_hidden', { count: String(hidden) }));
-    const markerRow = marker + ' '.repeat(Math.max(0, contentWidth - visibleWidth(marker)));
-    return [...rows.slice(0, HEAD_ROWS), markerRow, ...rows.slice(-TAIL_ROWS)];
+    // The note is interface, not what was typed: a copy leaves it out.
+    const markerRow = copyHiddenRow() + marker + ' '.repeat(Math.max(0, contentWidth - visibleWidth(marker)));
+    // The row after the fold starts a new stretch; it must not be joined onto the row before the fold.
+    const tail = rows.slice(-TAIL_ROWS).map((row, index) => (index === 0 ? row.replace(SOFT_WRAP_MARKER, '') : row));
+    return [...rows.slice(0, HEAD_ROWS), markerRow, ...tail];
   }
 }
+
+/** The terminal view's "this row continues the one above" marker (see its row markers). */
+const SOFT_WRAP_MARKER = /\u001B\]9912;\d+(?:\u0007|\u001B\\)/;
 
 /** The opening SGR sequence a chalk style emits ('' when colour is off). */
 function openOf(style: (text: string) => string): string {

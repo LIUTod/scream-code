@@ -83,7 +83,7 @@ function makeBlockStyles(colors: ColorPalette): BlockStyles {
   };
 }
 
-function renderDisplayBlock(block: DisplayBlock, s: BlockStyles, level: DetailLevel): string[] {
+function renderDisplayBlock(block: DisplayBlock, s: BlockStyles, level: DetailLevel, cmdLines: number): string[] {
   switch (block.type) {
     case 'diff':
       // Drawn by the panel (see `diffRows`): it owns the header row and the frame.
@@ -109,13 +109,13 @@ function renderDisplayBlock(block: DisplayBlock, s: BlockStyles, level: DetailLe
       // the notes that can go when the terminal is short.
       const lines: string[] = [];
       const command = replaceTabs(block.command);
-      const cmdLines = command.length > 0 ? command.split('\n') : [''];
-      const shownCmd = cmdLines.slice(0, level === 0 ? CONTENT_SUMMARY_MAX_LINES : 4);
+      const commandLines = command.length > 0 ? command.split('\n') : [''];
+      const shownCmd = commandLines.slice(0, cmdLines);
       shownCmd.forEach((cmdLine, idx) => {
         const prefix = idx === 0 ? s.accent('$') : s.dim('·');
         lines.push(`${prefix} ${s.strong(cmdLine)}`);
       });
-      const remainingCmd = cmdLines.length - shownCmd.length;
+      const remainingCmd = commandLines.length - shownCmd.length;
       if (remainingCmd > 0) {
         lines.push(s.dim(`  ${t('approval.more_lines', { count: String(remainingCmd) })}`));
       }
@@ -225,6 +225,53 @@ function truncateStart(text: string, max: number): string {
   let tail = text;
   while (tail.length > 0 && visibleWidth(tail) > max - 1) tail = tail.slice(1);
   return `…${tail}`;
+}
+
+/**
+ * One layout the panel may try. `render` walks a ladder of these from the
+ * roomiest, and the first that fits the terminal is drawn. Each limit is applied
+ * where the rows are made, so whatever is left out is counted truthfully in a
+ * "… N more" row rather than cut off.
+ */
+interface Fit {
+  readonly level: DetailLevel;
+  /** Rows of a diff. */
+  readonly diffRows: number;
+  /** Lines of a command shown, past which a count of the rest follows. */
+  readonly cmdLines: number;
+  /** Display blocks shown, past which a count of the rest follows. */
+  readonly blocks: number;
+  /** Reasons shown, past which a count of the rest follows; 0 folds several into one row. */
+  readonly reasons: number;
+}
+
+const MAX_BLOCKS = 5;
+
+/** Layouts from roomy to tight. The question, the choices and any danger line are in every one. */
+function fitLadder(reasonCount: number): Fit[] {
+  const ladder: Fit[] = [
+    { level: 0, diffRows: DIFF_ROWS_ROOMY, cmdLines: CONTENT_SUMMARY_MAX_LINES, blocks: MAX_BLOCKS, reasons: reasonCount },
+    { level: 1, diffRows: DIFF_ROWS_FOLDED, cmdLines: 4, blocks: MAX_BLOCKS, reasons: reasonCount },
+  ];
+  // No source line or description; the diff and the command shrink together.
+  for (let step = 0; step <= DIFF_ROWS_TIGHT; step++) {
+    ladder.push({
+      level: 2,
+      diffRows: DIFF_ROWS_TIGHT - step,
+      cmdLines: Math.max(1, 4 - step),
+      blocks: MAX_BLOCKS,
+      reasons: reasonCount,
+    });
+  }
+  // Then fewer blocks, then fewer reasons (the first two at the least).
+  for (let blocks = MAX_BLOCKS - 1; blocks >= 1; blocks--) {
+    ladder.push({ level: 2, diffRows: 0, cmdLines: 1, blocks, reasons: reasonCount });
+  }
+  for (let reasons = reasonCount - 1; reasons >= Math.min(2, reasonCount); reasons--) {
+    ladder.push({ level: 2, diffRows: 0, cmdLines: 1, blocks: 1, reasons });
+  }
+  if (reasonCount > 1) ladder.push({ level: 2, diffRows: 0, cmdLines: 1, blocks: 1, reasons: 0 });
+  return ladder;
 }
 
 export class ApprovalPanelComponent extends Container implements Focusable {
@@ -389,20 +436,23 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     this.feedbackInput.focused = this.focused && this.feedbackMode;
 
     const budget = this.rowBudget();
-    // The roomiest level that fits; the last one shrinks the diff until it does.
-    for (const level of [0, 1] as const) {
-      const lines = this.compose(width, level, level === 0 ? DIFF_ROWS_ROOMY : DIFF_ROWS_FOLDED);
+    const ladder = fitLadder(this.request.data.reasons?.length ?? 0);
+    let lines: string[] = [];
+    for (const fit of ladder) {
+      lines = this.compose(width, fit);
       if (lines.length <= budget) return lines;
     }
-    let limit = DIFF_ROWS_TIGHT;
-    let lines = this.compose(width, 2, limit);
-    while (lines.length > budget && limit > 0) {
-      limit -= 1;
-      lines = this.compose(width, 2, limit);
-    }
-    // Still over (a command with a warning on a very short terminal): the
-    // closing rule is the one row that carries nothing.
-    if (lines.length > budget) lines.pop();
+    // Still over at the tightest layout: only the frame is left to give up, the
+    // closing rule first, then the key hints, then the title. The choices, the
+    // question and a danger line stay.
+    lines = [...lines];
+    const giveUp = (index: number): void => {
+      if (lines.length > budget && index >= 0 && index < lines.length) lines.splice(index, 1);
+    };
+    giveUp(lines.length - 1); // closing rule
+    giveUp(0); // opening rule
+    giveUp(lines.length - 1); // key hints
+    giveUp(0); // title
     return lines;
   }
 
@@ -411,7 +461,8 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     return panelRowBudget(this.viewportRows?.());
   }
 
-  private compose(width: number, level: DetailLevel, diffLimit: number): string[] {
+  private compose(width: number, fit: Fit): string[] {
+    const { level, diffRows: diffLimit } = fit;
     const { data } = this.request;
     const blockStyles = makeBlockStyles(this.colors);
     // Frame and focus share the brand fluorescent green: pastel borderFocus
@@ -428,7 +479,8 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     const dedupedBlocks = data.display.filter(
       (block) => !isDuplicateBriefBlock(block, data.description),
     );
-    const visibleBlocks = dedupedBlocks.slice(0, 5);
+    const visibleBlocks = dedupedBlocks.slice(0, Math.min(MAX_BLOCKS, fit.blocks));
+    const hiddenBlocks = dedupedBlocks.length - visibleBlocks.length;
     const hasPreviewable = visibleBlocks.some(
       (block) => block.type === 'diff' || block.type === 'file_content',
     );
@@ -473,8 +525,9 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     }
     for (const block of visibleBlocks) {
       if (block.type === 'diff') continue;
-      body.push(...renderDisplayBlock(block, blockStyles, level));
+      body.push(...renderDisplayBlock(block, blockStyles, level, fit.cmdLines));
     }
+    if (hiddenBlocks > 0) body.push(dim(t('approval.more_items', { count: String(hiddenBlocks) })));
     if (visibleBlocks.length === 0 && data.description) {
       for (const descLine of data.description.split('\n')) body.push(dim(descLine));
     }
@@ -482,13 +535,21 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     const reasons = data.reasons ?? [];
     if (reasons.length === 1) {
       body.push(warning(t('approval.warning_line', { reason: truncateToWidth(replaceTabs(reasons[0]!), Math.max(inner - 8, 1)) })));
+    } else if (reasons.length > 1 && fit.reasons === 0) {
+      // No room for a list: the first reason and how many more there are.
+      const first = truncateToWidth(replaceTabs(reasons[0]!), Math.max(inner - 16, 1));
+      body.push(warning(t('approval.warning_line', { reason: `${first} (+${String(reasons.length - 1)})` })));
     } else if (reasons.length > 1) {
       body.push(warning(t('approval.warnings_title')));
-      for (const reason of reasons) {
+      for (const reason of reasons.slice(0, fit.reasons)) {
         body.push(warning(`· ${truncateToWidth(replaceTabs(reason), Math.max(inner - 2, 1))}`));
       }
+      if (reasons.length > fit.reasons) {
+        body.push(warning(`· ${t('approval.more_items', { count: String(reasons.length - fit.reasons) })}`));
+      }
     }
-    for (const block of visibleBlocks) {
+    // A danger line is never left out, even for a block the layout had no room to show.
+    for (const block of dedupedBlocks) {
       if (block.type === 'shell' && block.danger !== undefined) {
         body.push(blockStyles.errorBold(t('approval.danger', { reason: block.danger })));
       }

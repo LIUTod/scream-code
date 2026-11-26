@@ -27,7 +27,11 @@ function makeHost(): SlashCommandHost {
         },
       },
       theme: { colors: darkColors },
-      terminal: { rows: 40 },
+      terminal: { rows: 40, columns: 120 },
+      // The panel's room is what the dock leaves it: nothing above the editor here.
+      todoPanelContainer: { render: () => [] as string[], invalidate: () => {} },
+      errorBannerContainer: { render: () => [] as string[], invalidate: () => {} },
+      planModeBannerContainer: { render: () => [] as string[], invalidate: () => {} },
     },
     showError: vi.fn(),
     showNotice: vi.fn(),

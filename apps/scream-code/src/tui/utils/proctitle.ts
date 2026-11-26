@@ -13,8 +13,15 @@
 import { PRODUCT_NAME } from '#/constant/app';
 import { MAX_PROCESS_TITLE_LENGTH } from '#/tui/constant/terminal';
 
+/**
+ * The title goes into an escape sequence, and a session title can come from the
+ * model: a BEL or an ESC in it would end the sequence early and let the rest
+ * act as terminal commands. Control characters (C0, DEL and C1) become spaces.
+ */
+const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/g;
+
 export function setProcessTitle(title: string | null, _sessionId: string, prefix: string = ''): void {
-  const trimmed = title?.trim() ?? '';
+  const trimmed = (title ?? '').replaceAll(CONTROL_CHARACTERS, ' ').trim();
   const label = trimmed.length > 0 ? trimmed.slice(0, MAX_PROCESS_TITLE_LENGTH) : PRODUCT_NAME;
   try {
     process.title = label;

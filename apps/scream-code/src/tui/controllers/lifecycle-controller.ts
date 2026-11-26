@@ -23,7 +23,7 @@ import { agentsPanel } from '../components/sidebar/panels/agents-panel';
 import { goalPanel } from '../components/sidebar/panels/goal-panel';
 import { hubPanel } from '../components/sidebar/panels/hub-panel';
 import { buildHubSamples, createHubProbe } from '../utils/hub-probe';
-import { CHROME_GUTTER, DOCK_FOOTER_ROWS, DOCK_STATUS_ROWS } from '../constant/rendering';
+import { CHROME_GUTTER, DOCK_FOOTER_ROWS, DOCK_STATUS_ROWS, TODO_PANEL_MIN_WIDTH } from '../constant/rendering';
 import { USER_MESSAGE_BULLET } from '../constant/symbols';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
@@ -503,7 +503,7 @@ export class LifecycleController {
         component: this.host.state.todoPanelContainer,
         shrink: 1,
         minSize: 0,
-        visible: (viewport) => viewport.width >= 90,
+        visible: (viewport) => viewport.width >= TODO_PANEL_MIN_WIDTH,
       },
       { component: this.host.state.errorBannerContainer, shrink: 1, minSize: 0 },
       { component: this.host.state.planModeBannerContainer, shrink: 1, minSize: 0 },

@@ -78,4 +78,20 @@ describe('command usage', () => {
     recordCommandUse('');
     expect(mostUsedCommands([''])).toEqual([]);
   });
+
+  it("keeps what another terminal recorded in between, instead of writing over it", () => {
+    const now = Date.parse('2026-11-26T12:00:00Z');
+    recordCommandUse('model', now);
+    // Another terminal ran /plan five times after this one loaded the file.
+    const file = join(home, 'command-usage.json');
+    const theirs = JSON.parse(readFileSync(file, 'utf8')) as Record<string, { count: number; last: number }>;
+    theirs['plan'] = { count: 5, last: now };
+    writeFileSync(file, JSON.stringify(theirs), 'utf8');
+
+    recordCommandUse('model', now);
+
+    resetCommandUsage();
+    expect(commandUsageWeight('plan', now)).toBeCloseTo(5);
+    expect(commandUsageWeight('model', now)).toBeCloseTo(2);
+  });
 });

@@ -22,6 +22,7 @@ import type { ApprovalController } from '../reverse-rpc/approval/controller';
 import type { QuestionController } from '../reverse-rpc/question/controller';
 import type { ApprovalPanelData, QuestionPanelData } from '../reverse-rpc/types';
 import { disposeChildren } from '../utils/component-capabilities';
+import { panelViewportRows } from '../utils/panel-rows';
 
 export interface DialogManagerHost {
   readonly state: TUIState;
@@ -374,7 +375,7 @@ export class DialogManager {
         this.openApprovalPreview(panel, block);
       },
       this.host.state.ui,
-      () => this.host.state.terminal.rows,
+      () => panelViewportRows(this.host.state),
     );
     this.activeApprovalPanel = panel;
     this.mountEditorReplacement(panel);

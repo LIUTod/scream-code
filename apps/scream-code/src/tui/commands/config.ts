@@ -24,6 +24,7 @@ import { flashStatus } from '../utils/flash-status';
 import type { SlashCommandHost } from './dispatch';
 import type { AuthFlowController } from '../controllers/auth-flow';
 import type { TUIState } from '../tui-state';
+import { panelViewportRows } from '../utils/panel-rows';
 
 /**
  * Storm Breaker guard for model switches. Returns the (currentTokens,
@@ -603,7 +604,7 @@ export async function showModelPicker(
       currentThinkingLevel: host.state.appState.thinkingLevel,
       colors: host.state.theme.colors,
       searchable: true,
-      viewportRows: () => host.state.terminal.rows,
+      viewportRows: () => panelViewportRows(host.state),
       imageGeneration:
         imageConfig === undefined
           ? { configured: false }

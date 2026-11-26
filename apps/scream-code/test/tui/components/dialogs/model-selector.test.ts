@@ -81,7 +81,7 @@ describe('ModelSelectorComponent — rows', () => {
     const row = make().render(100).map(strip).find((line) => line.includes('思考（全局）')) ?? '';
     expect(row).toContain('○ low');
     expect(row).toContain('[● high]');
-    expect(row).toContain('◉ max');
+    expect(row).toContain('◈ max');
     expect(row).toContain('←→ 调整');
   });
 

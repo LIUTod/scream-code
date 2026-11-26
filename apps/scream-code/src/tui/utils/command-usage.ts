@@ -68,6 +68,9 @@ export function commandUsageWeight(name: string, now: number = Date.now()): numb
 /** Notes that `name` was run. */
 export function recordCommandUse(name: string, now: number = Date.now()): void {
   if (name.length === 0) return;
+  // Read the file again first: another terminal may have recorded since this
+  // one loaded it, and writing back our copy would erase what it added.
+  cache = undefined;
   const entries = load();
   const known = entries.get(name);
   entries.set(name, { count: (known?.count ?? 0) + 1, last: now });

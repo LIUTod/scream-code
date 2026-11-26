@@ -185,4 +185,21 @@ describe('UserMessageComponent — copy markers', () => {
     const message = rows.filter((row) => /[a-z]/.test(withoutRowMarkers(row)));
     for (const row of message) expect(readRowCopyInfo(row)?.softWrapGap).toBeUndefined();
   });
+
+  // 60 lines of two rows each after a one-row line: the row after the fold (index 117) is a continuation row.
+  const folded = (): string[] => {
+    const long = ['short', ...Array.from({ length: 60 }, (_, index) => `line number ${String(index)} with enough words to wrap`)].join('\n');
+    return new UserMessageComponent(long, darkColors).render(30);
+  };
+
+  it('leaves the "rows hidden" note of a folded message out of a copy', () => {
+    expect(folded().some((row) => readRowCopyInfo(row)?.hidden === true)).toBe(true);
+  });
+
+  it('does not join the row after the fold onto the row before it, even where the wrapper had broken that line', () => {
+    const rows = folded();
+    const at = rows.findIndex((row) => readRowCopyInfo(row)?.hidden === true);
+    expect(at).toBeGreaterThan(0);
+    expect(readRowCopyInfo(rows[at + 1]!)?.softWrapGap).toBeUndefined();
+  });
 });

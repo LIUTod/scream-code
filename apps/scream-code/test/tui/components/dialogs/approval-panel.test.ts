@@ -1,4 +1,5 @@
 import { CURSOR_MARKER, visibleWidth } from '@liutod-scream/pi-tui';
+import { t } from '@scream-code/config';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel';
@@ -744,5 +745,73 @@ describe('ApprovalPanelComponent — very short terminal', () => {
     expect(text).toContain('3. 拒绝');
     expect(text).toContain('直选');
     expect(lines.at(-1)).not.toMatch(/^─+$/);
+  });
+
+  const CHOICES: PendingApproval['data']['choices'] = [
+    { label: '批准一次', response: 'approved' },
+    { label: '批准（当前会话）', response: 'approved_for_session' },
+    { label: '拒绝', response: 'rejected' },
+  ];
+
+  function heavy(display: PendingApproval['data']['display'], reasons: string[]): PendingApproval {
+    return {
+      data: {
+        id: 'approval_heavy',
+        tool_call_id: 'tool_heavy',
+        tool_name: 'Bash',
+        action: 'run',
+        description: '',
+        display,
+        choices: CHOICES,
+        reasons,
+      },
+    };
+  }
+
+  it('fits a long command with several reasons by counting what it leaves out, and keeps the danger and the choices', () => {
+    const command = Array.from({ length: 8 }, (_, index) => `echo step ${String(index + 1)}`).join('\n');
+    const pending = heavy([{ type: 'shell', language: 'bash', command, danger: 'deletes files' }], ['one', 'two', 'three']);
+    const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS, undefined, undefined, undefined, undefined, () => 14);
+    const lines = dialog.render(60).map(strip);
+
+    expect(lines.length).toBeLessThanOrEqual(14 - 1 - 2 - 1);
+    const text = lines.join('\n');
+    // The rest of the command is not silently gone: seven of its eight lines are said to be hidden.
+    expect(text).toContain('echo step 1');
+    expect(text).toContain(t('approval.more_lines', { count: '7' }));
+    // Several reasons fold into one row that says how many more there are.
+    expect(text).toContain('one (+2)');
+    expect(text).toContain('deletes files');
+    for (const label of ['1. 批准一次', '2. 批准（当前会话）', '3. 拒绝']) expect(text).toContain(label);
+  });
+
+  it('shows the danger of a block the layout has no room for, and counts the blocks it hides', () => {
+    const files = Array.from({ length: 5 }, (_, index) => ({
+      type: 'file_op' as const,
+      operation: 'write' as const,
+      path: `/p/${String(index)}`,
+    }));
+    const pending = heavy(
+      [...files, { type: 'shell', language: 'bash', command: 'rm -rf /', danger: 'wipes the disk' }, ...files.slice(0, 1)],
+      ['r1'],
+    );
+    const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS, undefined, undefined, undefined, undefined, () => 30);
+    const text = dialog.render(60).map(strip).join('\n');
+
+    // Five blocks fit; the sixth (the dangerous one) and the seventh are counted, and the danger still shows.
+    expect(text).toContain(t('approval.more_items', { count: '2' }));
+    expect(text).toContain('wipes the disk');
+  });
+
+  it('draws everything, uncounted, when the terminal height is unknown', () => {
+    const command = Array.from({ length: 6 }, (_, index) => `echo step ${String(index + 1)}`).join('\n');
+    const dialog = new ApprovalPanelComponent(
+      heavy([{ type: 'shell', language: 'bash', command }], ['a', 'b', 'c']),
+      () => {},
+      COLORS,
+    );
+    const text = dialog.render(60).map(strip).join('\n');
+    expect(text).toContain('echo step 6');
+    expect(text).not.toContain('+2)');
   });
 });

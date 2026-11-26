@@ -527,7 +527,7 @@ describe('ModelSelectorComponent search and pagination', () => {
     // Right cycles thinking to the next level and must NOT change the page.
     selector.handleInput(RIGHT);
     expect(rendered(selector)).toContain('第 2/3 页');
-    expect(rendered(selector)).toContain('[⦿ xhigh]');
+    expect(rendered(selector)).toContain('[◉ xhigh]');
 
     // Left cycles thinking back, page still unchanged.
     selector.handleInput(LEFT);

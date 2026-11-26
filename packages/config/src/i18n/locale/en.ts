@@ -97,6 +97,7 @@ export const en: Record<string, string> = {
   'approval.danger': 'Dangerous: {reason}',
   'approval.warning_line': 'Warning: {reason}',
   'approval.more_lines': '… {count} more lines hidden',
+  'approval.more_items': '… {count} more not shown',
   'approval.hint.select': '↑↓ select',
   'approval.hint.choose': '{keys} choose',
   'approval.hint.confirm': '↵ confirm',

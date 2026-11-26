@@ -137,4 +137,16 @@ describe('TerminalTitle', () => {
     title.refresh();
     expect(writes).toHaveLength(2);
   });
+
+  it('stays quiet once stopped: a late state change neither writes nor restarts the spinner', () => {
+    const { title, writes, set } = make(state());
+    title.sync();
+    title.stop();
+    const count = writes.length;
+    set({ streamingPhase: 'thinking' });
+    title.sync();
+    title.refresh();
+    vi.advanceTimersByTime(TITLE_FRAME_MS * 5);
+    expect(writes).toHaveLength(count);
+  });
 });

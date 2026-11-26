@@ -1,8 +1,13 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { t } from '@scream-code/config';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { dispatchInput, type SlashCommandHost } from '#/tui/commands/dispatch';
 import { getLlmNotSetMessage } from '#/tui/constant/scream-tui';
+import { commandUsageWeight, resetCommandUsage } from '#/tui/utils/command-usage';
 import { ExitCalled, mockProcessExit } from '../../helpers/process';
 import { makeMockSession, makeMockSlashCommandHost } from '../fixtures/mock-host';
 
@@ -377,5 +382,41 @@ describe('dispatchInput — host-level commands & catch paths', () => {
     dispatchInput(host, '/theme broken');
     await settle();
     expect(host.showError).toHaveBeenCalledWith('theme fail');
+  });
+});
+
+describe('dispatchInput — command usage', () => {
+  let home: string;
+  let previousHome: string | undefined;
+
+  beforeEach(() => {
+    previousHome = process.env['SCREAM_CODE_HOME'];
+    home = mkdtempSync(join(tmpdir(), 'scream-dispatch-usage-'));
+    process.env['SCREAM_CODE_HOME'] = home;
+    resetCommandUsage();
+  });
+
+  afterEach(() => {
+    if (previousHome === undefined) delete process.env['SCREAM_CODE_HOME'];
+    else process.env['SCREAM_CODE_HOME'] = previousHome;
+    rmSync(home, { recursive: true, force: true });
+    resetCommandUsage();
+  });
+
+  it('counts a user skill run as /<name> under the name the menu lists it by', async () => {
+    const host = makeHost({ skillCommands: [['skill:flow', 'my-flow']] });
+    dispatchInput(host, '/flow now');
+    await vi.waitFor(() => {
+      expect(commandUsageWeight('skill:flow')).toBeGreaterThan(0);
+    });
+    expect(commandUsageWeight('flow')).toBe(0);
+  });
+
+  it('counts a built-in skill by its bare name, which is how the menu lists it', async () => {
+    const host = makeHost({ skillCommands: [['dream', 'dream']] });
+    dispatchInput(host, '/dream');
+    await vi.waitFor(() => {
+      expect(commandUsageWeight('dream')).toBeGreaterThan(0);
+    });
   });
 });

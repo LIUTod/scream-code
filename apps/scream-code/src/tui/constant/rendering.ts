@@ -83,3 +83,5 @@ export const DOCK_FOOTER_ROWS = 2;
 // Transcript rows a replacement panel leaves visible above itself: the last
 // message, so the person still sees what is being decided on.
 export const PANEL_MIN_TRANSCRIPT_ROWS = 1;
+// The todo panel above the editor is drawn from this terminal width up.
+export const TODO_PANEL_MIN_WIDTH = 90;

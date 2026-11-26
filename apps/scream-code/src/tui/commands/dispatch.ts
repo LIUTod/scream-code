@@ -216,7 +216,10 @@ async function executeSlashCommand(host: SlashCommandHost, input: string): Promi
       host.showError(slashBusyMessage(intent.commandName, intent.reason));
       return;
     case 'skill': {
-      recordCommandUse(parsedCommand?.name ?? '');
+      // Counted under the name the menu lists it by: a user skill is `skill:<name>`
+      // there even when it was run as `/<name>`.
+      const typed = parsedCommand?.name ?? '';
+      if (typed.length > 0) recordCommandUse(host.skillCommandMap.has(typed) ? typed : `skill:${typed}`);
       const session = host.session;
       if (host.state.appState.model.trim().length === 0 || session === undefined) {
         host.showError(getLlmNotSetMessage());
