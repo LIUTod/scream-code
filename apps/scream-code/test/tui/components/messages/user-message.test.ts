@@ -11,8 +11,11 @@ vi.mock('#/tui/utils/ui-preferences', async (importOriginal) => {
 import { UserMessageComponent } from '#/tui/components/messages/user-message';
 import { darkColors, lightColors, type ColorPalette } from '#/tui/theme/colors';
 
+/** Head of the first row of a real message: the terminal view's "prompt starts here" marker. */
+const PROMPT = '\u001B]133;A\u0007';
+
 function stripAnsi(text: string): string {
-  return text.replaceAll(/\u001B\[[0-9;]*m/g, '');
+  return text.replaceAll(/\u001B\[[0-9;]*m/g, '').replaceAll(PROMPT, '');
 }
 const bg = (hex: string): string => {
   const [r, g, b] = [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
@@ -48,8 +51,8 @@ describe('UserMessageComponent', () => {
     // One spacer row above, then exactly the two text rows: no padding rows.
     expect(rows).toHaveLength(3);
     expect(stripAnsi(rows[0]!).trim()).toBe('');
-    for (const row of rows.slice(1)) {
-      expect(row.startsWith(bg(darkColors.userMessageBg))).toBe(true);
+    for (const [index, row] of rows.slice(1).entries()) {
+      expect(row.startsWith((index === 0 ? PROMPT : '') + bg(darkColors.userMessageBg))).toBe(true);
       expect(row.endsWith('\u001B[49m')).toBe(true);
       expect(visibleWidth(row)).toBe(60);
     }
@@ -130,5 +133,31 @@ describe('UserMessageComponent', () => {
     const wide = component.render(80);
 
     expect(wide).not.toBe(narrow);
+  });
+});
+
+describe('UserMessageComponent — prompt marker', () => {
+  beforeEach(() => {
+    chalk.level = 3;
+    prefs.banded = true;
+  });
+
+  it('marks the first row of a message as where a prompt starts, and only that row', () => {
+    const rows = new UserMessageComponent('first line\nsecond line', darkColors).render(60);
+    expect(rows.filter((row) => row.includes(PROMPT))).toHaveLength(1);
+    expect(rows[1]!.startsWith(PROMPT)).toBe(true);
+    expect(rows[2]!.includes(PROMPT)).toBe(false);
+  });
+
+  it('marks it with the band off too, and leaves the width alone', () => {
+    prefs.banded = false;
+    const rows = new UserMessageComponent('hello', darkColors).render(40);
+    expect(rows[1]!.startsWith(PROMPT)).toBe(true);
+    expect(visibleWidth(rows[1]!)).toBe(visibleWidth(rows[1]!.replace(PROMPT, '')));
+  });
+
+  it('does not mark a system reminder: it is not something the person said', () => {
+    const rows = new UserMessageComponent('<system-reminder>be careful</system-reminder>', darkColors).render(60);
+    expect(rows.join('')).not.toContain(PROMPT);
   });
 });

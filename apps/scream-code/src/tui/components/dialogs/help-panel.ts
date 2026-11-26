@@ -59,6 +59,7 @@ export function defaultKeyboardShortcuts(): readonly KeyboardShortcut[] {
     { keys: 'Ctrl-D', description: t('help.exit') },
     { keys: 'Esc', description: t('help.close_dialog') },
     { keys: '↑ / ↓', description: t('help.browse_history') },
+    { keys: 'Ctrl-↑ / Ctrl-↓', description: t('help.jump_prompt') },
     { keys: 'Enter', description: t('help.submit') },
   ];
 }

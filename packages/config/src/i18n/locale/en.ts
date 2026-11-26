@@ -725,6 +725,7 @@ export const en: Record<string, string> = {
   'help.exit': 'Exit (when input is empty)',
   'help.close_dialog': 'Close dialog / Cancel stream',
   'help.browse_history': 'Browse input history',
+  'help.jump_prompt': 'Jump to the previous / next prompt',
   'help.submit': 'Submit',
   'help.title': ' Help ',
   'help.hotkeys_title': ' Keyboard shortcuts ',

@@ -31,6 +31,14 @@ const TAIL_ROWS = 4;
 
 const SGR_RESET_RE = /\u001B\[0?m/g;
 
+/**
+ * OSC 133;A — "a prompt starts here" — at the head of a message's first row.
+ * The terminal view finds these to jump to the previous or next prompt
+ * (Ctrl+↑ / Ctrl+↓); it takes the marker out before anything is written, so
+ * it never reaches the terminal and has no width.
+ */
+const PROMPT_START = '\u001B]133;A\u0007';
+
 export class UserMessageComponent implements Component {
   private readonly isSystemReminder: boolean;
   private readonly textComponent: Text;
@@ -86,15 +94,17 @@ export class UserMessageComponent implements Component {
     const bandOpen = banded ? openOf(chalk.bgHex(colors.userMessageBg)) : '';
     rows.forEach((row, index) => {
       const prefix = index === 0 ? mark : ' '.repeat(markWidth);
+      // Only a real message is a prompt; a system reminder is not.
+      const start = index === 0 && !this.isSystemReminder ? PROMPT_START : '';
       if (!banded) {
-        lines.push(prefix + row);
+        lines.push(start + prefix + row);
         return;
       }
       // The band runs across the row: re-opened after any reset inside the
       // styled text, padded to the full width, and closed at the end.
       const body = `${prefix}${row}`.replaceAll(SGR_RESET_RE, (reset) => reset + bandOpen);
       const pad = ' '.repeat(Math.max(0, width - visibleWidth(body)));
-      lines.push(`${bandOpen}${body}${pad}\u001B[49m`);
+      lines.push(`${start}${bandOpen}${body}${pad}\u001B[49m`);
     });
 
     // Images — indented to align with the text, on the terminal's own ground.

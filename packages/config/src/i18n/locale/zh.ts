@@ -724,6 +724,7 @@ export const zh: Record<string, string> = {
   'help.exit': '退出（空输入时）',
   'help.close_dialog': '关闭对话框 / 中断流',
   'help.browse_history': '浏览输入历史',
+  'help.jump_prompt': '跳到上一条/下一条提问',
   'help.submit': '提交',
   'help.title': ' 帮助 ',
   'help.hotkeys_title': ' 键盘快捷键 ',

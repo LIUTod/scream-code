@@ -54,4 +54,10 @@ describe('GutterContainer', () => {
     c.addChild(new FakeChild(() => [colored]));
     expect(c.render(20)).toEqual([`  ${colored}`]);
   });
+
+  it('keeps OSC 133 zone markers at the very start of a row, ahead of the gutter', () => {
+    const c = new GutterContainer(1, 1);
+    c.addChild(new FakeChild(() => ['\u001B]133;A\u0007■ asked', 'plain']));
+    expect(c.render(20)).toEqual(['\u001B]133;A\u0007 ■ asked', ' plain']);
+  });
 });

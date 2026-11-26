@@ -11,6 +11,13 @@
 
 import { Container } from '@liutod-scream/pi-tui';
 
+/**
+ * OSC 133 zone markers at the head of a row ("a prompt starts here"). The
+ * terminal view reads them from the very start of the row to jump between
+ * prompts, so the gutter goes after them, not before.
+ */
+const ZONE_MARKERS = /^(?:\u001B\]133;[ABC](?:\u0007|\u001B\\))+/;
+
 export class GutterContainer extends Container {
   constructor(
     private readonly leftPad: number,
@@ -25,7 +32,8 @@ export class GutterContainer extends Container {
     const out: string[] = [];
     for (const child of this.children) {
       for (const line of child.render(inner)) {
-        out.push(lead + line);
+        const markers = ZONE_MARKERS.exec(line)?.[0] ?? '';
+        out.push(markers + lead + line.slice(markers.length));
       }
     }
     return out;
