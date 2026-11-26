@@ -27,6 +27,7 @@ function makeHost(): SlashCommandHost {
         },
       },
       theme: { colors: darkColors },
+      terminal: { rows: 40 },
     },
     showError: vi.fn(),
     showNotice: vi.fn(),

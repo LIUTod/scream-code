@@ -6,12 +6,14 @@ import {
   Key,
   matchesKey,
   truncateToWidth,
+  visibleWidth,
   type Focusable,
 } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { DEFAULT_OAUTH_PROVIDER_NAME, PRODUCT_NAME } from '#/constant/app';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { panelRowBudget } from '#/tui/utils/panel-rows';
 import { SearchableList } from '#/tui/utils/searchable-list';
 import { currentMark, pointerCell, rowLabel, selectableRow } from '../../utils/select-row';
 
@@ -21,7 +23,9 @@ type ThinkingAvailability = 'toggle' | 'always-on' | 'unsupported';
 interface ModelChoice {
   readonly alias: string;
   readonly model: ModelAlias;
+  /** What the filter matches: the name and the provider. */
   readonly label: string;
+  readonly name: string;
 }
 
 export interface ModelSelection {
@@ -75,13 +79,21 @@ export interface ModelSelectorOptions {
    * not required to save the change.
    */
   readonly onChangeThinking?: (alias: string, level: ThinkingEffort) => void;
+  /**
+   * Terminal height, read on every render. The selector replaces the editor,
+   * so on a short terminal it gives rows back (fewer models per page, no
+   * capability or image rows) and keeps the key hints visible. Unknown means
+   * no limit.
+   */
+  readonly viewportRows?: () => number;
 }
 
 function createModelChoices(models: Record<string, ModelAlias>): readonly ModelChoice[] {
   return Object.entries(models).map(([alias, cfg]) => ({
     alias,
     model: cfg,
-    label: `${modelDisplayName(alias, cfg)} (${providerDisplayName(cfg.provider)})`,
+    name: modelDisplayName(alias, cfg),
+    label: `${modelDisplayName(alias, cfg)} ${providerDisplayName(cfg.provider)}`,
   }));
 }
 
@@ -193,17 +205,40 @@ export class ModelSelectorComponent extends Container implements Focusable {
   }
 
   override render(width: number): string[] {
+    const budget = panelRowBudget(this.opts.viewportRows?.());
+    const roomy = this.opts.pageSize ?? MODELS_PER_PAGE;
+    this.list.setPageSize(roomy);
+    let lines = this.compose(width, 0);
+    if (lines.length <= budget) return lines;
+    // Short terminal: no blank rows, no capability or image rows (the row of
+    // each model already says what it can read), then fewer models per page.
+    for (let size = roomy; size >= MIN_MODELS_PER_PAGE; size -= 1) {
+      this.list.setPageSize(size);
+      lines = this.compose(width, 1);
+      if (lines.length <= budget) return lines;
+    }
+    return lines;
+  }
+
+  private compose(width: number, level: 0 | 1): string[] {
     const { colors } = this.opts;
+    const dim = chalk.hex(colors.textDim);
     const searchable = this.opts.searchable === true;
     const view = this.list.view();
     const choices = view.items;
 
-    const navParts = [t('model.nav_model'), t('model.nav_thinking')];
-    if (view.page.pageCount > 1) navParts.push(t('model.nav_page'));
-    navParts.push(t('model.nav_select'), this.opts.breadcrumb === undefined ? t('model.nav_cancel') : t('dialog.back'));
+    // Highest rank goes first when the row is too narrow for all of it.
+    const navParts: Array<{ text: string; rank: number }> = [
+      { text: t('model.nav_model'), rank: 0 },
+      { text: t('model.nav_thinking'), rank: 2 },
+    ];
+    if (view.page.pageCount > 1) navParts.push({ text: t('model.nav_page'), rank: 3 });
+    navParts.push(
+      { text: t('model.nav_select'), rank: 0 },
+      { text: this.opts.breadcrumb === undefined ? t('model.nav_cancel') : t('dialog.back'), rank: 0 },
+    );
 
-    const titleSuffix =
-      searchable && view.query.length === 0 ? chalk.hex(colors.textMuted)(`  ${t('model.search_placeholder')}`) : '';
+    const titleSuffix = searchable && view.query.length === 0 ? dim(`  ${t('model.search_placeholder')}`) : '';
     const lines: string[] = [
       chalk.hex(colors.primary)('─'.repeat(width)),
       ' ' + breadcrumbPrefix(this.opts.breadcrumb, colors) + chalk.hex(colors.primary).bold(t('model.select_title').trim()) + titleSuffix,
@@ -211,101 +246,156 @@ export class ModelSelectorComponent extends Container implements Focusable {
     if (searchable && view.query.length > 0) {
       lines.push(chalk.hex(colors.primary)(t('model.search_label')) + chalk.hex(colors.text)(view.query));
     }
-    lines.push('');
+    if (level === 0) lines.push('');
 
     if (choices.length === 0) {
-      lines.push(chalk.hex(colors.textMuted)('   No matches'));
+      lines.push(dim(`   ${t('model.no_matches')}`));
     }
+    // One row per model: its name (and the mark when it is the one in use),
+    // then a quiet column that says what it is — provider, context, what it
+    // can read — so models can be compared before one is picked.
+    const names: string[] = [];
     for (let i = view.page.start; i < view.page.end; i++) {
       const choice = choices[i]!;
       const isSelected = i === view.selectedIndex;
       const isCurrent = choice.alias === this.opts.currentValue;
-      let line = `  ${pointerCell(colors, isSelected)}` + rowLabel(colors, isSelected)(choice.label);
-      if (isCurrent) line += currentMark(colors);
-      lines.push(selectableRow(colors, line, width, isSelected));
+      let head = `  ${pointerCell(colors, isSelected)}` + rowLabel(colors, isSelected)(choice.name);
+      if (isCurrent) head += currentMark(colors);
+      names.push(head);
+    }
+    const column = Math.min(
+      Math.max(0, ...names.map((head) => visibleWidth(head))) + 2,
+      Math.max(Math.floor(width * 0.5), 12),
+    );
+    for (let i = view.page.start; i < view.page.end; i++) {
+      const choice = choices[i]!;
+      const isSelected = i === view.selectedIndex;
+      const head = truncateToWidth(names[i - view.page.start]!, column - 1);
+      const room = width - column - 1;
+      const note = room > 6 ? dim(truncateToWidth(describeModel(choice), room, '…')) : '';
+      lines.push(selectableRow(colors, head + ' '.repeat(Math.max(1, column - visibleWidth(head))) + note, width, isSelected));
     }
 
-    lines.push('');
-    lines.push(chalk.hex(colors.textMuted)(t('model.thinking_global')));
+    if (level === 0) lines.push('');
     const selected = choices[view.selectedIndex];
     if (selected !== undefined) {
-      lines.push(this.renderThinkingControl(selected.model));
+      lines.push(this.renderThinkingRow(selected.model, width));
+      if (level === 0) lines.push(this.renderCapabilityRow(selected.model));
     }
-    lines.push('');
-    lines.push(chalk.hex(colors.textMuted)(t('model.multimodal')));
-    if (selected !== undefined) {
-      lines.push(this.renderImageControl(selected.model));
-      lines.push(this.renderVideoControl(selected.model));
-      lines.push(this.renderAudioControl(selected.model));
-    }
-    if (this.opts.imageGeneration !== undefined) {
+    if (level === 0 && this.opts.imageGeneration !== undefined) {
       const imageGeneration = this.opts.imageGeneration;
-      lines.push('');
       lines.push(
-        chalk.hex(colors.textMuted)(
+        dim(
           imageGeneration.configured && imageGeneration.model !== undefined
             ? t('model.image_gen_configured', { model: imageGeneration.model })
             : t('model.image_gen_missing'),
         ),
       );
     }
-    lines.push('');
+    if (level === 0) lines.push('');
     if (view.page.pageCount > 1) {
-      lines.push(
-        chalk.hex(colors.textMuted)(
-          ` Page ${String(view.page.page + 1)}/${String(view.page.pageCount)}`,
-        ),
-      );
+      lines.push(dim(` ${t('model.page', { page: String(view.page.page + 1), count: String(view.page.pageCount) })}`));
     }
     // The key hint sits under the list in every dialog.
-    lines.push(chalk.hex(colors.textMuted)(` ${navParts.join(' · ')}`));
+    lines.push(dim(` ${fitNav(navParts, width - 2)}`));
     lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
     return lines.map((line) => truncateToWidth(line, width));
   }
 
-  private renderThinkingControl(model: ModelAlias): string {
+  /**
+   * The thinking level as a scale of glyphs, the active step bracketed and bold. Only what
+   * this model offers is listed; narrow rows keep the name of the active step
+   * alone.
+   */
+  private renderThinkingRow(model: ModelAlias, width: number): string {
     const { colors } = this.opts;
-    const availability = thinkingAvailability(model);
+    const dim = chalk.hex(colors.textDim);
+    const label = dim(`  ${t('model.thinking_label')}  `);
+    if (thinkingAvailability(model) === 'unsupported') {
+      return `${label}${dim(t('model.thinking_unsupported'))}`;
+    }
     const levels = getThinkingLevels(model);
-    const effectiveLevel = effectiveThinkingLevel(model, this.thinkingDraft);
-
-    const segments = levels.map((level) => {
-      const active = level === effectiveLevel;
-      return active
-        ? chalk.hex(colors.primary).bold(`[ ${level} ]`)
-        : chalk.hex(colors.text)(level);
-    });
-
-    const line = `  ${segments.join('  ')}`;
-    if (availability === 'unsupported') {
-      return `${line} ${chalk.hex(colors.textMuted)('unsupported')}`;
+    const active = effectiveThinkingLevel(model, this.thinkingDraft);
+    // The active step is bracketed as well as bold, so it still shows where
+    // there is no colour; every step is the same width, so the row does not
+    // shift as the level changes.
+    const scale = (names: boolean): string =>
+      levels
+        .map((level) => {
+          const glyph = THINKING_GLYPH[level] ?? '•';
+          if (level === active) return chalk.hex(colors.primary).bold(`[${glyph} ${level}]`);
+          return dim(names ? ` ${glyph} ${level} ` : ` ${glyph} `);
+        })
+        .join(' ');
+    const adjust = dim(`   ${t('model.thinking_adjust')}`);
+    for (const row of [`${label}${scale(true)}${adjust}`, `${label}${scale(true)}`, `${label}${scale(false)}`]) {
+      if (visibleWidth(row) <= width) return row;
     }
-    return line;
+    return `${label}${scale(false)}`;
   }
 
-  private renderImageControl(model: ModelAlias): string {
+  /** What the model can read, on one row. */
+  private renderCapabilityRow(model: ModelAlias): string {
     const { colors } = this.opts;
-    // Vision capability is read-only — it reflects whatever the catalog/config
-    // declares. Users cannot override it from the model selector.
-    if (modelHasImageIn(model)) {
-      return `  ${chalk.hex(colors.textMuted)(t('model.image'))}: ${chalk.hex(colors.success).bold(t('model.supported'))}`;
-    }
-    return `  ${chalk.hex(colors.textMuted)(t('model.image'))}: ${chalk.hex(colors.textDim)(t('model.not_supported'))}`;
+    const dim = chalk.hex(colors.textDim);
+    const item = (name: string, yes: boolean): string =>
+      `${dim(name)} ${yes ? chalk.hex(colors.success).bold('✓') : dim('✗')}`;
+    return (
+      dim(`  ${t('model.capabilities_label')}  `) +
+      [
+        item(t('model.image'), modelHasImageIn(model)),
+        item(t('model.video'), modelHasVideoIn(model)),
+        item(t('model.audio'), modelHasAudioIn(model)),
+      ].join('  ')
+    );
   }
+}
 
-  private renderVideoControl(model: ModelAlias): string {
-    const { colors } = this.opts;
-    if (modelHasVideoIn(model)) {
-      return `  ${chalk.hex(colors.textMuted)(t('model.video'))}: ${chalk.hex(colors.success).bold(t('model.supported'))}`;
-    }
-    return `  ${chalk.hex(colors.textMuted)(t('model.video'))}: ${chalk.hex(colors.textDim)(t('model.not_supported'))}`;
+/** The key hint, the least important parts dropped until it fits `width`. */
+function fitNav(parts: ReadonlyArray<{ text: string; rank: number }>, width: number): string {
+  const kept = [...parts];
+  const joined = (): string => kept.map((part) => part.text).join(' · ');
+  while (visibleWidth(joined()) > width) {
+    const worst = Math.max(...kept.map((part) => part.rank));
+    if (worst === 0) break;
+    kept.splice(kept.map((part) => part.rank).lastIndexOf(worst), 1);
   }
+  return joined();
+}
 
-  private renderAudioControl(model: ModelAlias): string {
-    const { colors } = this.opts;
-    if (modelHasAudioIn(model)) {
-      return `  ${chalk.hex(colors.textMuted)(t('model.audio'))}: ${chalk.hex(colors.success).bold(t('model.supported'))}`;
-    }
-    return `  ${chalk.hex(colors.textMuted)(t('model.audio'))}: ${chalk.hex(colors.textDim)(t('model.not_supported'))}`;
-  }
+/** Models per page when there is room, and the fewest a short terminal gets. */
+const MODELS_PER_PAGE = 8;
+const MIN_MODELS_PER_PAGE = 3;
+
+/** One glyph per level: a scale that fills up. */
+const THINKING_GLYPH: Readonly<Record<string, string>> = {
+  off: '-',
+  low: '○',
+  medium: '◐',
+  high: '●',
+  xhigh: '⦿',
+  max: '◉',
+};
+
+/** `128000` and `131072` are both "128K": the nearer of the decimal and binary reading. */
+export function formatContextSize(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return '';
+  const decimal = Math.round(tokens / 1000) * 1000;
+  const binary = Math.round(tokens / 1024) * 1024;
+  const unit = Math.abs(tokens - binary) < Math.abs(tokens - decimal) ? 1024 : 1000;
+  const k = Math.round(tokens / unit);
+  return k >= 1000 ? `${String(Math.round((k / 1000) * 10) / 10)}M` : `${String(k)}K`;
+}
+
+/** `provider · context · what it reads`, the quiet column of a model's row. */
+function describeModel(choice: ModelChoice): string {
+  const { model } = choice;
+  const parts = [providerDisplayName(model.provider)];
+  const context = formatContextSize(model.maxContextSize);
+  if (context.length > 0) parts.push(context);
+  if (thinkingAvailability(model) !== 'unsupported') parts.push(t('model.cap_thinking'));
+  if (modelHasImageIn(model)) parts.push(t('model.image'));
+  if (modelHasVideoIn(model)) parts.push(t('model.video'));
+  if (modelHasAudioIn(model)) parts.push(t('model.audio'));
+  return parts.join(' · ');
 }

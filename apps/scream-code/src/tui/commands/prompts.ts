@@ -118,6 +118,7 @@ export function runModelSelector(
       currentThinkingLevel: initialThinkingLevel,
       colors: host.state.theme.colors,
       searchable: true,
+      viewportRows: () => host.state.terminal.rows,
       onSelect: ({ alias, thinkingLevel }) => {
         host.restoreEditor();
         resolve({ alias, thinkingLevel });

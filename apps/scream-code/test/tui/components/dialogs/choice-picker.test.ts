@@ -75,13 +75,17 @@ describe('ChoicePickerComponent', () => {
       onCancel,
     });
     const modelOutput = model.render(120).map(strip);
-    expect(modelOutput).toContain(`  ❯ Scream K2 (Scream Code) ${t('dialog.current')}`);
-    expect(modelOutput).toContain(' Thinking（全局设置）');
-    expect(modelOutput).toContain('  off  low  medium  [ high ]  xhigh  max');
-    expect(modelOutput).toContain(' 多模态能力');
-    expect(modelOutput).toContain('  识图: ✗ 不支持');
-    expect(modelOutput).toContain('  视频: ✗ 不支持');
-    expect(modelOutput).toContain('  音频: ✗ 不支持');
+    const row = modelOutput.find((line) => line.includes('❯ Scream K2')) ?? '';
+    expect(row).toContain(t('dialog.current'));
+    expect(row).toContain('Scream Code');
+    expect(row).toContain('200K');
+    const thinking = modelOutput.find((line) => line.includes('思考（全局）')) ?? '';
+    expect(thinking).toContain('[● high]');
+    expect(thinking).toContain('- off');
+    const capabilities = modelOutput.find((line) => line.includes('能力')) ?? '';
+    expect(capabilities).toContain('识图 ✗');
+    expect(capabilities).toContain('视频 ✗');
+    expect(capabilities).toContain('音频 ✗');
 
     const theme = new ThemeSelectorComponent({
       currentValue: 'light',
@@ -177,13 +181,15 @@ describe('ChoicePickerComponent', () => {
       onCancel: vi.fn(),
     });
 
-    expect(picker.render(120).map(strip)).toContain('  [ low ]  medium  high  xhigh  max');
+    const always = picker.render(120).map(strip).find((line) => line.includes('思考（全局）')) ?? '';
+    expect(always).toContain('[○ low]');
+    expect(always).not.toContain('off');
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
     expect(onSelect).toHaveBeenLastCalledWith({ alias: 'always', thinkingLevel: 'medium' });
 
     picker.handleInput('\u001B[B');
-    expect(picker.render(120).map(strip)).toContain('  [ off ] unsupported');
+    expect(picker.render(120).map(strip).find((line) => line.includes('思考（全局）')) ?? '').toContain('此模型不支持');
     picker.handleInput('\u001B[D');
     picker.handleInput('\r');
     expect(onSelect).toHaveBeenLastCalledWith({ alias: 'plain', thinkingLevel: 'off' });
@@ -502,33 +508,33 @@ describe('ModelSelectorComponent search and pagination', () => {
     for (const ch of 'beta') selector.handleInput(ch);
     const out = rendered(selector);
     expect(out).toContain('搜索：beta');
-    expect(out).toContain('beta (p)');
-    expect(out).not.toContain('alpha (p)');
-    expect(out).not.toContain('gamma (p)');
+    expect(out).toContain('beta');
+    expect(out).not.toContain('alpha');
+    expect(out).not.toContain('gamma');
   });
 
   it('pages with PageDown/PageUp while Left/Right still toggle thinking', () => {
     const { selector } = makeSelector(buildModels(20));
 
-    expect(rendered(selector)).toContain('Page 1/3');
-    expect(rendered(selector)).toContain('model00 (prov)');
-    expect(rendered(selector)).not.toContain('model08 (prov)');
+    expect(rendered(selector)).toContain('第 1/3 页');
+    expect(rendered(selector)).toContain('model00');
+    expect(rendered(selector)).not.toContain('model08');
 
     selector.handleInput(PAGE_DOWN);
-    expect(rendered(selector)).toContain('Page 2/3');
-    expect(rendered(selector)).toContain('model08 (prov)');
+    expect(rendered(selector)).toContain('第 2/3 页');
+    expect(rendered(selector)).toContain('model08');
 
     // Right cycles thinking to the next level and must NOT change the page.
     selector.handleInput(RIGHT);
-    expect(rendered(selector)).toContain('Page 2/3');
-    expect(rendered(selector)).toContain('[ xhigh ]');
+    expect(rendered(selector)).toContain('第 2/3 页');
+    expect(rendered(selector)).toContain('[⦿ xhigh]');
 
     // Left cycles thinking back, page still unchanged.
     selector.handleInput(LEFT);
-    expect(rendered(selector)).toContain('Page 2/3');
-    expect(rendered(selector)).toContain('[ high ]');
+    expect(rendered(selector)).toContain('第 2/3 页');
+    expect(rendered(selector)).toContain('[● high]');
     selector.handleInput(PAGE_UP);
-    expect(rendered(selector)).toContain('Page 1/3');
+    expect(rendered(selector)).toContain('第 1/3 页');
   });
 
   it('surfaces the image-generation status under the multimodal block', () => {

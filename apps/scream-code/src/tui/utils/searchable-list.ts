@@ -40,7 +40,7 @@ export interface SearchableListView<T> {
 export class SearchableList<T> {
   private readonly items: readonly T[];
   private readonly toSearchText: (item: T) => string;
-  private readonly pageSize: number;
+  private pageSize: number;
   private readonly searchable: boolean;
   private query = '';
   private cursor: number;
@@ -51,6 +51,11 @@ export class SearchableList<T> {
     this.pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
     this.searchable = opts.searchable ?? false;
     this.cursor = Math.max(opts.initialIndex ?? 0, 0);
+  }
+
+  /** Items per page, for a view that has less (or more) room than it had. */
+  setPageSize(size: number): void {
+    this.pageSize = Math.max(1, Math.floor(size));
   }
 
   filtered(): readonly T[] {

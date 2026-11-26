@@ -602,6 +602,7 @@ export async function showModelPicker(
       currentThinkingLevel: host.state.appState.thinkingLevel,
       colors: host.state.theme.colors,
       searchable: true,
+      viewportRows: () => host.state.terminal.rows,
       imageGeneration:
         imageConfig === undefined
           ? { configured: false }

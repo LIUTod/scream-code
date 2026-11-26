@@ -21,13 +21,7 @@ import { t } from '@scream-code/config';
 
 import { highlightLines, langFromPath } from '#/tui/components/media/code-highlight';
 import { changeFromTexts, renderFileChange, type FileChange } from '#/tui/components/messages/file-change';
-import {
-  DOCK_FOOTER_ROWS,
-  DOCK_STATUS_ROWS,
-  PANEL_MIN_TRANSCRIPT_ROWS,
-  PIXEL_PULSE_FRAMES,
-  PIXEL_PULSE_INTERVAL_MS,
-} from '#/tui/constant/rendering';
+import { PIXEL_PULSE_FRAMES, PIXEL_PULSE_INTERVAL_MS } from '#/tui/constant/rendering';
 import type {
   ApprovalPanelChoice,
   DiffDisplayBlock,
@@ -37,6 +31,7 @@ import type {
 } from '#/tui/reverse-rpc/types';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { motionEnabled } from '#/tui/utils/motion';
+import { panelRowBudget } from '#/tui/utils/panel-rows';
 import { replaceTabs } from '#/tui/utils/sanitize';
 
 export interface ApprovalPanelResponse {
@@ -411,11 +406,9 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     return lines;
   }
 
-  /** Rows the panel may take: the terminal minus the dock below it and a few transcript rows above. */
+  /** Rows the panel may take (see `panelRowBudget`). */
   private rowBudget(): number {
-    const rows = this.viewportRows?.();
-    if (rows === undefined || !Number.isFinite(rows)) return Number.POSITIVE_INFINITY;
-    return Math.max(6, rows - DOCK_STATUS_ROWS - DOCK_FOOTER_ROWS - PANEL_MIN_TRANSCRIPT_ROWS);
+    return panelRowBudget(this.viewportRows?.());
   }
 
   private compose(width: number, level: DetailLevel, diffLimit: number): string[] {
