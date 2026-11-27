@@ -2,6 +2,6 @@
 "scream-code": patch
 ---
 
-The mark after the permission mode in the input box says how far the mode lets the agent run, and what it is doing: AUTO `▸▸▸` (all the way), YES `▸▸` (stops only for the high-risk few), ASK `‖` (reads, never changes), BOT `◜` (works on its own) — three cells in every state, so the badge never changes width. While the agent works the arrows flow and BOT turns through four quarter arcs; while it waits on you (an approval or a question) the badge shows `‖` in the warning colour, breathing, so the stop is seen where you type. It replaces the same `✎﹏` for every mode. With motion off the marks hold still.
+The permission-mode badge at the top-left of the input box is its label alone (`AUTO`, `YES`, `BOT`, `ASK`): nothing follows it, no arrows, pause mark or emoji, and nothing moves. While the session waits on you (an approval or a question) the badge turns to the warning colour and stays still, so the stop is still seen where you type.
 
 `/blockrows` defaults: a folded block is 10 rows, each edit previews up to 8 changed lines (choices 0, 4, 8, 12), and an expanded tool result shows 10 lines.

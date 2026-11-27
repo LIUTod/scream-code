@@ -8,7 +8,7 @@ import { visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { describe, expect, it, vi } from 'vitest';
 
-import { CustomEditor, idleModeMark, modeMark } from '#/tui/components/editor/custom-editor';
+import { CustomEditor } from '#/tui/components/editor/custom-editor';
 import { permissionModeLabel } from '#/tui/permission-mode-label';
 import type { ColorPalette, ResolvedTheme } from '#/tui/theme/colors';
 import { getColorPalette } from '#/tui/theme/index';
@@ -48,6 +48,7 @@ function providerReturning(items: AutocompleteItem[]): AutocompleteProvider {
   };
 }
 
+const stripAnsi = (text: string): string => text.replaceAll(/\u001B\[[0-9;]*m/g, '');
 describe('CustomEditor autocomplete Escape handling', () => {
   it('escape closes a visible slash command menu without firing app-level escape', async () => {
     const editor = makeEditor();
@@ -349,9 +350,9 @@ describe('CustomEditor permission mode badge', () => {
 
           const out = topBorder(editor);
 
-          expect(out).toContain(chalk.hex(modeHex).bold(` ${permissionModeLabel(mode)} ${idleModeMark(mode)} `));
+          expect(out).toContain(chalk.hex(modeHex).bold(` ${permissionModeLabel(mode)} `));
           expect(out).toContain(chalk.hex(borderHex)('──'));
-          expect(out).not.toContain(chalk.hex(borderHex).bold(` ${permissionModeLabel(mode)} ${idleModeMark(mode)} `));
+          expect(out).not.toContain(chalk.hex(borderHex).bold(` ${permissionModeLabel(mode)} `));
         });
       });
     }
@@ -376,11 +377,11 @@ describe('CustomEditor permission mode badge', () => {
       setBorderColor(editor, fusionPlanBorder);
       const lightOutput = topBorder(editor);
 
-      expect(normalOutput).toContain(chalk.hex('#FF7043').bold(` ${permissionModeLabel('auto')} ${idleModeMark('auto')} `));
+      expect(normalOutput).toContain(chalk.hex('#FF7043').bold(` ${permissionModeLabel('auto')} `));
       expect(normalOutput).toContain(chalk.hex(normalBorder)('──'));
-      expect(planOutput).toContain(chalk.hex('#FF7043').bold(` ${permissionModeLabel('auto')} ${idleModeMark('auto')} `));
+      expect(planOutput).toContain(chalk.hex('#FF7043').bold(` ${permissionModeLabel('auto')} `));
       expect(planOutput).toContain(chalk.hex(planBorder)('──'));
-      expect(lightOutput).toContain(chalk.hex('#C2410C').bold(` ${permissionModeLabel('auto')} ${idleModeMark('auto')} `));
+      expect(lightOutput).toContain(chalk.hex('#C2410C').bold(` ${permissionModeLabel('auto')} `));
       expect(lightOutput).toContain(chalk.hex(fusionPlanBorder)('──'));
     });
   });
@@ -397,7 +398,7 @@ describe('CustomEditor permission mode badge', () => {
       const out = topBorder(editor, 60);
       const borderBadge = chalk.bgHex(borderHex).hex('#FFFFFF');
 
-      expect(out).toContain(chalk.hex('#9CDCFE').bold(` ${permissionModeLabel('ask')} ${idleModeMark('ask')} `));
+      expect(out).toContain(chalk.hex('#9CDCFE').bold(` ${permissionModeLabel('ask')} `));
       expect(out).toContain(borderBadge(' Think '));
       expect(out).toContain(borderBadge(' First skill '));
     });
@@ -424,12 +425,16 @@ describe('CustomEditor permission mode badge', () => {
     expect(topBorder(editor)).toContain('YES');
   });
 
-  it('closes the mode badge with its transport mark without overflowing the border', () => {
+  it('draws the mode badge as its label alone, never overflowing the border', () => {
     const editor = makeEditor();
     editor.permissionMode = 'yolo';
 
-    expect(topBorder(editor, 40)).toContain(`${permissionModeLabel('yolo')} ▸▸`);
-    // Every mark is one cell per glyph, so the prefix must not shift the border.
+    // The label and nothing after it: no arrow, pause mark or emoji.
+    expect(stripAnsi(topBorder(editor, 40))).toMatch(new RegExp(`^── ${permissionModeLabel('yolo')} ─+`));
+    for (const mode of ['auto', 'yolo', 'ask', 'bot'] as const) {
+      editor.permissionMode = mode;
+      expect(stripAnsi(topBorder(editor, 40))).not.toMatch(/[▸▹‖🤖]/u);
+    }
     for (const width of [10, 12, 20, 40, 80]) {
       const line = topBorder(editor, width);
       expect(visibleWidth(line), `width ${width}`).toBeLessThanOrEqual(width);
@@ -498,29 +503,34 @@ describe('CustomEditor permission mode badge', () => {
     }
   });
 
-  it('marks how far each mode lets the agent run, flowing while it works and holding while it waits', () => {
-    expect(['auto', 'yolo', 'ask', 'bot'].map((mode) => idleModeMark(mode as never))).toEqual(['▸▸▸', '▸▸ ', ' ‖ ', '🤖 ']);
-    // Working: the arrows flow frame by frame; BOT holds its robot still; ASK holds.
-    expect([0, 240, 480].map((now) => modeMark('auto', 'running', now, true))).toEqual(['▹▸▸', '▸▹▸', '▸▸▹']);
-    expect([0, 240].map((now) => modeMark('yolo', 'running', now, true))).toEqual(['▹▸ ', '▸▹ ']);
-    expect([0, 80, 160, 240].map((now) => modeMark('bot', 'running', now, true))).toEqual(['🤖 ', '🤖 ', '🤖 ', '🤖 ']);
-    expect(modeMark('ask', 'running', 240, true)).toBe(' ‖ ');
-    // Every mark is three cells in every state: the badge never changes width.
-    for (const mode of ['auto', 'yolo', 'ask', 'bot'] as const) {
-      for (const activity of ['idle', 'running', 'waiting'] as const) {
-        for (const now of [0, 150, 240, 300, 450, 480]) expect(visibleWidth(modeMark(mode, activity, now, true))).toBe(3);
-      }
-    }
-    // Motion off: the first frame, always.
-    expect(modeMark('auto', 'running', 480, false)).toBe('▹▸▸');
-    // Waiting on the person: the pause mark in every mode.
-    expect(modeMark('auto', 'waiting', 0, true)).toBe(' ‖ ');
-
+  it('holds the badge still: the same line on every render, working or not', () => {
     const editor = makeEditor();
-    editor.permissionMode = 'yolo';
-    editor.activity = 'waiting';
-    expect(topBorder(editor, 40)).toContain(`${permissionModeLabel('yolo')}  ‖ `);
-    editor.activity = 'running';
-    expect(topBorder(editor, 40)).toMatch(/YES [▹▸]{2} /);
+    editor.permissionMode = 'auto';
+    const first = topBorder(editor, 40);
+    for (const now of [240, 480, 720]) {
+      vi.spyOn(Date, 'now').mockReturnValue(now);
+      expect(topBorder(editor, 40)).toBe(first);
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('turns the badge to the warning colour, held still, while the session waits on the person', () => {
+    withTrueColor(() => {
+      const editor = makeEditor('dark');
+      editor.permissionMode = 'yolo';
+      const warning = (editor as unknown as { colors: { warning: string } }).colors.warning;
+      const resting = topBorder(editor, 40);
+      editor.waiting = true;
+      const waiting = topBorder(editor, 40);
+      expect(waiting).toContain(chalk.hex(warning).bold(` ${permissionModeLabel('yolo')} `));
+      expect(waiting).not.toBe(resting);
+      for (const now of [0, 700, 1400]) {
+        vi.spyOn(Date, 'now').mockReturnValue(now);
+        expect(topBorder(editor, 40)).toBe(waiting);
+      }
+      vi.restoreAllMocks();
+      editor.waiting = false;
+      expect(topBorder(editor, 40)).toBe(resting);
+    });
   });
 });
