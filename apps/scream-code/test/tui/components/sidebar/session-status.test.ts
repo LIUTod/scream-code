@@ -75,7 +75,9 @@ describe('heatmapLines', () => {
 
   it('is a calendar: weeks across, seven weekdays down with Monday, Wednesday and Friday named, and a legend', () => {
     const { lines } = rowsOf(52);
-    expect(lines).toHaveLength(1 + 7 + 1);
+    // Months, seven weekdays, a blank row of air, the legend.
+    expect(lines).toHaveLength(1 + 7 + 1 + 1);
+    expect(lines.at(-2)).toBe('');
     const names = (rows: string[]): string[] => rows.slice(1, 8).map((l) => /^\S*/.exec(l)![0]);
     expect(names(lines)).toEqual(['', '周一', '', '周三', '', '周五', '']);
     expect(lines.at(-1)).toContain('少 ░░ ▒▒ ▓▓ ██ 多');

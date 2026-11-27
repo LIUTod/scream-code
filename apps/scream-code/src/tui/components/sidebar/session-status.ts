@@ -165,8 +165,8 @@ function parseKey(key: string): Date {
  *
  * A terminal cell is about twice as tall as it is wide, so a day drawn one column
  * wide is a thin sliver and the whole picture looks squeezed. The grid therefore
- * makes a day two or three columns wide, as wide as still shows 16 weeks (or the
- * whole history when it is shorter); a longer history is cut to its recent
+ * makes a day two or three columns wide (the last column is air between days), as
+ * wide as still shows 16 weeks (or the whole history when it is shorter); a longer history is cut to its recent
  * weeks, and only a sidebar too narrow for that goes back to one column. Days and months are written in the interface language.
  */
 export function heatmapLines(
@@ -193,11 +193,10 @@ export function heatmapLines(
   const quiet = chalk.hex(colors.textMuted);
   const ink = chalk.hex(colors.primary);
 
-  // A used day is its shade repeated (leaving a column of air once a day is three wide); an unused one is a dot.
-  const solid = (shade: number): string => {
-    const glyphs = Math.min(cell, 2);
-    return ink(GLYPH[shade]!.repeat(glyphs)) + ' '.repeat(cell - glyphs);
-  };
+  // A used day is its shade with a column of air after it, so neighbours stay apart and every day can be told from
+  // the next (a one-column day has no room for the air); an unused one is a dot on the same rhythm.
+  const glyphs = cell >= 2 ? cell - 1 : 1;
+  const solid = (shade: number): string => ink(GLYPH[shade]!.repeat(glyphs)) + ' '.repeat(cell - glyphs);
   const dot = quiet(GLYPH[0]) + ' '.repeat(cell - 1);
   const grid: string[][] = Array.from({ length: 7 }, () => Array.from({ length: weeks }, () => ' '.repeat(cell)));
   const monthStarts: Array<{ week: number; month: number }> = [];
@@ -255,8 +254,10 @@ export function heatmapLines(
     const label = day === 1 || day === 3 || day === 5 ? t(`sidebar.weekday_${String(day)}`) : '';
     lines.push(quiet(label + ' '.repeat(Math.max(0, labelCols - displayWidth(label)))) + grid[day]!.join(''));
   }
+  // A blank row of air, then the legend.
   lines.push(
-    ' '.repeat(labelCols) + quiet(`${t('sidebar.less')} `) + [1, 2, 3, 4].map((shade) => ink(GLYPH[shade]!.repeat(Math.min(cell, 2)))).join(' ') + quiet(` ${t('sidebar.more')}`),
+    '',
+    ' '.repeat(labelCols) + quiet(`${t('sidebar.less')} `) + [1, 2, 3, 4].map((shade) => ink(GLYPH[shade]!.repeat(glyphs))).join(' ') + quiet(` ${t('sidebar.more')}`),
   );
   return { lines, weeks, cell };
 }
