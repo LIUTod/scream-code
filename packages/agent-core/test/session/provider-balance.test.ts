@@ -121,4 +121,31 @@ describe('fetchProviderBalance', () => {
     const result = await fetchProviderBalance('https://api.deepseek.com', 'sk-x');
     expect(result).toBeNull();
   });
+
+  test('reads the TodAPI balance in USD from /v1/usage on both of its hosts', async () => {
+    expect(isSupportedBalanceProvider('https://todapi.work/v1')).toBe(true);
+    expect(isSupportedBalanceProvider('https://api.todapi.lol/v1')).toBe(true);
+    expect(isSupportedBalanceProvider('https://todapi.work.evil.com')).toBe(false);
+    expect(isSupportedBalanceProvider('https://evil-todapi.work')).toBe(false);
+
+    mockFetchOnce({ mode: 'unrestricted', is_active: true, planName: '钱包余额', remaining: 12.3456, unit: 'USD', balance: 12.3456 });
+    expect(await fetchProviderBalance('https://api.todapi.lol/v1', 'sk-test')).toEqual({ currency: 'USD', totalBalance: '12.35' });
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    // The usage endpoint sits at the origin, whatever path the base URL carries.
+    expect(String(call?.[0])).toBe('https://api.todapi.lol/v1/usage');
+    expect((call?.[1] as RequestInit | undefined)?.headers).toMatchObject({ Authorization: 'Bearer sk-test' });
+
+    mockFetchOnce({ mode: 'quota_limited', is_active: true, remaining: 3, unit: 'USD' });
+    expect(await fetchProviderBalance('https://todapi.work', 'sk-test')).toEqual({ currency: 'USD', totalBalance: '3.00' });
+  });
+
+  test('shows no TodAPI balance for a key without one, a failed call or a bad body', async () => {
+    // A key limited by rate only reports no remaining amount.
+    mockFetchOnce({ mode: 'quota_limited', is_active: true, rate_limits: [] });
+    expect(await fetchProviderBalance('https://todapi.work/v1', 'sk-test')).toBeNull();
+    mockFetchOnce({ error: { type: 'authentication_error', message: 'Invalid API key' } }, false);
+    expect(await fetchProviderBalance('https://todapi.work/v1', 'sk-test')).toBeNull();
+    mockFetchOnce({ remaining: '12.00', unit: 'USD' });
+    expect(await fetchProviderBalance('https://todapi.work/v1', 'sk-test')).toBeNull();
+  });
 });

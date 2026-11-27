@@ -664,7 +664,7 @@ describe('ApprovalPanelComponent — layout', () => {
     for (const rows of [14, 18, 24, 40]) {
       const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS, undefined, undefined, undefined, undefined, () => rows);
       const lines = dialog.render(80).map(strip);
-      const room = Math.max(6, rows - 1 - 2 - 1);
+      const room = Math.max(6, rows - 1 - 1 - 1);
       expect(lines.length, `rows ${String(rows)}`).toBeLessThanOrEqual(room);
       const text = lines.join('\n');
       expect(text).toContain('1. 批准一次');
@@ -738,9 +738,10 @@ describe('ApprovalPanelComponent — very short terminal', () => {
         reasons: ['命令包含 rm -rf'],
       },
     };
-    const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS, undefined, undefined, undefined, undefined, () => 14);
+    // 13 rows leave the panel 10 (status row, footer and one transcript row take the rest).
+    const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS, undefined, undefined, undefined, undefined, () => 13);
     const lines = dialog.render(60).map(strip);
-    expect(lines.length).toBeLessThanOrEqual(14 - 1 - 2 - 1);
+    expect(lines.length).toBeLessThanOrEqual(13 - 1 - 1 - 1);
     const text = lines.join('\n');
     expect(text).toContain('3. 拒绝');
     expect(text).toContain('直选');
@@ -774,7 +775,7 @@ describe('ApprovalPanelComponent — very short terminal', () => {
     const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS, undefined, undefined, undefined, undefined, () => 14);
     const lines = dialog.render(60).map(strip);
 
-    expect(lines.length).toBeLessThanOrEqual(14 - 1 - 2 - 1);
+    expect(lines.length).toBeLessThanOrEqual(14 - 1 - 1 - 1);
     const text = lines.join('\n');
     // The rest of the command is not silently gone: seven of its eight lines are said to be hidden.
     expect(text).toContain('echo step 1');

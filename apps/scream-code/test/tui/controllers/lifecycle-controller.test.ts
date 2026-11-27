@@ -97,11 +97,11 @@ describe('LifecycleController', () => {
   });
 
   describe('dock row contract', () => {
-    it('keeps the footer at two rows (one on a short terminal) and the status row at one', () => {
-      // The footer renders two lines, folding to one below COMPACT_FOOTER_ROWS
-      // (footer.test locks both); these constants are what panels size against.
-      // A silent change here would let a panel overlap the second row.
-      expect(DOCK_FOOTER_ROWS).toBe(2);
+    it('keeps the footer at one row and the status row at one', () => {
+      // The footer renders one line at every size (footer.test locks it); these
+      // constants are what panels size against. A silent change here would let a
+      // panel overlap the footer or leave a dead row above it.
+      expect(DOCK_FOOTER_ROWS).toBe(1);
       expect(DOCK_STATUS_ROWS).toBe(1);
     });
   });

@@ -37,7 +37,8 @@ describe('StatusBarPaneComponent — working', () => {
   it('puts the phase and how long right after the wave, on one row', () => {
     const p = pane({ mode: 'working', pulseWave: fakeWave(), state: working(['思考中 · 12s', '思考中']) });
     expect(p.render(80)).toHaveLength(1);
-    expect(row(p, 80)).toBe('■······  思考中 · 12s' + ' '.repeat(80 - visibleWidth('■······  思考中 · 12s')));
+    const left = '■······  思考中 · 12s';
+    expect(row(p, 80)).toBe(left + ' '.repeat(80 - visibleWidth(left) - visibleWidth('Esc 中断')) + 'Esc 中断');
   });
 
   it('draws the phase in grey, never in the bright text colour', () => {
@@ -71,8 +72,28 @@ describe('StatusBarPaneComponent — working', () => {
     expect(line).toContain(`${sgr(darkColors.warning)}⚠️ 重连中 2/10：限流 (429) · 20s`);
   });
 
+  it('offers Esc on the right while working, and not while Esc would do something else', () => {
+    expect(row(pane({ mode: 'working', pulseWave: fakeWave(), state: working(['思考中 · 12s']) }), 80)).toMatch(/Esc 中断$/);
+    const taken = pane({ mode: 'working', pulseWave: fakeWave(), state: working(['思考中 · 12s']), escTaken: () => true });
+    expect(row(taken, 80)).not.toContain('Esc');
+  });
+
+  it('lets Esc give way before the phase on a narrow row', () => {
+    const p = pane({ mode: 'working', pulseWave: fakeWave(), state: working(['思考中 · 12s', '思考中']) });
+    const withEsc: number[] = [];
+    for (let width = 12; width <= 80; width++) {
+      const line = row(p, width);
+      if (!line.includes('Esc')) continue;
+      withEsc.push(width);
+      expect(line, `width ${String(width)}`).toContain('思考中 · 12s');
+    }
+    // Wide rows keep it, narrow ones give it up first.
+    expect(withEsc.at(-1)).toBe(80);
+    expect(withEsc[0]).toBeGreaterThan(12);
+  });
+
   it('renders the bare wave when there is no state yet', () => {
-    expect(row(pane({ mode: 'working', pulseWave: fakeWave() }), 80).trimEnd()).toBe('■······');
+    expect(row(pane({ mode: 'working', pulseWave: fakeWave() }), 80)).toMatch(/^■······ +Esc 中断$/);
   });
 
   it('shortens the phase to its label, then drops it, but never the wave', () => {

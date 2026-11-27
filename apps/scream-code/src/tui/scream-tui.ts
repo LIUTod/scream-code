@@ -311,14 +311,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.state.footer.setGitDiffProvider(() =>
       this.lifecycleController.getGitDiffStats(this.state.appState.workDir),
     );
-    // The notice slot reads the controller's notice board live, and the key
-    // hints stay quiet while a picker or a replacement panel owns the keys.
+    // The notice slot reads the controller's notice board live.
     this.state.footer.setNoticeProvider(() => this.lifecycleController.getNotice());
-    this.state.footer.setKeysTakenProvider(
-      () =>
-        this.state.activeDialog !== null ||
-        !this.state.editorContainer.children.includes(this.state.editor),
-    );
     this.inputController = new InputController(this);
     this.lifecycleController.buildLayout();
   }
@@ -1107,11 +1101,24 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
         streamingStartTime: patch.streamingPhase === 'idle' ? 0 : Date.now(),
       };
     }
+    // A balance belongs to the provider it was read from. Whatever path changes
+    // the model (a switch, a login that activates a new model, a logout), the
+    // old balance goes with it and the new model's is looked up; a path that
+    // already handles the balance itself says so by carrying it in the patch.
+    const modelChanged =
+      'model' in patch && patch.model !== undefined && patch.model !== this.state.appState.model;
+    const refreshBalance = modelChanged && !('providerBalance' in patch);
+    if (refreshBalance) patch = { ...patch, providerBalance: null };
     if (!hasPatchChanges(this.state.appState, patch)) return;
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
     const prevPlanMode = this.state.appState.planMode;
     const prevSessionId = this.state.appState.sessionId;
     Object.assign(this.state.appState, patch);
+    if (refreshBalance && this.state.appState.model !== '') {
+      refreshProviderBalance(this.state.appState.model, (balancePatch) => {
+        this.setAppState(balancePatch);
+      });
+    }
     const planModeChanged = 'planMode' in patch && prevPlanMode !== this.state.appState.planMode;
     // Session switch (sessionId change) must also reset the banner path —
     // otherwise the banner keeps showing the previous session's plan file

@@ -103,7 +103,7 @@ describe('footer jobs item', () => {
     };
     const footer = new FooterComponent(state as never, darkColors, { requestRender: () => {} } as never);
     // eslint-disable-next-line no-control-regex
-    const text = (footer.render(200)[1] ?? '').replaceAll(/\u001B\[[0-9;]*m/g, '');
+    const text = (footer.render(200)[0] ?? '').replaceAll(/\u001B\[[0-9;]*m/g, '');
     footer.dispose();
     return text;
   }

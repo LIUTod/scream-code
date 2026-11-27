@@ -1,7 +1,7 @@
 /**
  * Status row above the editor: one row that says what is going on right now.
  *
- *   working  `■■······  思考中 · 12s`            (the pulse wave, the phase and how long)
+ *   working  `■■······  思考中 · 12s      Esc 中断` (the pulse wave, the phase and how long; the key that stops it)
  *   blocked  `◆ 等待批准 · 4m`                   (the session waits for the person)
  *   idle     `Tips  <one tip>        Ctrl+B 关闭`
  *
@@ -51,6 +51,12 @@ export interface StatusBarPaneOptions {
    * ("↓ 2 new messages"). Read live like the state.
    */
   readonly scrollCue?: () => StatusChipLine | null;
+  /**
+   * True while Esc does something other than interrupt: a picker or a panel in
+   * the editor's place closes on it, and queued messages are cancelled by it.
+   * The row then does not offer Esc as the interrupt key. Read live.
+   */
+  readonly escTaken?: () => boolean;
 }
 
 /** Display widths a tip may shrink to, widest first (`…` included). */
@@ -124,6 +130,14 @@ class StatusLine implements Component {
     if (cue !== null) {
       const text = cue.color === undefined ? cue.text : chalk.hex(cue.color)(cue.text);
       right.push({ id: 'cue', rank: 1.5, dropRank: 4, variants: shrinkVariants(text, CUE_STEPS) });
+    } else if (mode === 'working' && this.options.escTaken?.() !== true) {
+      // The key that stops what the row describes, quiet like the rest of the row.
+      // It is the first thing to give way: the phase says more than the key.
+      right.push({
+        id: 'esc',
+        rank: 7,
+        variants: [`${chalk.hex(colors.textDim)('Esc')} ${quiet(t('footer.hint_interrupt'))}`],
+      });
     } else if (mode === 'idle' && tip !== undefined && tip.length > 0) {
       right.push({ id: 'close', rank: 3, variants: [chalk.hex(colors.textMuted)(t('status.tip_close'))] });
     }

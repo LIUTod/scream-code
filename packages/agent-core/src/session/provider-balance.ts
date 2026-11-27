@@ -106,7 +106,45 @@ const kimiFetcher: BalanceFetcher = {
   },
 };
 
-const fetchers: BalanceFetcher[] = [deepseekFetcher, kimiFetcher];
+/** TodAPI's hosts: the global endpoint and the APAC direct one serve the same accounts. */
+const TODAPI_HOSTS = new Set(['todapi.work', 'api.todapi.lol']);
+
+const todapiFetcher: BalanceFetcher = {
+  matches: (baseUrl) => {
+    try {
+      return TODAPI_HOSTS.has(new URL(baseUrl).hostname);
+    } catch {
+      return false;
+    }
+  },
+  fetch: async (baseUrl, apiKey) => {
+    try {
+      // GET /v1/usage reports the key's balance: `remaining` in `unit` (USD),
+      // whatever the account mode (a key quota, a subscription or the wallet).
+      // A key limited by rate only has no `remaining`, so no balance is shown.
+      // The base URL may or may not carry /v1, so anchor at the origin.
+      const root = new URL(baseUrl).origin;
+      const res = await fetch(`${root}/v1/usage`, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { remaining?: unknown; unit?: unknown };
+      if (typeof data.remaining !== 'number' || !Number.isFinite(data.remaining)) return null;
+      return {
+        currency: typeof data.unit === 'string' && data.unit.length > 0 ? data.unit : 'USD',
+        totalBalance: data.remaining.toFixed(2),
+      };
+    } catch {
+      return null;
+    }
+  },
+};
+
+const fetchers: BalanceFetcher[] = [deepseekFetcher, kimiFetcher, todapiFetcher];
 
 /**
  * Look up the balance for the given provider endpoint.

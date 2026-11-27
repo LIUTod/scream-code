@@ -76,16 +76,12 @@ export const PULSE_WAVE_INTERVAL_MS = 80;
 
 // Rows the dock keeps below the transcript: the status row above the editor
 // keeps one row even when it renders nothing (a minSize 0 would let the dock's
-// shrink pass squeeze it away), and the footer renders exactly two rows.
+// shrink pass squeeze it away), and the footer renders exactly one row.
 // Panels that replace the editor size themselves against what is left.
 export const DOCK_STATUS_ROWS = 1;
-export const DOCK_FOOTER_ROWS = 2;
-// Below this many terminal rows the footer folds its two rows into one (model,
-// mode pills, notice and the context gauge), giving a row back to the transcript.
-export const COMPACT_FOOTER_ROWS = 20;
-// The status row above the editor is drawn from this terminal width up. Narrower
-// than that the footer carries the work state itself.
-export const STATUS_ROW_MIN_WIDTH = 60;
+// The footer is one row at every terminal size; the status row above the editor
+// is drawn at every width too, so the footer never has to carry the work state.
+export const DOCK_FOOTER_ROWS = 1;
 // Transcript rows a replacement panel leaves visible above itself: the last
 // message, so the person still sees what is being decided on.
 export const PANEL_MIN_TRANSCRIPT_ROWS = 1;

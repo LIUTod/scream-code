@@ -52,7 +52,6 @@ interface Opts {
   rows?: number;
   git?: { added: number; deleted: number } | null;
   notice?: { text: string; color: string } | null;
-  keysTaken?: boolean;
 }
 
 function makeFooter(state: AppState, opts: Opts = {}): FooterComponent {
@@ -63,7 +62,6 @@ function makeFooter(state: AppState, opts: Opts = {}): FooterComponent {
   const footer = new FooterComponent(state, darkColors, ui);
   footer.setGitDiffProvider(() => opts.git ?? null);
   footer.setNoticeProvider(() => opts.notice ?? null);
-  footer.setKeysTakenProvider(() => opts.keysTaken === true);
   return footer;
 }
 
@@ -87,18 +85,20 @@ afterEach(() => {
   resetMotion();
 });
 
-describe('FooterComponent — measurements row', () => {
-  it('says model, cache, balance and git on row 1, the gauge flush right', () => {
+describe('FooterComponent — measurements', () => {
+  it('says model, cache, balance and git on its one row, the gauge flush right', () => {
     const state = baseState({
       providerBalance: { currency: 'CNY', totalBalance: '12.40' } as never,
       sessionUsage: USED,
     });
-    const [row1] = rowsOf(state, 100, { git: { added: 34, deleted: 8 } });
+    const rows = rowsOf(state, 100, { git: { added: 34, deleted: 8 } });
+    expect(rows).toHaveLength(1);
+    const [row1] = rows;
     expect(row1).toMatch(/^Alpha 1 {3}缓存 92% {3}¥12\.40 {3}git \+34 -8 +ctx {2}━━─{8} 28%$/);
     expect(visibleWidth(row1!)).toBe(100);
   });
 
-  it('draws plain-text labels, no emoji, in both rows', () => {
+  it('draws plain-text labels, no emoji', () => {
     const state = baseState({ sessionUsage: USED, lineActive: true, linePlatform: 'lark' });
     for (const width of [50, 80, 120]) {
       const text = rowsOf(state, width, { git: { added: 1, deleted: 1 } }).join('\n');
@@ -177,7 +177,7 @@ describe('FooterComponent — context gauge', () => {
     expect(gaugeOf(1)).toContain('━━━━━━━━━━');
   });
 
-  it('shrinks the bar 10 → 6 → none before it drops the gauge', () => {
+  it('shrinks the bar 10 → 6 → none, then drops only the label: the percentage is never dropped', () => {
     const widths = new Map<number, string>();
     for (let width = 70; width >= 6; width--) {
       const row = rowsOf(baseState(), width)[0]!;
@@ -187,6 +187,7 @@ describe('FooterComponent — context gauge', () => {
     const lengths = new Set([...widths.values()].map((bar) => bar.length));
     expect([...lengths].filter((n) => n > 0).toSorted((a, b) => b - a)).toEqual([10, 6]);
     expect(rowsOf(baseState(), 24)[0]).toMatch(/ctx 28%/);
+    for (let width = 12; width <= 70; width++) expect(rowsOf(baseState(), width)[0], `width ${String(width)}`).toContain('28%');
   });
 
   it('colours by the used share, and by absolute tokens on a 1M window', () => {
@@ -233,12 +234,12 @@ describe('FooterComponent — exit hint', () => {
   });
 });
 
-describe('FooterComponent — controls row', () => {
+describe('FooterComponent — modes and running work', () => {
   it('shows only the pills that are on, in the order plan → RLM → 群狼', () => {
     // (Working, so the idle key hints — one of which is "plan" — are out of the way.)
     const working = { streamingPhase: 'tool', streamingStartTime: NOW } as const;
-    expect(rowsOf(baseState(working), 100)[1]).not.toMatch(/计划|RLM|群狼|目标/);
-    const row = rowsOf(baseState({ ...working, planMode: 'plan', rlmEnabled: true, wolfpackMode: true }), 100)[1]!;
+    expect(rowsOf(baseState(working), 100)[0]).not.toMatch(/计划|RLM|群狼|目标/);
+    const row = rowsOf(baseState({ ...working, planMode: 'plan', rlmEnabled: true, wolfpackMode: true }), 100)[0]!;
     expect(row.indexOf('计划')).toBeGreaterThanOrEqual(0);
     expect(row.indexOf('计划')).toBeLessThan(row.indexOf('RLM'));
     expect(row.indexOf('RLM')).toBeLessThan(row.indexOf('群狼'));
@@ -247,10 +248,10 @@ describe('FooterComponent — controls row', () => {
   it('colours a pill with its own colour, in bold; fusion has its own', () => {
     chalk.level = 3;
     try {
-      const plan = makeFooter(baseState({ planMode: 'plan' })).render(100)[1]!;
+      const plan = makeFooter(baseState({ planMode: 'plan' })).render(100)[0]!;
       expect(plan).toContain(sgr(darkColors.planMode));
       expect(plan).toContain('\u001B[1m');
-      const fusion = makeFooter(baseState({ planMode: 'fusionplan' })).render(100)[1]!;
+      const fusion = makeFooter(baseState({ planMode: 'fusionplan' })).render(100)[0]!;
       expect(fusion).toContain(sgr(darkColors.fusionPlanMode));
     } finally {
       chalk.level = 1;
@@ -259,13 +260,13 @@ describe('FooterComponent — controls row', () => {
 
   it('keeps what follows the plan pill in place when plan switches to fusion', () => {
     const at = (planMode: 'plan' | 'fusionplan'): number => {
-      const row = rowsOf(baseState({ planMode, rlmEnabled: true }), 100)[1]!;
+      const row = rowsOf(baseState({ planMode, rlmEnabled: true }), 100)[0]!;
       return visibleWidth(row.slice(0, row.indexOf('RLM')));
     };
     expect(at('plan')).toBe(at('fusionplan'));
   });
 
-  it('shows the goal only while a goal is active, and shortens it before dropping it', () => {
+  it('shows the goal only while a goal is active, and shortens it but never drops it', () => {
     const goal = {
       objective: 'x',
       status: 'active',
@@ -277,12 +278,12 @@ describe('FooterComponent — controls row', () => {
       inputTokens: null,
       outputTokens: null,
     } as never;
-    expect(rowsOf(baseState(), 100)[1]).not.toContain('目标');
+    expect(rowsOf(baseState(), 100)[0]).not.toContain('目标');
     const state = baseState({ goalActive: true, goal });
-    expect(rowsOf(state, 100)[1]).toContain('目标 3m · 7轮');
+    expect(rowsOf(state, 100)[0]).toContain('目标 3m · 7轮');
     const forms = new Set<string>();
-    for (let width = 100; width >= 6; width--) {
-      const row = rowsOf(state, width)[1]!;
+    for (let width = 100; width >= 24; width--) {
+      const row = rowsOf(state, width)[0]!;
       if (row.includes('目标 3m · 7轮')) forms.add('full');
       else if (row.includes('目标 7轮')) forms.add('turns');
       else if (row.includes('目标')) forms.add('bare');
@@ -291,89 +292,59 @@ describe('FooterComponent — controls row', () => {
     expect([...forms]).toEqual(['full', 'turns', 'bare']);
   });
 
-  it('names background work by kind, and folds it into a total when short', () => {
+  it('names background work by kind, folds it into a total when short, and never drops it', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 1, foregroundSubagents: 0 });
-    expect(strip(footer.render(100)[1]!)).toContain('后台任务 x2 · 后台Agent x1');
+    expect(strip(footer.render(100)[0]!)).toContain('后台任务 x2 · 后台Agent x1');
     footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 1, foregroundSubagents: 1 });
-    expect(strip(footer.render(100)[1]!)).toContain('后台任务 x2 · 后台Agent x1 · 前台Agent x1');
-    const short = strip(footer.render(40)[1]!);
+    expect(strip(footer.render(100)[0]!)).toContain('后台任务 x2 · 后台Agent x1 · 前台Agent x1');
+    const short = strip(footer.render(40)[0]!);
     expect(short).toContain('运行中 4');
+    for (let width = 24; width <= 100; width++) expect(strip(footer.render(width)[0]!), `width ${String(width)}`).toMatch(/后台任务|运行中/);
     footer.setBackgroundCounts({ bashTasks: -3, agentTasks: 0, foregroundSubagents: 0 });
-    expect(strip(footer.render(100)[1]!)).not.toMatch(/后台|运行中/);
+    expect(strip(footer.render(100)[0]!)).not.toMatch(/后台|运行中/);
     footer.dispose();
   });
 
   it('says nothing about MCP while it is healthy', () => {
-    expect(rowsOf(baseState(), 100)[1]).not.toContain('MCP');
+    expect(rowsOf(baseState(), 100)[0]).not.toContain('MCP');
     const healthy = baseState({ mcpSummary: { total: 5, connected: 5, pending: 0, failed: 0, needsAuth: 0 } });
     expect(rowsOf(healthy, 100).join('\n')).not.toContain('MCP');
     const connecting = baseState({ mcpSummary: { total: 5, connected: 2, pending: 3, failed: 0, needsAuth: 0 } });
     expect(rowsOf(connecting, 100).join('\n')).not.toContain('MCP');
   });
 
-  it('keeps a pill for a failed or auth-blocked server until it is resolved, and keeps it last to go', () => {
+  it('keeps a pill for a failed or auth-blocked server until it is resolved, and never drops it', () => {
     const failed = baseState({ mcpSummary: { total: 5, connected: 3, pending: 0, failed: 1, needsAuth: 1 } });
-    expect(rowsOf(failed, 100)[1]).toContain('✕ MCP 3/5');
+    expect(rowsOf(failed, 100)[0]).toContain('✕ MCP 3/5');
     const auth = baseState({ mcpSummary: { total: 5, connected: 4, pending: 0, failed: 0, needsAuth: 1 } });
-    expect(rowsOf(auth, 100)[1]).toContain('◆ MCP 4/5');
+    expect(rowsOf(auth, 100)[0]).toContain('◆ MCP 4/5');
     const busy = baseState({ ...failed, planMode: 'plan', rlmEnabled: true });
     for (let width = 30; width <= 100; width++) {
-      const row = rowsOf(busy, width, { notice: { text: '1 个 MCP 服务器失败 · /mcp', color: '#f00' } })[1]!;
+      const row = rowsOf(busy, width, { notice: { text: '1 个 MCP 服务器失败 · /mcp', color: '#f00' } })[0]!;
       expect(row.includes('✕'), `width ${String(width)}: ${row}`).toBe(true);
     }
   });
 });
 
-describe('FooterComponent — key hints', () => {
-  it('says what works now: idle keys, or Esc while working', () => {
-    expect(rowsOf(baseState(), 100)[1]).toContain('/ 命令   Shift+Tab 计划');
-    const working = rowsOf(baseState({ streamingPhase: 'thinking', streamingStartTime: NOW - 5000 }), 100)[1]!;
-    expect(working).toContain('Esc 中断');
-    expect(working).not.toContain('命令');
-  });
-
-  it('draws idle hints in the quiet tones and the interrupt key in the brighter one', () => {
-    chalk.level = 3;
-    try {
-      const idle = makeFooter(baseState()).render(100)[1]!;
-      expect(idle).toContain(sgr(darkColors.textMuted));
-      expect(idle).not.toContain(sgr(darkColors.text));
-      const working = makeFooter(baseState({ streamingPhase: 'thinking', streamingStartTime: NOW })).render(100)[1]!;
-      expect(working).toContain(`${sgr(darkColors.text)}Esc`);
-    } finally {
-      chalk.level = 1;
-    }
-  });
-
-  it('drops idle hints from the right, one whole key at a time', () => {
-    const seen: string[] = [];
-    for (let width = 70; width >= 3; width--) {
-      const row = rowsOf(baseState(), width)[1]!;
-      const keys = ['/ 命令', 'Shift+Tab 计划'].filter((k) => row.includes(k));
-      seen.push(keys.join('|'));
-    }
-    expect(seen).toContain('/ 命令|Shift+Tab 计划');
-    expect(seen).toContain('/ 命令');
-    // Down to nothing at the narrowest, never a half key.
-    expect(seen.at(-1)).toBe('');
-  });
-
-  it('stays quiet while a panel, a picker or a compaction owns the keys', () => {
+describe('FooterComponent — no key hints', () => {
+  it('prints no keys: the tips teach them, and Esc sits on the status row', () => {
     for (const state of [
+      baseState(),
+      baseState({ streamingPhase: 'thinking', streamingStartTime: NOW - 5000 }),
       baseState({ streamingPhase: 'tool', pendingUserAction: 'approval', pendingUserActionSince: NOW }),
-      baseState({ streamingPhase: 'tool', pendingUserAction: 'question', pendingUserActionSince: NOW }),
-      baseState({ streamingPhase: 'waiting', isCompacting: true }),
     ]) {
-      expect(rowsOf(state, 100)[1]).not.toMatch(/Esc|命令|计划/);
+      const row = rowsOf(state, 140)[0]!;
+      expect(row).not.toMatch(/Esc|命令|Shift\+Tab/);
     }
-    expect(rowsOf(baseState(), 100, { keysTaken: true })[1]).not.toMatch(/Esc|命令|计划/);
   });
 
-  it('puts the notice on the right of the same row', () => {
-    const row = rowsOf(baseState(), 100, { notice: { text: '⏰ 定时任务已触发：日报汇总', color: '#e0a030' } })[1]!;
-    expect(row).toContain('Shift+Tab 计划');
-    expect(row.trimEnd().endsWith('⏰ 定时任务已触发：日报汇总')).toBe(true);
+  it('puts the notice on the right, before the gauge at the edge', () => {
+    const row = rowsOf(baseState(), 100, { notice: { text: '⏰ 定时任务已触发：日报汇总', color: '#e0a030' } })[0]!;
+    expect(row.indexOf('Alpha 1')).toBe(0);
+    expect(row.indexOf('⏰ 定时任务已触发：日报汇总')).toBeGreaterThan(row.indexOf('Alpha 1'));
+    expect(row.indexOf('⏰ 定时任务已触发：日报汇总')).toBeLessThan(row.indexOf('ctx'));
+    expect(row.trimEnd().endsWith('28%')).toBe(true);
   });
 });
 
@@ -383,18 +354,34 @@ describe('FooterComponent — notice slot', () => {
   it('shrinks and drops before a mode pill does', () => {
     const state = baseState({ planMode: 'plan', rlmEnabled: true, streamingPhase: 'tool', streamingStartTime: NOW - 5000 });
     for (let width = 20; width <= 100; width++) {
-      const row = rowsOf(state, width, { notice })[1]!;
+      const row = rowsOf(state, width, { notice })[0]!;
       if (!row.includes('RLM')) continue;
       expect(row.includes('计划'), `width ${String(width)}: ${row}`).toBe(true);
     }
-    const narrow = rowsOf(state, 40, { notice })[1]!;
+    const narrow = rowsOf(state, 40, { notice })[0]!;
     expect(narrow).toContain('计划');
     expect(narrow).toContain('RLM');
   });
 
+  it('never shortens the notice while the gauge still has a bar to give', () => {
+    const state = baseState({ planMode: 'plan', streamingPhase: 'tool', streamingStartTime: NOW - 5000 });
+    const cutAt: number[] = [];
+    for (let width = 40; width <= 140; width++) {
+      const footer = makeFooter(state, { notice });
+      footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 2 });
+      const row = strip(footer.render(width)[0]!);
+      footer.dispose();
+      if (!row.includes('⏰') || row.includes(notice.text)) continue;
+      cutAt.push(width);
+      expect(row, `width ${String(width)}`).not.toMatch(/[━─]/);
+    }
+    // The range does reach widths where the notice is cut.
+    expect(cutAt.length).toBeGreaterThan(0);
+  });
+
   it('cuts the notice with one ellipsis, never mid-word into a bare dots chip', () => {
     for (let width = 30; width <= 80; width++) {
-      const row = rowsOf(baseState({ planMode: 'plan' }), width, { notice })[1]!;
+      const row = rowsOf(baseState({ planMode: 'plan' }), width, { notice })[0]!;
       expect(row).not.toMatch(/(^|\s)\.\.\.($|\s)/);
       expect((row.match(/…/g) ?? []).length).toBeLessThanOrEqual(1);
     }
@@ -404,9 +391,9 @@ describe('FooterComponent — notice slot', () => {
     const footer = makeFooter(baseState());
     let current: { text: string; color: string } | null = null;
     footer.setNoticeProvider(() => current);
-    expect(strip(footer.render(100)[1]!)).not.toContain('hello');
+    expect(strip(footer.render(100)[0]!)).not.toContain('hello');
     current = { text: 'hello', color: '#fff' };
-    expect(strip(footer.render(100)[1]!)).toContain('hello');
+    expect(strip(footer.render(100)[0]!)).toContain('hello');
     footer.setNoticeProvider(() => {
       throw new Error('boom');
     });
@@ -417,81 +404,62 @@ describe('FooterComponent — notice slot', () => {
 
 describe('FooterComponent — channel', () => {
   it('shows the channel only while it runs; a configured but stopped one says nothing', () => {
-    expect(rowsOf(baseState({ linePlatform: 'lark', lineActive: false }), 100)[1]).not.toContain('Line');
-    expect(rowsOf(baseState(), 100)[1]).not.toContain('Line');
-    expect(rowsOf(baseState({ linePlatform: 'lark', lineActive: true }), 100)[1]).toContain('◆ Line: Lark');
-    expect(rowsOf(baseState({ linePlatform: 'wechat', lineActive: true }), 100)[1]).toContain('◆ Line: WeChat');
+    expect(rowsOf(baseState({ linePlatform: 'lark', lineActive: false }), 100)[0]).not.toContain('Line');
+    expect(rowsOf(baseState(), 100)[0]).not.toContain('Line');
+    expect(rowsOf(baseState({ linePlatform: 'lark', lineActive: true }), 100)[0]).toContain('◆ Line: Lark');
+    expect(rowsOf(baseState({ linePlatform: 'wechat', lineActive: true }), 100)[0]).toContain('◆ Line: WeChat');
   });
 
   it('shortens to Line before it is dropped', () => {
     const state = baseState({ linePlatform: 'lark', lineActive: true, planMode: 'plan', rlmEnabled: true });
     const forms = new Set<string>();
     for (let width = 100; width >= 20; width--) {
-      const m = /◆ Line(?:: \S+)?/.exec(rowsOf(state, width)[1]!);
+      const m = /◆ Line(?:: \S+)?/.exec(rowsOf(state, width)[0]!);
       if (m) forms.add(m[0]);
     }
     expect([...forms]).toEqual(expect.arrayContaining(['◆ Line: Lark', '◆ Line']));
   });
 });
 
-describe('FooterComponent — a terminal too narrow for the status row', () => {
-  const working = baseState({ streamingPhase: 'thinking', streamingStartTime: NOW - 12_000 });
-
-  it('carries the work state itself below 60 columns', () => {
-    expect(rowsOf(working, 56)[1]).toContain('思考中 · 12s');
-    expect(rowsOf(working, 100)[1]).not.toContain('思考中');
+describe('FooterComponent — one row at every size', () => {
+  it('is one row on any terminal height and width', () => {
+    for (const rows of [undefined, 10, 14, 19, 20, 40]) {
+      for (const width of [30, 50, 80, 140]) expect(rowsOf(baseState(), width, { rows }), `${String(rows)}x${String(width)}`).toHaveLength(1);
+    }
   });
 
-  it('carries what the session waits for, too', () => {
+  it('never carries the work state: the status row is drawn at every width', () => {
+    const working = baseState({ streamingPhase: 'thinking', streamingStartTime: NOW - 12_000 });
     const waiting = baseState({
       streamingPhase: 'tool',
       streamingStartTime: NOW - 300_000,
       pendingUserAction: 'approval',
       pendingUserActionSince: NOW - 240_000,
     });
-    expect(rowsOf(waiting, 56)[1]).toContain('等待批准 · 4m');
-    expect(rowsOf(waiting, 100).join('\n')).not.toContain('等待批准');
-  });
-});
-
-describe('FooterComponent — short terminal', () => {
-  it('folds into one row below 20 terminal rows, and keeps two from 20', () => {
-    expect(rowsOf(baseState(), 100, { rows: 14 })).toHaveLength(1);
-    expect(rowsOf(baseState(), 100, { rows: 19 })).toHaveLength(1);
-    expect(rowsOf(baseState(), 100, { rows: 20 })).toHaveLength(2);
-    expect(rowsOf(baseState(), 100, { rows: 40 })).toHaveLength(2);
-    expect(rowsOf(baseState(), 100)).toHaveLength(2);
+    for (const width of [40, 56, 100]) {
+      expect(rowsOf(working, width)[0]).not.toContain('思考中');
+      expect(rowsOf(waiting, width)[0]).not.toContain('等待批准');
+    }
   });
 
-  it('keeps model, pills, notice and gauge on the one row, and gives up the rest', () => {
+  it('keeps the model, the modes, running work, MCP trouble, waiting jobs and the percentage on a narrow row', () => {
     const state = baseState({
       planMode: 'plan',
+      rlmEnabled: true,
+      jobsEnabled: 1,
+      jobsWaiting: 1,
+      jobsHostRunning: true,
       sessionUsage: USED,
-      providerBalance: { currency: 'CNY', totalBalance: '12.40' } as never,
-      mcpSummary: { total: 5, connected: 3, pending: 0, failed: 1, needsAuth: 1 },
-    });
-    const [row] = rowsOf(state, 100, {
-      rows: 14,
-      git: { added: 3, deleted: 1 },
-      notice: { text: '1 个 MCP 服务器失败 · /mcp', color: '#f00' },
-    });
-    expect(row).toContain('Alpha 1');
-    expect(row).toContain('计划');
-    expect(row).toContain('✕ MCP 3/5');
-    expect(row).toContain('1 个 MCP 服务器失败');
-    expect(row).toContain('ctx');
-    expect(row).not.toMatch(/缓存|¥|git/);
-    expect(visibleWidth(row!)).toBe(100);
-  });
-
-  it('keeps jobs that need the person even on the one row', () => {
-    const [row] = rowsOf(baseState({ jobsEnabled: 2, jobsWaiting: 1, jobsHostRunning: true } as never), 100, { rows: 14 });
-    expect(row).toContain('◆ 待处理 1');
-  });
-
-  it('keeps the interrupt key while working, and no hints while idle', () => {
-    expect(rowsOf(baseState({ streamingPhase: 'tool', streamingStartTime: NOW }), 100, { rows: 14 })[0]).toContain('Esc 中断');
-    expect(rowsOf(baseState(), 100, { rows: 14 })[0]).not.toMatch(/命令/);
+      providerBalance: { currency: 'USD', totalBalance: '8.84' } as never,
+      mcpSummary: { total: 3, connected: 2, pending: 0, failed: 1, needsAuth: 0 },
+    } as never);
+    const footer = makeFooter(state, { git: { added: 3, deleted: 1 }, notice: { text: '提醒 · 10 分钟后开会', color: '#fa0' } });
+    footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 0, foregroundSubagents: 1 });
+    const row = strip(footer.render(64)[0]!);
+    footer.dispose();
+    for (const kept of ['Alpha', '计划', 'RLM', '运行中 2', '✕', '◆ 待处理 1', '28%']) expect(row, row).toContain(kept);
+    // The measurements gave way to them.
+    expect(row).not.toMatch(/缓存|\$8\.84|git/);
   });
 });
 
@@ -525,6 +493,57 @@ describe('FooterComponent — fit contract', () => {
   });
 });
 
+describe('FooterComponent — model name glow', () => {
+  const WORKING = { streamingStartTime: NOW - 10_000 } as const;
+  const render = (state: AppState, at: number): string => {
+    vi.spyOn(Date, 'now').mockReturnValue(at);
+    const footer = makeFooter(state);
+    const row = footer.render(100)[0]!;
+    footer.dispose();
+    return row;
+  };
+  beforeEach(() => {
+    chalk.level = 3;
+  });
+  afterEach(() => {
+    chalk.level = 1;
+  });
+
+  it('glows while the model works, and the glow moves with the clock', () => {
+    for (const phase of ['thinking', 'waiting', 'composing', 'tool-args'] as const) {
+      const state = baseState({ streamingPhase: phase, ...WORKING });
+      const frames = new Set([0, 100, 200, 300, 400, 500].map((offset) => render(state, NOW + offset)));
+      expect(frames.size, phase).toBeGreaterThan(1);
+    }
+  });
+
+  it('is plain bold text while idle, with no glow', () => {
+    const state = baseState();
+    expect(render(state, NOW)).toBe(render(state, NOW + 300));
+    expect(render(state, NOW)).toContain(`${sgr(darkColors.text)}\u001B[1mAlpha 1`);
+  });
+
+  it('holds one steady colour with motion off: green while the model works, blue while a tool runs', () => {
+    applyMotionEnv({ SCREAM_MOTION: 'off' });
+    for (const phase of ['thinking', 'waiting', 'composing', 'tool-args'] as const) {
+      const state = baseState({ streamingPhase: phase, ...WORKING });
+      const first = render(state, NOW);
+      expect(render(state, NOW + 137), phase).toBe(first);
+      expect(first, phase).toContain(`${sgr(darkColors.primary)}Alpha 1`);
+    }
+    const tool = baseState({ streamingPhase: 'tool', ...WORKING });
+    const first = render(tool, NOW);
+    expect(render(tool, NOW + 211)).toBe(first);
+    expect(first).toContain(`${sgr(darkColors.planMode)}Alpha 1`);
+  });
+
+  it('uses the blue of a running tool for its glow, not the green', () => {
+    const tool = baseState({ streamingPhase: 'tool', ...WORKING });
+    const frames = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900].map((offset) => render(tool, NOW + offset)).join('');
+    expect(frames).not.toContain(sgr(darkColors.primary));
+  });
+});
+
 describe('FooterComponent — clock', () => {
   function make(state: AppState) {
     const requestRender = vi.fn();
@@ -532,7 +551,7 @@ describe('FooterComponent — clock', () => {
     return { footer, requestRender };
   }
 
-  it('stays quiet while idle and ticks once a second in every active phase', () => {
+  it('stays quiet while idle and repaints at 30 frames a second in every active phase (the glow)', () => {
     vi.useFakeTimers();
     const { footer, requestRender } = make(baseState());
     vi.advanceTimersByTime(3000);
@@ -540,8 +559,9 @@ describe('FooterComponent — clock', () => {
     for (const phase of ['waiting', 'tool', 'composing'] as const) {
       footer.setState(baseState({ streamingPhase: phase }));
       requestRender.mockClear();
-      vi.advanceTimersByTime(3000);
-      expect(requestRender).toHaveBeenCalledTimes(3);
+      vi.advanceTimersByTime(1000);
+      expect(requestRender.mock.calls.length, phase).toBeGreaterThanOrEqual(29);
+      expect(requestRender.mock.calls.length, phase).toBeLessThanOrEqual(31);
     }
     footer.dispose();
   });

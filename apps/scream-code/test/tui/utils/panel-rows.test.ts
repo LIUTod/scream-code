@@ -22,7 +22,7 @@ describe('panelRowBudget', () => {
   });
 
   it('leaves the status row, the footer and one transcript row to the rest of the screen', () => {
-    expect(panelRowBudget(40)).toBe(40 - 1 - 2 - 1);
+    expect(panelRowBudget(40)).toBe(40 - 1 - 1 - 1);
   });
 
   it('never squeezes below the rows a frame, a title, a choice and a hint need', () => {

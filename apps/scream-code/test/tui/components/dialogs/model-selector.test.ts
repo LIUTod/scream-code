@@ -142,7 +142,7 @@ describe('ModelSelectorComponent — short terminal', () => {
     for (const rows of [14, 18, 24, 40]) {
       const selector = make({ viewportRows: () => rows });
       const lines = selector.render(80).map(strip);
-      expect(lines.length, `rows ${String(rows)}`).toBeLessThanOrEqual(Math.max(6, rows - 1 - 2 - 1));
+      expect(lines.length, `rows ${String(rows)}`).toBeLessThanOrEqual(Math.max(6, rows - 1 - 1 - 1));
       const text = lines.join('\n');
       expect(text).toContain('Enter 切换模型');
       expect(text).toContain('Bravo 5');

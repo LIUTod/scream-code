@@ -22,7 +22,6 @@ import {
   CHROME_GUTTER,
   DOCK_FOOTER_ROWS,
   DOCK_STATUS_ROWS,
-  STATUS_ROW_MIN_WIDTH,
   TODO_PANEL_MIN_WIDTH,
 } from '../constant/rendering';
 import { USER_MESSAGE_BULLET } from '../constant/symbols';
@@ -143,8 +142,7 @@ const MCP_PROGRESS_NOTICE_TTL_MS = 15_000;
 const GIT_DIFF_TTL_MS = 15_000;
 /** Window after a command-driven line write during which the poll stands down. */
 const MANUAL_LINE_WRITE_GRACE_MS = 5_000;
-/** The footer renders two rows (one on a short terminal, see COMPACT_FOOTER_ROWS);
- *  the dock reserves the two. The status row keeps one row even when it renders
+/** The footer renders one row at every terminal size; the dock reserves it. The status row keeps one row even when it renders
  *  nothing. Both live in constant/rendering so panels can size against them;
  *  re-exported here. */
 export { DOCK_FOOTER_ROWS, DOCK_STATUS_ROWS };
@@ -513,14 +511,12 @@ export class LifecycleController {
         component: this.host.state.statusBarContainer,
         shrink: 1,
         minSize: DOCK_STATUS_ROWS,
-        visible: (viewport) => viewport.width >= STATUS_ROW_MIN_WIDTH,
       },
       { component: this.host.state.editorContainer, shrink: 1, minSize: 3 },
       {
         component: this.ensureFooterWrap(),
-        // The footer is a fixed block of its rendered height: two rows, or one
-        // on a short terminal (it folds itself, see COMPACT_FOOTER_ROWS). It
-        // must not shrink below that, otherwise a row is clipped away.
+        // The footer is one row at every terminal size. It must not shrink
+        // below that, otherwise it is clipped away.
         shrink: 0,
         minSize: 1,
       },
@@ -551,8 +547,8 @@ export class LifecycleController {
     ]);
     const layoutRoot = new VStack([
       { component: topRegion, basis: 0, grow: 1, shrink: 1, minSize: 1 },
-      // The dock's own floor matches the footer's two rows: shrinking the dock
-      // below that would clip the footer's second row.
+      // The dock's own floor keeps two rows: the status row and the footer,
+      // so neither is clipped when the transcript takes the room.
       { component: dock, basis: 'auto', grow: 0, shrink: 1, minSize: 2 },
     ]);
     ui.setLayoutRoot(layoutRoot);
@@ -824,6 +820,12 @@ export class LifecycleController {
     const colors = state.theme.colors;
     const live = () => workState(state.appState);
     const scrollCue = () => this.getScrollCue();
+    // Esc closes a picker or a panel in the editor's place, and cancels queued
+    // messages before it interrupts anything (see EditorKeyboard.onEscape).
+    const escTaken = () =>
+      state.activeDialog !== null ||
+      !state.editorContainer.children.includes(state.editor) ||
+      state.queuedMessages.length > 0;
 
     switch (mode) {
       case 'waiting':
@@ -845,6 +847,7 @@ export class LifecycleController {
             state: live,
             reconnect: this.buildReconnectLabel(state),
             scrollCue,
+            escTaken,
           }),
         );
         break;
