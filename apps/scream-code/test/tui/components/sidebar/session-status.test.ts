@@ -16,6 +16,7 @@ import {
   type SidebarData,
 } from '#/tui/components/sidebar/session-status';
 import { darkColors } from '#/tui/theme/colors';
+import { lerpHex } from '#/tui/utils/gradient';
 import type { SubagentSlot } from '#/tui/utils/subagent-slots';
 import { OTHER_MODELS, type DayUsage, type UsageSnapshot } from '#/tui/utils/usage-ledger';
 
@@ -80,22 +81,28 @@ describe('heatmapLines', () => {
     expect(lines.at(-2)).toBe('');
     const names = (rows: string[]): string[] => rows.slice(1, 8).map((l) => /^\S*/.exec(l)![0]);
     expect(names(lines)).toEqual(['', '周一', '', '周三', '', '周五', '']);
-    expect(lines.at(-1)).toContain('少 ░ ▒ ▓ █ 多');
+    expect(lines.at(-1)).toContain('少 ▇▇ ▇▇ ▇▇ ▇▇ 多');
     setLocale('en');
     const en = heatmapLines(snapshot({}), 52, darkColors).lines.map(strip);
     expect(names(en)).toEqual(['', 'Mon', '', 'Wed', '', 'Fri', '']);
-    expect(en.at(-1)).toContain('Less ░ ▒ ▓ █ More');
+    expect(en.at(-1)).toContain('Less ▇▇ ▇▇ ▇▇ ▇▇ More');
+    // With no colour the shades are told apart by density instead.
+    chalk.level = 0;
+    expect(heatmapLines(snapshot({}), 52, darkColors).lines.at(-1)).toContain('Less ░░ ▒▒ ▓▓ ██ More');
   });
 
-  it('draws a column a day, as many weeks as fit, a year at most and a few at least', () => {
-    expect(rowsOf(30).weeks).toBe(25);
-    expect(rowsOf(49).weeks).toBe(44);
-    expect(rowsOf(57).weeks).toBe(52);
-    expect(rowsOf(400).weeks).toBe(52);
-    expect(rowsOf(6).weeks).toBe(10);
-    // One character a day: the grid is exactly as wide as the weeks.
-    const { lines, weeks } = rowsOf(49, snapshot({ [TODAY]: day(10) }));
-    expect(visibleWidth(lines[1]!.trimEnd())).toBeLessThanOrEqual(5 + weeks);
+  it('makes a day a tile two columns wide with a column of air, as many weeks as fit, a year at most', () => {
+    // About square in a terminal cell, which is about twice as tall as wide.
+    expect(heatmapLines(snapshot({}), 52, darkColors)).toMatchObject({ cell: 3, weeks: 15 });
+    expect(heatmapLines(snapshot({}), 30, darkColors)).toMatchObject({ cell: 3, weeks: 8 });
+    // A wide sidebar draws the whole year, a year at most.
+    expect(heatmapLines(snapshot({}), 400, darkColors)).toMatchObject({ cell: 3, weeks: 52 });
+    // The width depends on the room alone: the picture does not change shape while the history is being counted.
+    expect(heatmapLines(snapshot({}, { loading: 0.3 }), 52, darkColors)).toMatchObject({ cell: 3, weeks: 15 });
+    // Not enough room for eight weeks of three-column days: two columns, then one.
+    expect(heatmapLines(snapshot({}), 24, darkColors)).toMatchObject({ cell: 2, weeks: 9 });
+    expect(heatmapLines(snapshot({}), 20, darkColors)).toMatchObject({ cell: 1, weeks: 15 });
+    expect(heatmapLines(snapshot({}), 6, darkColors).weeks).toBe(8);
   });
 
   it('keeps every row inside the room it was given, the future blank', () => {
@@ -109,25 +116,35 @@ describe('heatmapLines', () => {
     expect(visibleWidth(lines[7]!.trimEnd())).toBeLessThan(visibleWidth(lines[6]!.trimEnd()));
   });
 
-  it('writes months in the interface language, spread evenly, the oldest dropped first when they would touch', () => {
-    const zh = rowsOf(57).lines[0]!;
-    const zhWords = zh.trim().split(/\s+/);
-    expect(zhWords.at(-1)).toBe('11月');
-    expect(zhWords.every((w) => /^\d+月$/.test(w))).toBe(true);
-    // The names never touch: a slot is at least as wide as the widest name plus a space.
-    expect(zhWords.length).toBeLessThan(13);
+  it('writes months in the interface language, each above the week it starts in, never two touching', () => {
+    const { weeks, cell } = heatmapLines(snapshot({}), 52, darkColors);
+    const zh = rowsOf(52).lines[0]!;
+    expect(zh.trim().split(/\s+/).at(-1)).toBe('11月');
+    expect(zh.trim().split(/\s+/).every((w) => /^\d+月$/.test(w))).toBe(true);
+    // 2026-11-01 is a Sunday three weeks before the week of today: its label sits over that week's column.
+    expect(visibleWidth(zh.slice(0, zh.indexOf('11月')))).toBe(5 + (weeks - 4) * cell);
 
     setLocale('en');
-    const wide = strip(heatmapLines(snapshot({}), 57, darkColors).lines[0]!);
-    expect(wide).toMatch(/Nov +Dec +Jan +Feb +Mar +Apr +May +Jun +Jul +Aug +Sep +Oct +Nov/);
-    const narrow = strip(heatmapLines(snapshot({}), 24, darkColors).lines[0]!);
+    // The English weekday names are a column narrower, which can add a week.
+    const heat = heatmapLines(snapshot({}), 52, darkColors);
+    const en = strip(heat.lines[0]!);
+    const words = en.trim().split(/\s+/);
+    expect(words.at(-1)).toBe('Nov');
+    expect(words.every((w) => /^[A-Z][a-z]{2}$/.test(w))).toBe(true);
+    expect(en.indexOf('Nov')).toBe(4 + (heat.weeks - 4) * heat.cell);
+    expect(en).not.toMatch(/[a-z][A-Z]/);
+  });
+
+  it('spreads the months evenly on a one-column grid, the oldest dropped first when they would crowd', () => {
+    setLocale('en');
+    const narrow = strip(heatmapLines(snapshot({}), 20, darkColors).lines[0]!);
     const words = narrow.trim().split(/\s+/);
     expect(words.at(-1)).toBe('Nov');
-    expect(words.length).toBeLessThan(13);
+    expect(words.length).toBeLessThanOrEqual(4);
     expect(narrow).not.toMatch(/[a-z][A-Z]/);
   });
 
-  it('shades by the quartiles of the days that were used, in the brand colour, and shows unused days as a quiet dot', () => {
+  it('shades by the quartiles of the days that were used, in four tints of the brand colour, and shows unused days as a dot', () => {
     const days: Record<string, DayUsage> = {};
     // Ten used days, 1..10 (the weekday rows are Sun..Sat; these fall in the last two weeks).
     for (let i = 0; i < 10; i++) {
@@ -136,14 +153,22 @@ describe('heatmapLines', () => {
     }
     const heat = heatmapLines(snapshot(days), 30, darkColors).lines;
     const cells = heat.slice(1, 8).map(strip).join('');
-    for (const glyph of ['█', '▓', '▒', '░', '·']) expect(cells).toContain(glyph);
-    const raw = heat.join('');
+    expect(cells).toContain('▇');
+    expect(cells).toContain('·');
+    const raw = heat.slice(1, 8).join('');
+    // The strongest day is the brand colour itself; the others are thinned toward the border colour; unused days are quiet.
     expect(raw).toContain(sgr(darkColors.primary));
+    for (const k of [0.3, 0.55, 0.8]) expect(raw).toContain(sgr(lerpHex(darkColors.border, darkColors.primary, k)));
     expect(raw).toContain(sgr(darkColors.textMuted));
+    // Without colour the density glyphs say the same thing.
+    chalk.level = 0;
+    const plainCells = heatmapLines(snapshot(days), 30, darkColors).lines.slice(1, 8).join('');
+    for (const glyph of ['█', '▓', '▒', '░']) expect(plainCells).toContain(glyph);
+    expect(plainCells).not.toContain('▇');
   });
 
   it('shows nothing but dots when nothing was used', () => {
-    expect(rowsOf(30).lines.slice(1, 8).join('')).not.toMatch(/[░▒▓█]/);
+    expect(rowsOf(30).lines.slice(1, 8).join('')).not.toMatch(/[▇░▒▓█]/);
   });
 });
 
@@ -262,8 +287,9 @@ describe('SessionStatusBody', () => {
     const { body } = make({}, FULL);
     const text = plain(body.render(52)).join('\n');
     expect(text).toContain('模型 · 近 30 天');
-    expect(text).toMatch(/alpha +█+░* +\d+%/);
-    expect(text).toMatch(/其他 2 个 +░+ +\d+%/);
+    // Every bar is a run of tiles; the brand colour marks the filled part.
+    expect(text).toMatch(/alpha +▇+ +\d+%/);
+    expect(text).toMatch(/其他 2 个 +▇+ +\d+%/);
     const shares = [...text.matchAll(/(\d+)%\n/g)].map((m) => Number(m[1]));
     expect(shares.length).toBeGreaterThan(0);
     body.dispose();
@@ -272,7 +298,7 @@ describe('SessionStatusBody', () => {
   it('counts a day\'s "other" models as the rest, and shows no model block without any model data', () => {
     const withOther = snapshot({ [TODAY]: models({ alpha: 80, [OTHER_MODELS]: 20 }) });
     const { body } = make({}, withOther);
-    expect(plain(body.render(52)).join('\n')).toMatch(/其他 1 个 +░+ +20%/);
+    expect(plain(body.render(52)).join('\n')).toMatch(/其他 1 个 +▇+ +20%/);
     const none = make({}, snapshot({ [TODAY]: day(10) }));
     expect(plain(none.body.render(52)).join('\n')).not.toContain('模型 ·');
     body.dispose();
