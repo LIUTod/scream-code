@@ -80,6 +80,12 @@ export const PULSE_WAVE_INTERVAL_MS = 80;
 // Panels that replace the editor size themselves against what is left.
 export const DOCK_STATUS_ROWS = 1;
 export const DOCK_FOOTER_ROWS = 2;
+// Below this many terminal rows the footer folds its two rows into one (model,
+// mode pills, notice and the context gauge), giving a row back to the transcript.
+export const COMPACT_FOOTER_ROWS = 20;
+// The status row above the editor is drawn from this terminal width up. Narrower
+// than that the footer carries the work state itself.
+export const STATUS_ROW_MIN_WIDTH = 60;
 // Transcript rows a replacement panel leaves visible above itself: the last
 // message, so the person still sees what is being decided on.
 export const PANEL_MIN_TRANSCRIPT_ROWS = 1;

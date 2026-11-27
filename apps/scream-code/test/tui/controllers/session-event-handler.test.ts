@@ -1,5 +1,5 @@
 import { getLocale, setLocale, t } from '@scream-code/config';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Event, Session } from '@scream-code/scream-code-sdk';
 import {
@@ -110,7 +110,8 @@ function createMockHost(): SessionEventHost {
     requireSession: vi.fn(),
     showCollabActivity: vi.fn(),
     showReminderActivity: vi.fn(),
-    showMcpActivity: vi.fn(),
+    showMcpNotice: vi.fn(),
+    clearMcpNotice: vi.fn(),
     clearStatusActivity: vi.fn(),
     setAppState: vi.fn((patch) => {
       Object.assign(state.appState, patch);
@@ -1074,7 +1075,7 @@ describe('SessionEventHandler', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
 
-    // This is the frame that keeps the footer's `📨 Context  ━━─── xx%` gauge alive.
+    // This is the frame that keeps the footer's `ctx  ━━─── xx%` gauge alive.
     handler.handleEvent(
       {
         ...baseEvent('agent.status.updated'),
@@ -1372,86 +1373,52 @@ describe('SessionEventHandler', () => {
     });
   });
 
-  it('averages measured first-token latency for the sidebar Hub provider row', () => {
-    const host = createMockHost();
-    const handler = new SessionEventHandler(host);
+  describe('first-token history for the sidebar trend', () => {
+    const step = (latency?: number): Event =>
+      ({ ...baseEvent('turn.step.completed'), turnId: 1, ...(latency === undefined ? {} : { llmFirstTokenLatencyMs: latency }) }) as unknown as Event;
 
-    expect(handler.getProviderLatency()).toEqual({ ms: undefined, sampledAt: undefined });
+    it('keeps the latest ten, oldest first', () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      expect(handler.getFirstTokenHistory()).toEqual([]);
+      for (let i = 1; i <= 12; i++) handler.handleEvent(step(i * 100), vi.fn());
+      expect(handler.getFirstTokenHistory()).toEqual([300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200]);
+    });
 
-    for (const latency of [100, 200, 300]) {
-      handler.handleEvent(
-        {
-          ...baseEvent('turn.step.completed'),
-          turnId: 1,
-          llmFirstTokenLatencyMs: latency,
-        } as unknown as Event,
-        vi.fn(),
-      );
-    }
-    expect(handler.getProviderLatency().ms).toBe(200);
+    it('never mixes models, and ignores a step that measured nothing', () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      host.setAppState({ model: 'provider-a' });
+      handler.handleEvent(step(100), vi.fn());
+      handler.handleEvent(step(200), vi.fn());
+      expect(handler.getFirstTokenHistory()).toEqual([100, 200]);
 
-    // The window slides: the oldest reading drops out.
-    handler.handleEvent(
-      {
-        ...baseEvent('turn.step.completed'),
-        turnId: 1,
-        llmFirstTokenLatencyMs: 400,
-      } as unknown as Event,
-      vi.fn(),
-    );
-    expect(handler.getProviderLatency().ms).toBe(300);
-  });
+      host.setAppState({ model: 'provider-b' });
+      handler.handleEvent(step(900), vi.fn());
+      expect(handler.getFirstTokenHistory()).toEqual([900]);
 
-  it('separates provider latency by model and ignores unmeasured steps', () => {
-    const host = createMockHost();
-    const handler = new SessionEventHandler(host);
-    host.setAppState({ model: 'provider-a' });
-    for (const latency of [100, 200]) {
-      handler.handleEvent(
-        {
-          ...baseEvent('turn.step.completed'),
-          turnId: 1,
-          llmFirstTokenLatencyMs: latency,
-        } as unknown as Event,
-        vi.fn(),
-      );
-    }
-    expect(handler.getProviderLatency().ms).toBe(150);
+      // A step that never reported a latency must not read as an instant reply.
+      handler.handleEvent(step(), vi.fn());
+      expect(handler.getFirstTokenHistory()).toEqual([900]);
+    });
 
-    // A different provider is a different network path: never average across it.
-    host.setAppState({ model: 'provider-b' });
-    handler.handleEvent(
-      {
-        ...baseEvent('turn.step.completed'),
-        turnId: 1,
-        llmFirstTokenLatencyMs: 900,
-      } as unknown as Event,
-      vi.fn(),
-    );
-    expect(handler.getProviderLatency().ms).toBe(900);
+    it('stops showing the old model the moment the model changes, without waiting for a step', () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      host.setAppState({ model: 'provider-a' });
+      handler.handleEvent(step(120), vi.fn());
+      expect(handler.getFirstTokenHistory()).toEqual([120]);
+      host.setAppState({ model: 'provider-b' });
+      expect(handler.getFirstTokenHistory()).toEqual([]);
+    });
 
-    // A step that never reported a latency must not read as an instant reply.
-    handler.handleEvent(
-      { ...baseEvent('turn.step.completed'), turnId: 1 } as unknown as Event,
-      vi.fn(),
-    );
-    expect(handler.getProviderLatency().ms).toBe(900);
-  });
-
-  it('drops the provider latency the moment the model changes, without waiting for a step', () => {
-    const host = createMockHost();
-    const handler = new SessionEventHandler(host);
-    host.setAppState({ model: 'provider-a' });
-    handler.handleEvent(
-      { ...baseEvent('turn.step.completed'), turnId: 1, llmFirstTokenLatencyMs: 120 } as unknown as Event,
-      vi.fn(),
-    );
-    expect(handler.getProviderLatency().ms).toBe(120);
-
-    // A different provider is a different network path. The old reading must not
-    // stay on screen until the next completed step (or the stale budget elapses).
-    host.setAppState({ model: 'provider-b' });
-    expect(handler.getProviderLatency()).toEqual({ ms: undefined, sampledAt: undefined });
+    it('starts empty again for a new session', () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(step(120), vi.fn());
+      handler.resetRuntimeState();
+      expect(handler.getFirstTokenHistory()).toEqual([]);
+    });
   });
 });
 
@@ -2518,40 +2485,166 @@ describe('liveness stamp for the status-bar wave', () => {
     expect(host.state.lastActivityAt).toBe(1234);
   });
 
-  it('routes MCP server status to the status-row notice instead of a transcript row', () => {
-    const host = createMockHost();
-    const handler = new SessionEventHandler(host);
-    const sendQueued = vi.fn();
-    const connected = {
-      type: 'mcp.server.status',
-      agentId: 'main',
-      server: { name: 'chrome-devtools', transport: 'stdio', status: 'connected', toolCount: 33 },
-    } as unknown as Event;
-
-    handler.handleEvent(connected, sendQueued);
-    expect(host.showMcpActivity).toHaveBeenCalledWith('MCP chrome-devtools · 33 tools', 'green');
-    expect(host.showStatus).not.toHaveBeenCalled();
-
-    // Replayed duplicates of the same status are dropped, not re-announced.
-    handler.handleEvent(connected, sendQueued);
-    expect(host.showMcpActivity).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps MCP failures in the transcript (they need user action)', () => {
-    const host = createMockHost();
-    const handler = new SessionEventHandler(host);
-
-    handler.handleEvent(
-      {
+  describe('MCP servers', () => {
+    const status = (name: string, serverStatus: string, extra: Record<string, unknown> = {}): Event =>
+      ({
         type: 'mcp.server.status',
         agentId: 'main',
-        server: { name: 'figma', transport: 'stdio', status: 'failed', toolCount: 0, error: 'boom' },
-      } as unknown as Event,
-      vi.fn(),
-    );
+        server: { name, transport: 'stdio', status: serverStatus, toolCount: serverStatus === 'connected' ? 5 : 0, ...extra },
+      }) as unknown as Event;
 
-    expect(host.showMcpActivity).not.toHaveBeenCalled();
-    expect(host.showStatus).toHaveBeenCalledTimes(1);
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('says nothing about a healthy server: no notice, no transcript row', () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(status('chrome-devtools', 'connected'), vi.fn());
+      expect(host.showMcpNotice).not.toHaveBeenCalled();
+      expect(host.showStatus).not.toHaveBeenCalled();
+      expect(host.state.appState.mcpSummary).toEqual({ total: 1, connected: 1, pending: 0, failed: 0, needsAuth: 0 });
+    });
+
+    it('does not count a disabled server, and does not announce it', () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(status('figma', 'disabled'), vi.fn());
+      expect(host.showMcpNotice).not.toHaveBeenCalled();
+      expect(host.state.appState.mcpSummary).toBeUndefined();
+    });
+
+    it('announces connect progress only when it takes a moment, as one summary', () => {
+      vi.useFakeTimers();
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(status('a', 'connected'), vi.fn());
+      handler.handleEvent(status('b', 'pending'), vi.fn());
+      handler.handleEvent(status('c', 'pending'), vi.fn());
+      expect(host.showMcpNotice).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1_500);
+      expect(host.showMcpNotice).toHaveBeenCalledTimes(1);
+      expect(host.showMcpNotice).toHaveBeenLastCalledWith('progress', 'MCP 连接中 1/3', 'gray');
+
+      // The summary follows the servers instead of flashing one line per server.
+      handler.handleEvent(status('b', 'connected'), vi.fn());
+      expect(host.showMcpNotice).toHaveBeenLastCalledWith('progress', 'MCP 连接中 2/3', 'gray');
+
+      // When they settle the notice goes, and nothing is said about success.
+      handler.handleEvent(status('c', 'connected'), vi.fn());
+      expect(host.clearMcpNotice).toHaveBeenCalledWith('progress');
+      expect(host.showMcpNotice).toHaveBeenCalledTimes(2);
+    });
+
+    it('stays silent when the servers connect within the delay', () => {
+      vi.useFakeTimers();
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(status('a', 'pending'), vi.fn());
+      vi.advanceTimersByTime(500);
+      handler.handleEvent(status('a', 'connected'), vi.fn());
+      vi.advanceTimersByTime(5_000);
+      expect(host.showMcpNotice).not.toHaveBeenCalled();
+      expect(host.clearMcpNotice).not.toHaveBeenCalled();
+    });
+
+    it('announces a failure once, keeps it in the summary, and writes nothing to the transcript', () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(status('ok', 'connected'), vi.fn());
+      handler.handleEvent(status('figma', 'failed', { error: 'boom' }), vi.fn());
+
+      expect(host.showMcpNotice).toHaveBeenCalledTimes(1);
+      expect(host.showMcpNotice).toHaveBeenCalledWith('failed', '1 个 MCP 服务器失败 · /mcp', 'red');
+      expect(host.showStatus).not.toHaveBeenCalled();
+      expect(host.state.appState.mcpSummary).toEqual({ total: 2, connected: 1, pending: 0, failed: 1, needsAuth: 0 });
+
+      // A replay of the same status is not announced again.
+      handler.handleEvent(status('figma', 'failed', { error: 'boom' }), vi.fn());
+      expect(host.showMcpNotice).toHaveBeenCalledTimes(1);
+
+      // A second failure is a change worth announcing.
+      handler.handleEvent(status('github', 'failed'), vi.fn());
+      expect(host.showMcpNotice).toHaveBeenLastCalledWith('failed', '2 个 MCP 服务器失败 · /mcp', 'red');
+    });
+
+    it('announces a server that needs auth in its own kind', () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(status('docs', 'needs-auth'), vi.fn());
+      expect(host.showMcpNotice).toHaveBeenCalledWith('needs-auth', '1 个 MCP 服务器需要认证 · /mcp', 'yellow');
+      expect(host.state.appState.mcpSummary?.needsAuth).toBe(1);
+    });
+
+    it('waits for the servers still connecting before it announces a problem', () => {
+      vi.useFakeTimers();
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(status('slow', 'pending'), vi.fn());
+      handler.handleEvent(status('figma', 'failed'), vi.fn());
+      expect(host.showMcpNotice).not.toHaveBeenCalledWith('failed', expect.anything(), expect.anything());
+      handler.handleEvent(status('slow', 'connected'), vi.fn());
+      expect(host.showMcpNotice).toHaveBeenCalledWith('failed', '1 个 MCP 服务器失败 · /mcp', 'red');
+    });
+
+    it('clears the notice and the footer summary when the problem is resolved', () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(status('figma', 'failed'), vi.fn());
+      handler.handleEvent(status('figma', 'connected'), vi.fn());
+      expect(host.clearMcpNotice).toHaveBeenCalledWith('failed');
+      expect(host.state.appState.mcpSummary).toEqual({ total: 1, connected: 1, pending: 0, failed: 0, needsAuth: 0 });
+    });
+
+    it('takes the first picture of the servers from the session snapshot', async () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      const session = {
+        id: 'ses-test',
+        listMcpServers: vi.fn().mockResolvedValue([
+          { name: 'a', transport: 'stdio', status: 'connected', toolCount: 3 },
+          { name: 'b', transport: 'stdio', status: 'failed', toolCount: 0, error: 'x' },
+        ]),
+      };
+      host.session = session as never;
+      await handler.syncMcpServerStatusSnapshot(session as never);
+      expect(host.state.appState.mcpSummary).toEqual({ total: 2, connected: 1, pending: 0, failed: 1, needsAuth: 0 });
+      expect(host.showMcpNotice).toHaveBeenCalledWith('failed', '1 个 MCP 服务器失败 · /mcp', 'red');
+    });
+
+    it('lets a status an event already reported win over an older snapshot', async () => {
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      const session = {
+        id: 'ses-test',
+        // The snapshot was taken while the server was still connecting.
+        listMcpServers: vi.fn().mockImplementation(async () => {
+          handler.handleEvent(status('a', 'connected'), vi.fn());
+          return [{ name: 'a', transport: 'stdio', status: 'pending', toolCount: 0 }];
+        }),
+      };
+      host.session = session as never;
+      await handler.syncMcpServerStatusSnapshot(session as never);
+      expect(host.state.appState.mcpSummary).toEqual({ total: 1, connected: 1, pending: 0, failed: 0, needsAuth: 0 });
+    });
+
+    it('forgets everything about the old session when the session changes', () => {
+      vi.useFakeTimers();
+      const host = createMockHost();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(status('a', 'pending'), vi.fn());
+      vi.advanceTimersByTime(1_500);
+      handler.handleEvent(status('b', 'failed'), vi.fn());
+      handler.resetRuntimeState();
+      expect(host.state.appState.mcpSummary).toBeUndefined();
+      expect(host.clearMcpNotice).toHaveBeenCalledWith('progress');
+
+      // The same failure in the new session is announced again.
+      vi.clearAllMocks();
+      handler.handleEvent(status('b', 'failed'), vi.fn());
+      expect(host.showMcpNotice).toHaveBeenCalledWith('failed', '1 个 MCP 服务器失败 · /mcp', 'red');
+    });
   });
 
   it('still stamps live tool output', () => {

@@ -83,7 +83,7 @@ Scream is a personal agent you install on your own computer or server. Coding is
 
 ### Resident and background
 
-- **Works without Feishu or WeChat** — with jobs on, opening a terminal starts the background, which keeps running after the terminal closes until the computer restarts. Opening a terminal tells you what happened while you were away, the footer shows `◆ 1 waiting` when something needs you, the sidebar's first panel (Jobs) lists each job's last result and next run, and a system notification pops up when something waits for you, a job fails or handed-over work is done.
+- **Works without Feishu or WeChat** — with jobs on, opening a terminal starts the background, which keeps running after the terminal closes until the computer restarts. Opening a terminal tells you what happened while you were away, the footer shows `◆ 1 waiting` when something needs you, the session-status sidebar shows the next run, and a system notification pops up when something waits for you, a job fails or handed-over work is done.
 - **Resident service (`/service`)** — makes the background start again after a restart: installs the background host as a per-user service: a LaunchAgent on macOS, a systemd user unit on Linux (install turns on lingering so it starts at boot without a login; where that needs a password it tells you to run `sudo loginctl enable-linger`), a logon task on Windows. No administrator rights; it restarts after a crash (and stops retrying if it keeps crashing), and moves to the new version by itself once it is idle after an update. Turning it on checks, with the service's own environment, that the background can reach the model (`scream host check`), and says what to do when it cannot — a key kept only in your shell profile is the usual reason. While work runs on mains power it keeps the computer from idling into sleep (a laptop still sleeps with its lid closed).
 - **Session reminders** — with Feishu or WeChat set up, the chat hears when a session needs you: done, waiting for an approval or an answer, or failed. That covers sessions the background runs, and a terminal's sessions once you have been away from that terminal for 3 minutes. Each names the session, its project and what to do next, never the conversation; several at once arrive as one message. `/line` → 会话提醒 chooses which (or off).
 - **Rides out outages** — a goal or a bot run whose model requests fail because the network is down (a laptop that just woke) or the provider is overloaded keeps trying for up to 30 minutes instead of stopping; a background job that hits a timeout runs again 15 minutes later before it counts as failed.
@@ -109,7 +109,7 @@ Scream is a personal agent you install on your own computer or server. Coding is
 - **Local Knowledge Graph** — a visual knowledge base based on SAG ([arXiv:2606.15971](https://arxiv.org/abs/2606.15971)) for multi-hop reasoning; import your own documents anytime.
 - **RLM Mode** — a persistent Python workspace for long tasks; `rlm()` spawns recursive sub-agents straight from code, always through the `coder` profile, unlimited by default and capped with `/rlm-max-depth`. Every `rlm()` call is a real sub-agent run and consumes tokens.
 - **Script Mode** — on by default: the model runs JavaScript in a sandbox that calls the other tools for it, so batch work over dozens of files or pages finishes in one round trip and only the summary enters the conversation; `/script` toggles it.
-- **TUI Sidebar** — Jobs (whether the background runs, what waits for you, each job's last result and next run), per-session token accounting (cache hit / miss / output), 9 sub-agent slots with live states, Goal and judge state, and a network panel (probed only while the sidebar is visible, every 30 seconds). `Ctrl+X` toggles it.
+- **Session status sidebar** — a borderless column with a year-shaped heatmap of your daily token use (the numbers are counted from your own session logs, kept in `usage-ledger.json`; the first open counts the history in the background), then today / 7 / 30 days, cache hit, active days and streak, the model's first-token time with a trend, the next background job, this session's numbers, running agents and the goal, and each model's share of the last 30 days. Its width follows the terminal; the mouse wheel scrolls it when the terminal is short. `Ctrl+X` or `/sidebar` toggles it.
 - **Session Trace `/trace` and Search `/search`** — export a session as an offline, interactive HTML timeline; full-screen keyword search over the conversation.
 - **High Cache Hit Rate** — per-session HitR in the status bar, tuned across compatible protocols to maximize cache hits without lowering quality.
 - **MCP / Skills / 130+ providers** — all DIY-configurable; ships with browser automation and macOS desktop automation; when a language server is missing, it names the command that installs it.
@@ -180,7 +180,7 @@ Type `/` in the input to browse all 59 commands:
 | **Interface & tools** | |
 | `/search` | Search the conversation (same as `Ctrl+Shift+F`), Esc to close |
 | `/trace` | View the session working trajectory |
-| `/sidebar` (`/sb`) | Open/close the sidebar (`Ctrl+X`) |
+| `/sidebar` (`/sb`) | Open/close the session status (`Ctrl+X`) |
 | `/hl` (`/highlight`) | Toggle the faint band behind user messages (on by default) |
 | `/blockrows` (`/rows`) | Adjust activity block rows (collapsed height / changed lines per edit / tool-result rows / reasoning rows) |
 | `/codebg` (`/codeblock`) | Toggle the background behind code blocks |
@@ -195,7 +195,7 @@ Skills work as commands too: `/skill:<name>`. For example, after image setup, `/
 
 </details>
 
-**Shortcuts:** `Ctrl+S` interrupt · `Ctrl+C` cancel · `Ctrl+O` expand tool output · `Ctrl+Shift+F` search · `Ctrl+X` sidebar · `Shift+Tab` plan mode · `Shift+Enter` new line · `Tab` (empty input) cycle thinking effort · `@` mention a file
+**Shortcuts:** `Ctrl+S` interrupt · `Ctrl+C` cancel · `Ctrl+O` expand tool output · `Ctrl+Shift+F` search · `Ctrl+X` session status · `Shift+Tab` plan mode · `Shift+Enter` new line · `Tab` (empty input) cycle thinking effort · `@` mention a file
 
 ### Command line
 

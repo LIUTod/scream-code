@@ -1,6 +1,7 @@
 import {
   Container,
   ProcessTerminal,
+  ScrollView,
   TuiAltScreen,
   type Component,
 } from '@liutod-scream/pi-tui';
@@ -9,8 +10,9 @@ import { getLogDir } from '#/utils/paths';
 import { writeTextClipboard } from '#/utils/clipboard/clipboard-text';
 import { createRenderBatcher, type RenderBatchController } from './utils/render-batcher';
 
-import { SidebarContainer } from './components/sidebar/sidebar-container';
 import { SidebarManager } from './components/sidebar/sidebar-manager';
+import { createSessionStatusView, type SessionStatusBody } from './components/sidebar/session-status';
+import { UsageTracker } from './utils/usage-ledger';
 import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
 import { GutterContainer } from './components/chrome/gutter-container';
@@ -52,13 +54,14 @@ export interface TUIState {
    * lifecycle-controller.buildLayout. Full-screen overlays (approval
    * preview, tasks browser) swap it temporarily and restore it on close. */
   layoutRoot: Component | undefined;
-  /** Sidebar panel registry/state (owned here so views and commands share it). */
+  /** Whether the sidebar is open and how wide (owned here so views and commands share it). */
   sidebarManager: SidebarManager;
-  /** Renders the active sidebar panel inside the top-level HStack. */
-  sidebarContainer: SidebarContainer;
-  /** Gutter-wrapped sidebar used in buildLayout: same 1-column horizontal
-   * padding as the transcript region so both columns line up. */
-  sidebarPane: GutterContainer;
+  /** The session-status column, a scroll view mounted in the top-level HStack. */
+  sidebarView: ScrollView;
+  /** Its content; disposed with the TUI (it keeps a 1 s heartbeat while open). */
+  sidebarBody: SessionStatusBody;
+  /** Counts per-day usage from the session logs for the sidebar's heatmap. */
+  usageTracker: UsageTracker;
   transcriptContainer: Container;
   activityContainer: Container;
   statusBarContainer: Container;
@@ -244,17 +247,17 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   editor.toolPriority = initialAppState.like?.toolPriority;
   const footer = new FooterComponent({ ...initialAppState }, theme.colors, ui);
 
-  // Sidebar panel state is created once and shared by the layout (buildLayout)
-  // and the commands/keybindings. The width store can be wired to config later;
-  // here it stays in-memory for the session.
+  // The sidebar's state is created once and shared by the layout (buildLayout)
+  // and the commands/keybindings. Its usage count starts only when the sidebar
+  // is first drawn, so a session that never opens it reads no logs.
   const sidebarManager = new SidebarManager(() => ui.requestRender());
-  const sidebarContainer = new SidebarContainer(
-    sidebarManager,
-    () => ui.requestRender(),
-    theme.colors,
-  );
-  const sidebarPane = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
-  sidebarPane.addChild(sidebarContainer);
+  const usageTracker = new UsageTracker(() => ui.requestRender());
+  const { view: sidebarView, body: sidebarBody } = createSessionStatusView({
+    manager: sidebarManager,
+    colors: theme.colors,
+    requestRender: () => ui.requestRender(),
+    usage: () => usageTracker.snapshot(),
+  });
   editor.onToggleSidebar = () => sidebarManager.toggle();
   const terminalState = createTerminalState();
   const reminders = new TerminalReminders({ unfocusedAt: () => terminalState.unfocusedAt });
@@ -264,8 +267,9 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     terminal,
     layoutRoot: undefined,
     sidebarManager,
-    sidebarContainer,
-    sidebarPane,
+    sidebarView,
+    sidebarBody,
+    usageTracker,
     transcriptContainer,
     activityContainer,
     statusBarContainer,

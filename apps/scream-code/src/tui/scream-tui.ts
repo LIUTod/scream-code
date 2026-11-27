@@ -57,7 +57,11 @@ import { SessionReplayRenderer } from './controllers/session-replay';
 import { StreamingUIController } from './controllers/streaming-ui';
 import { TasksBrowserController } from './controllers/tasks-browser';
 import { TranscriptController, type TranscriptControllerHost } from './controllers/transcript-controller';
-import { LifecycleController, type LifecycleControllerHost } from './controllers/lifecycle-controller';
+import {
+  LifecycleController,
+  type LifecycleControllerHost,
+  type McpNoticeKind,
+} from './controllers/lifecycle-controller';
 import { InputController, type InputControllerHost } from './controllers/input-controller';
 import type { TuiConfig } from './config';
 import {
@@ -306,6 +310,14 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // (TTL-cached, read off the render path).
     this.state.footer.setGitDiffProvider(() =>
       this.lifecycleController.getGitDiffStats(this.state.appState.workDir),
+    );
+    // The notice slot reads the controller's notice board live, and the key
+    // hints stay quiet while a picker or a replacement panel owns the keys.
+    this.state.footer.setNoticeProvider(() => this.lifecycleController.getNotice());
+    this.state.footer.setKeysTakenProvider(
+      () =>
+        this.state.activeDialog !== null ||
+        !this.state.editorContainer.children.includes(this.state.editor),
     );
     this.inputController = new InputController(this);
     this.lifecycleController.buildLayout();
@@ -574,7 +586,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.inputController.dispose();
     this.terminalTitle.stop();
     this.state.footer.dispose();
-    this.state.sidebarContainer.dispose();
+    this.state.sidebarBody.dispose();
+    this.state.usageTracker.dispose();
     // Clean shutdown: clear the crash marker before any teardown awaits. If a
     // teardown step throws, this path still ran and the next launch must not
     // report a crash that did not happen.
@@ -1039,22 +1052,27 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     }
   }
 
-  /** Collaboration ticker above the editor (subagent ↔ main-agent traffic). */
+  /** Collaboration notice in the footer's notice slot (subagent ↔ main-agent traffic). */
   showCollabActivity(text: string, tone: 'request' | 'handled'): void {
     this.lifecycleController.showCollabActivity(text, tone);
   }
 
-  /** Scheduled-task reminder above the editor (`⏰ 定时任务已触发：…`). */
+  /** Scheduled-task reminder in the footer's notice slot (`⏰ 定时任务已触发：…`). */
   showReminderActivity(text: string, tone: 'fired' | 'missed'): void {
     this.lifecycleController.showReminderActivity(text, tone);
   }
 
-  /** MCP server notice above the editor (connecting / connected / disabled). */
-  showMcpActivity(text: string, color: string): void {
-    this.lifecycleController.showMcpActivity(text, color);
+  /** MCP notice in the footer's notice slot (connect progress, a failure, an auth request). */
+  showMcpNotice(kind: McpNoticeKind, text: string, color: string): void {
+    this.lifecycleController.showMcpNotice(kind, text, color);
   }
 
-  /** Drops every transient chip on the status row (session switch). */
+  /** Removes an MCP notice (the servers settled). */
+  clearMcpNotice(kind: McpNoticeKind): void {
+    this.lifecycleController.clearMcpNotice(kind);
+  }
+
+  /** Drops every notice in the footer's notice slot (session switch). */
   clearStatusActivity(): void {
     this.lifecycleController.clearStatusActivity();
   }

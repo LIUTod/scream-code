@@ -8,7 +8,7 @@ The background host (`scream host`) is a scream process without a window; there 
 - **Background jobs**: runs the jobs in `/jobs` when they fall due (see below).
 - **Waiting for you**: what unattended work could not decide alone (a refused action, a question) is kept until you answer: a note when a terminal opens, a count in the footer, a system notification; with Feishu or WeChat set up, a copy in the chat as well.
 
-**Everything works without Feishu or WeChat.** The terminal comes first: opening it tells you what happened while you were away; the footer shows `◆ 1 waiting` when something needs you (or `◆ jobs not running` when the background is not up); the first sidebar panel (`Ctrl+X`) is Jobs — whether the background runs, what waits, and each job's last result and next run. A system notification pops up when something waits for you, a job fails, or handed-over work is done. A chat only adds a copy on your phone.
+**Everything works without Feishu or WeChat.** The terminal comes first: opening it tells you what happened while you were away; the footer shows `◆ 1 waiting` when something needs you (or `◆ jobs not running` when the background is not up); the session-status sidebar (`Ctrl+X`) shows the next job run. A system notification pops up when something waits for you, a job fails, or handed-over work is done. A chat only adds a copy on your phone.
 
 ## Resident service (`/service`)
 

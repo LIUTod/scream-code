@@ -68,10 +68,11 @@ import { formatBackgroundTaskTranscript } from '../utils/background-task-status'
 import { isTerminalBackgroundTask } from '../utils/message-replay';
 import { formatHookResultMarkdown, formatHookResultPlain } from '../utils/hook-result-format';
 import {
-  formatMcpStartupStatusSummary,
-  mcpServerStatusKey,
+  mcpServerNames,
+  type McpServerStatus,
   type McpServerStatusSnapshot,
-  selectMcpStartupStatusRows,
+  sameMcpSummary,
+  summarizeMcpServers,
 } from '../utils/mcp-server-status';
 import { openUrl } from '../utils/open-url';
 import { McpOAuthAuthorizationUrlOpener } from '../utils/mcp-oauth';
@@ -172,6 +173,13 @@ export function isMainAgentStatusEvent(event: {
   return event.agentId === undefined || event.agentId === MAIN_AGENT_ID;
 }
 
+/** How many first-token times the sidebar's trend keeps. */
+const FIRST_TOKEN_HISTORY = 10;
+/** The problem key of a session with no failed and no auth-blocked server. */
+const NO_MCP_PROBLEMS = JSON.stringify([[], []]);
+/** A start that connects within this long says nothing about MCP at all. */
+const MCP_PROGRESS_DELAY_MS = 1_500;
+
 /**
  * Cap for the visible background-task registry (`backgroundTasks`).
  *
@@ -218,11 +226,13 @@ export interface SessionEventHost {
    */
   showReminderActivity?(text: string, tone: 'fired' | 'missed'): void;
   /**
-   * One-line MCP server notice above the editor (connecting / connected /
-   * disabled). Own slot + its own TTL; optional for headless hosts.
+   * MCP notice in the footer's notice slot: connect progress, a failure, an
+   * auth request. Healthy servers say nothing. Optional for headless hosts.
    */
-  showMcpActivity?(text: string, color: string): void;
-  /** Drops every transient chip on the status row (session switch). */
+  showMcpNotice?(kind: 'progress' | 'failed' | 'needs-auth', text: string, color: string): void;
+  /** Removes an MCP notice (the servers settled, or the problem went away). */
+  clearMcpNotice?(kind: 'progress' | 'failed' | 'needs-auth'): void;
+  /** Drops every notice in the footer's notice slot (session switch). */
   clearStatusActivity?(): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
@@ -289,17 +299,19 @@ export class SessionEventHandler {
   private readonly recentSubagentInstances: SubagentInstanceRow[] = [];
   /** Tool callId of the in-flight UpdateGoal(complete) (judging), if any. */
   private goalJudgeCallId: string | undefined;
-  /** Rolling first-token latencies of real requests, feeding the sidebar Hub
-   *  provider row. In-process only, and dropped whenever the model changes —
-   *  a different provider is a different network path. */
-  private providerLatencySamples: number[] = [];
-  private providerLatencyModel: string | undefined;
-  private providerLatencyAt: number | undefined;
-  /** Enough samples to smooth one slow request, few enough that a recovered
-   *  endpoint reads as recovered again quickly. */
-  private readonly providerLatencyWindow = 3;
+  /** The latest first-token times of real requests of the model in use, oldest
+   *  first, feeding the sidebar's trend. In-process only, and dropped whenever the
+   *  model changes: a different provider is a different network path. */
+  private firstTokenHistory: number[] = [];
+  private firstTokenModel: string | undefined;
   renderedSkillActivationIds: Set<string> = new Set();
-  renderedMcpServerStatusKeys: Map<string, string> = new Map();
+  /** Status of every MCP server of this session, by name (events and the snapshot both land here). */
+  private readonly mcpStatuses = new Map<string, McpServerStatus>();
+  /** The problem set (failed, needs auth) last announced: only a change is announced again. */
+  private mcpProblemKey = NO_MCP_PROBLEMS;
+  /** Connect progress is only worth a notice when it is slow; a fast start says nothing. */
+  private mcpProgressTimer: ReturnType<typeof setTimeout> | undefined;
+  private mcpProgressShown = false;
   /**
    * `SendSubagentMessage` tool call → target agent id. Needed at result time
    * because `SubagentSlots.onMessagingEnd()` deletes its own mapping, and a
@@ -328,16 +340,15 @@ export class SessionEventHandler {
     this.subagentInstances.clear();
     this.recentSubagentInstances.length = 0;
     this.renderedSkillActivationIds.clear();
-    this.renderedMcpServerStatusKeys.clear();
+    this.resetMcpStatus();
     // Drop queued skill candidates and the per-session prompt dedupe set when
     // the session changes, so a candidate queued in one session can never be
     // prompted into a different session.
     this.pendingSkillCandidates = [];
     this.promptedSkillCandidates.clear();
     this.goalJudgeCallId = undefined;
-    this.providerLatencySamples = [];
-    this.providerLatencyModel = undefined;
-    this.providerLatencyAt = undefined;
+    this.firstTokenHistory = [];
+    this.firstTokenModel = undefined;
     this.subagentUsageSeen.clear();
     this.host.setAppState({ subagentUsage: {}, goalJudge: 'awaiting' });
   }
@@ -378,33 +389,12 @@ export class SessionEventHandler {
     }
     if (host.session !== session || host.state.appState.sessionId !== session.id) return;
 
-    const visible = selectMcpStartupStatusRows(servers);
-    const visibleNames = new Set(visible.map((server) => server.name));
-    for (const server of visible) {
-      if (this.renderedMcpServerStatusKeys.has(server.name)) continue;
-      this.renderMcpServerStatus(server);
-    }
-
-    const hidden: McpServerStatusSnapshot[] = [];
+    // Every change after the snapshot was taken also arrives as an event, so a
+    // status an event already reported is newer than the snapshot's.
     for (const server of servers) {
-      if (visibleNames.has(server.name)) continue;
-      if (this.renderedMcpServerStatusKeys.has(server.name)) continue;
-      this.renderedMcpServerStatusKeys.set(server.name, mcpServerStatusKey(server));
-      hidden.push(server);
+      if (!this.mcpStatuses.has(server.name)) this.mcpStatuses.set(server.name, server.status);
     }
-    if (hidden.length > 0) {
-      const summary = formatMcpStartupStatusSummary(hidden, visible.length);
-      // Diagnostics that need action must survive the chip TTL — a failed or
-      // auth-blocked server outside the visible set keeps its transcript row.
-      const needsTranscript = hidden.some(
-        (server) => server.status === 'failed' || server.status === 'needs-auth',
-      );
-      if (needsTranscript) {
-        host.showStatus(summary, host.state.theme.colors.textMuted);
-      } else {
-        host.showMcpActivity?.(summary, host.state.theme.colors.textMuted);
-      }
-    }
+    this.refreshMcpStatus();
   }
 
   handleEvent(event: Event, sendQueued: (item: QueuedMessage) => void): void {
@@ -457,7 +447,7 @@ export class SessionEventHandler {
       case 'background.task.terminated':
         this.handleBackgroundTaskEvent(event); break;
       case 'cron.fired': this.handleCronFired(event); break;
-      case 'mcp.server.status': this.renderMcpServerStatus(event.server); break;
+      case 'mcp.server.status': this.applyMcpServerStatus(event.server); break;
       case 'tool.list.updated': break;
       case 'goal.updated': this.handleGoalUpdated(event); break;
       case 'todo.updated': this.handleTodoUpdated(event); break;
@@ -536,42 +526,23 @@ export class SessionEventHandler {
     this.subagentInstances.delete(agentId);
   }
 
-  /** Keep the last few first-token latencies, per provider. Steps without a
-   *  measured latency (no stream, cached turn) are ignored rather than counted
-   *  as a zero. */
-  private recordProviderLatency(event: TurnStepCompletedEvent): void {
+  /** Keep the last few first-token times. Steps without a measured latency (no
+   *  stream, cached turn) are ignored rather than counted as a zero. */
+  private recordFirstToken(event: TurnStepCompletedEvent): void {
     const latency = event.llmFirstTokenLatencyMs;
     if (latency === undefined) return;
     const model = this.host.state.appState.model;
-    if (this.providerLatencyModel !== undefined && model !== this.providerLatencyModel) {
-      this.providerLatencySamples = [];
-    }
-    this.providerLatencyModel = model;
-    this.providerLatencySamples.push(latency);
-    if (this.providerLatencySamples.length > this.providerLatencyWindow) {
-      this.providerLatencySamples.shift();
-    }
-    this.providerLatencyAt = Date.now();
+    if (this.firstTokenModel !== undefined && model !== this.firstTokenModel) this.firstTokenHistory = [];
+    this.firstTokenModel = model;
+    this.firstTokenHistory.push(latency);
+    if (this.firstTokenHistory.length > FIRST_TOKEN_HISTORY) this.firstTokenHistory.shift();
   }
 
-  /** Sidebar Hub: average measured first-token latency for the provider in use. The
-   *  caller owns tone and staleness — this stays a plain reading. */
-  getProviderLatency(): { ms: number | undefined; sampledAt: number | undefined } {
-    if (this.providerLatencySamples.length === 0) return { ms: undefined, sampledAt: undefined };
-    // A different provider is a different network path: drop the old readings
-    // here rather than waiting for the next completed step, or the model row
-    // would keep showing the previous endpoint's latency for minutes.
-    if (this.host.state.appState.model !== this.providerLatencyModel) {
-      this.providerLatencySamples = [];
-      this.providerLatencyModel = undefined;
-      this.providerLatencyAt = undefined;
-      return { ms: undefined, sampledAt: undefined };
-    }
-    const total = this.providerLatencySamples.reduce((sum, value) => sum + value, 0);
-    return {
-      ms: Math.round(total / this.providerLatencySamples.length),
-      sampledAt: this.providerLatencyAt,
-    };
+  /** The latest first-token times of the model in use, oldest first. Another
+   *  model is another network path, so the moment the model changes the old
+   *  readings stop showing instead of waiting for the next completed step. */
+  getFirstTokenHistory(): readonly number[] {
+    return this.host.state.appState.model === this.firstTokenModel ? this.firstTokenHistory : [];
   }
 
   /** Feed routed subagent activity into the slot state machine. */
@@ -872,7 +843,7 @@ export class SessionEventHandler {
     // a block (a subagent's call): it keeps its own row from here on.
     this.host.streamingUI.flushPendingApprovals();
     this.maybeShowDebugTiming(event);
-    this.recordProviderLatency(event);
+    this.recordFirstToken(event);
     this.drainQueuedMessagesIntoSteer();
     // A completed step is one LLM request; the failed attempts are counted
     // where they happen (handleStepRetrying). Both live in-process only: reset
@@ -1361,41 +1332,83 @@ export class SessionEventHandler {
   }
 
   /**
-   * MCP server status goes to the status row above the editor — a transient
-   * notice with its own TTL (same design as the collaboration ticker), not a
-   * permanent transcript row. Failures / auth requests stay in the transcript
-   * because they need user action and must not vanish after a few seconds.
+   * MCP follows the quiet rule: a healthy server says nothing. While servers
+   * are still connecting and it takes a moment, one summary notice; when they
+   * settle, a problem (failed, needs auth) gets one notice per change and then
+   * lives on as the footer pill until it is resolved. Nothing is written to the
+   * transcript, and nothing flashes per server.
    */
-  private renderMcpServerStatus(server: McpServerStatusSnapshot): void {
-    const { state } = this.host;
-    const key = mcpServerStatusKey(server);
-    if (this.renderedMcpServerStatusKeys.get(server.name) === key) return;
-    this.renderedMcpServerStatusKeys.set(server.name, key);
+  private applyMcpServerStatus(server: McpServerStatusSnapshot): void {
+    if (this.mcpStatuses.get(server.name) === server.status) return;
+    this.mcpStatuses.set(server.name, server.status);
+    this.refreshMcpStatus();
+  }
 
-    const colors = state.theme.colors;
-    switch (server.status) {
-      case 'connected': {
-        const toolStr = `${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}`;
-        this.host.showMcpActivity?.(`MCP ${server.name} · ${toolStr}`, colors.success);
-        return;
+  private refreshMcpStatus(): void {
+    const { host } = this;
+    const colors = host.state.theme.colors;
+    const summary = summarizeMcpServers(this.mcpStatuses);
+    const next = summary.total === 0 ? undefined : summary;
+    if (!sameMcpSummary(host.state.appState.mcpSummary, next)) host.setAppState({ mcpSummary: next });
+
+    if (summary.pending > 0) {
+      const show = (): void => {
+        const now = summarizeMcpServers(this.mcpStatuses);
+        host.showMcpNotice?.(
+          'progress',
+          t('mcp.notice_connecting', { done: now.total - now.pending, total: now.total }),
+          colors.textMuted,
+        );
+      };
+      if (this.mcpProgressShown) show();
+      else if (this.mcpProgressTimer === undefined) {
+        this.mcpProgressTimer = setTimeout(() => {
+          this.mcpProgressTimer = undefined;
+          if (summarizeMcpServers(this.mcpStatuses).pending === 0) return;
+          this.mcpProgressShown = true;
+          show();
+        }, MCP_PROGRESS_DELAY_MS);
+        // A pending notice must never be what keeps the process alive at exit.
+        this.mcpProgressTimer.unref();
       }
-      case 'pending':
-        this.host.showMcpActivity?.(t('handler.mcp_server_connecting', { name: server.name }), colors.textMuted);
-        return;
-      case 'disabled':
-        this.host.showMcpActivity?.(t('handler.mcp_server_disabled', { name: server.name }), colors.textMuted);
-        return;
-      case 'failed': {
-        const message = t('handler.mcp_server_failed', { name: server.name, error: server.error !== undefined ? `: ${server.error}` : '' });
-        this.host.showStatus(message, colors.error);
-        return;
-      }
-      case 'needs-auth': {
-        const message = t('handler.mcp_server_needs_auth', { name: server.name });
-        this.host.showStatus(message, colors.warning);
-        return;
-      }
+      return;
     }
+
+    this.stopMcpProgress();
+    const failed = mcpServerNames(this.mcpStatuses, 'failed');
+    const needsAuth = mcpServerNames(this.mcpStatuses, 'needs-auth');
+    const key = JSON.stringify([failed, needsAuth]);
+    if (key === this.mcpProblemKey) return;
+    this.mcpProblemKey = key;
+    if (failed.length > 0) {
+      host.showMcpNotice?.('failed', t('mcp.notice_failed', { count: failed.length }), colors.error);
+    } else {
+      host.clearMcpNotice?.('failed');
+    }
+    if (needsAuth.length > 0) {
+      host.showMcpNotice?.('needs-auth', t('mcp.notice_needs_auth', { count: needsAuth.length }), colors.warning);
+    } else {
+      host.clearMcpNotice?.('needs-auth');
+    }
+  }
+
+  private stopMcpProgress(): void {
+    if (this.mcpProgressTimer !== undefined) {
+      clearTimeout(this.mcpProgressTimer);
+      this.mcpProgressTimer = undefined;
+    }
+    if (this.mcpProgressShown) {
+      this.mcpProgressShown = false;
+      this.host.clearMcpNotice?.('progress');
+    }
+  }
+
+  /** A new session has its own servers: nothing of the old one carries over. */
+  private resetMcpStatus(): void {
+    this.mcpStatuses.clear();
+    this.mcpProblemKey = NO_MCP_PROBLEMS;
+    this.stopMcpProgress();
+    if (this.host.state.appState.mcpSummary !== undefined) this.host.setAppState({ mcpSummary: undefined });
   }
 
   private handleSkillActivated(event: SkillActivatedEvent): void {

@@ -27,7 +27,6 @@ const ALLOWED_PREFIXES: Readonly<Record<string, string>> = {
 const ALLOWED_FILES: Readonly<Record<string, string>> = {
   'tui/commands/language.ts': 'each language is named in itself (中文 / English)',
   'tui/commands/knowledge-web.ts': 'the page ships its own zh/en dictionaries and a language toggle',
-  'tui/components/sidebar/panels/goal-panel.ts': 'sidebar duration format branches on getLocale() — the sidebar pattern',
   'tui/reverse-rpc/approval/adapter.ts': 'approval source label branches on getLocale() — the sidebar pattern',
   'utils/usage/token-limit.ts': 'parser vocabulary: accepts 万 / 亿 and Chinese "off" words as input',
   'host/service.ts': "matches schtasks' own localized error text (找不到) to tell a missing task from a failure",

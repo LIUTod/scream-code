@@ -64,6 +64,15 @@ export interface GoalBadgeInfo {
  *  call is grading) → adjudicated (goal finished grading and was completed). */
 export type GoalJudgeState = 'awaiting' | 'judging' | 'adjudicated';
 
+/** How the session's MCP servers stand (disabled servers are not counted). */
+export interface McpSummary {
+  readonly total: number;
+  readonly connected: number;
+  readonly pending: number;
+  readonly failed: number;
+  readonly needsAuth: number;
+}
+
 export interface AppState {
   model: string;
   /** Model alias that was detached because its provider was removed. Keeps
@@ -146,6 +155,12 @@ export interface AppState {
    * is not configured. Drives the footer's channel label.
    */
   linePlatform: 'lark' | 'wechat' | null;
+  /**
+   * MCP server health for the footer. Healthy servers are not shown; the footer
+   * draws a pill only while something failed or needs auth. `undefined` until
+   * the first snapshot of a session.
+   */
+  mcpSummary?: McpSummary;
   /** Background jobs switched on (footer `jobs` item; hidden at 0 with nothing waiting). */
   jobsEnabled?: number;
   /** Items waiting for the person ("waiting for you"). */

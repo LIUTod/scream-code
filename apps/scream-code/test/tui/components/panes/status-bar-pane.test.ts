@@ -1,330 +1,207 @@
-import { describe, expect, it } from 'vitest';
 import chalk from 'chalk';
 import { visibleWidth } from '@liutod-scream/pi-tui';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { StatusBarPaneComponent } from '#/tui/components/panes/status-bar-pane';
+import { StatusBarPaneComponent, type StatusBarPaneOptions } from '#/tui/components/panes/status-bar-pane';
+import { darkColors } from '#/tui/theme/colors';
+import type { WorkState } from '#/tui/utils/status-text';
 
-const ANSI = /\u001B\[[0-9;]*m/g;
-const strip = (text: string): string => text.replaceAll(ANSI, '');
+const strip = (text: string): string => text.replaceAll(/\u001B\[[0-9;]*m/g, '');
+const sgr = (hex: string): string => {
+  const v = hex.replace(/^#/, '');
+  return `\u001B[38;2;${String(Number.parseInt(v.slice(0, 2), 16))};${String(Number.parseInt(v.slice(2, 4), 16))};${String(Number.parseInt(v.slice(4, 6), 16))}m`;
+};
 
 /** Minimal PulseWaveLoader stand-in: only getFrameText()/invalidate() are used. */
-function fakeWave(frame = '⬝') {
-  return { getFrameText: () => frame, invalidate: () => {} } as never;
+const fakeWave = (frame = '■······'): never => ({ getFrameText: () => frame, invalidate: () => {} }) as never;
+
+const working = (variants: string[]): (() => WorkState) => () => ({ kind: 'working', variants });
+const blocked = (variants: string[]): (() => WorkState) => () => ({ kind: 'blocked', variants });
+
+function pane(options: Partial<StatusBarPaneOptions> & Pick<StatusBarPaneOptions, 'mode'>): StatusBarPaneComponent {
+  return new StatusBarPaneComponent({ colors: darkColors, ...options });
 }
 
-function activity(text: string, color?: string) {
-  return () => ({ text, color });
-}
+const row = (p: StatusBarPaneComponent, width: number): string => strip(p.render(width)[0] ?? '');
 
-describe('StatusBarPaneComponent', () => {
-  it('renders the label snug after the pulse wave on one line for waiting/tool modes', () => {
-    const waiting = new StatusBarPaneComponent({
-      mode: 'waiting',
-      label: 'Waiting...',
-      pulseWave: fakeWave(),
-    });
-    const waitingLines = waiting.render(80).map((line) => line.trimEnd());
-    // One line, wave and label adjacent (no full-width gap in between).
-    expect(waitingLines.length).toBe(1);
-    expect(waitingLines[0]).toBe(' ⬝  Waiting...');
+let level = chalk.level;
+beforeEach(() => {
+  level = chalk.level;
+  chalk.level = 3;
+});
+afterEach(() => {
+  chalk.level = level;
+});
 
-    const tool = new StatusBarPaneComponent({
-      mode: 'tool',
-      label: '[working]',
-      pulseWave: fakeWave(),
-    });
-    const toolLines = tool.render(80).map((line) => line.trimEnd());
-    expect(toolLines.length).toBe(1);
-    expect(toolLines[0]).toBe(' ⬝  [working]');
+describe('StatusBarPaneComponent — working', () => {
+  it('puts the phase and how long right after the wave, on one row', () => {
+    const p = pane({ mode: 'working', pulseWave: fakeWave(), state: working(['思考中 · 12s', '思考中']) });
+    expect(p.render(80)).toHaveLength(1);
+    expect(row(p, 80)).toBe('■······  思考中 · 12s' + ' '.repeat(80 - visibleWidth('■······  思考中 · 12s')));
   });
 
-  it('applies labelColor on the working row too (regression: it was dropped)', () => {
-    const previousLevel = chalk.level;
-    chalk.level = 3;
-    try {
-      const pane = new StatusBarPaneComponent({
-        mode: 'waiting',
-        label: '⚠️ 重连中 2/10：限流 (429) · 20s',
-        labelColor: '#E8A838',
-        pulseWave: fakeWave(),
-      });
-      const line = pane.render(120)[0] ?? '';
-      const sgr = '\u001B[38;2;232;168;56m';
-      // The whole chip shares one colour span; without the forward it renders
-      // unstyled (the bug this test locks).
-      expect(line).toContain(`${sgr}⚠️ 重连中 2/10：限流 (429) · 20s\u001B[39m`);
-    } finally {
-      chalk.level = previousLevel;
+  it('draws the phase in grey, never in the bright text colour', () => {
+    const line = pane({ mode: 'working', pulseWave: fakeWave(), state: working(['输出中 · 0s']) }).render(80)[0] ?? '';
+    expect(line).toContain(`${sgr(darkColors.textDim)}输出中 · 0s`);
+    expect(line).not.toContain(sgr(darkColors.text));
+  });
+
+  it('reads the state on every render, so the clock moves without a rebuild', () => {
+    let seconds = 12;
+    const p = pane({
+      mode: 'working',
+      pulseWave: fakeWave(),
+      state: () => ({ kind: 'working', variants: [`思考中 · ${String(seconds)}s`] }),
+    });
+    expect(row(p, 80)).toContain('12s');
+    seconds = 13;
+    expect(row(p, 80)).toContain('13s');
+  });
+
+  it('shows the reconnect detail in the warning colour instead of the phase', () => {
+    const p = pane({
+      mode: 'working',
+      pulseWave: fakeWave(),
+      state: working(['思考中 · 12s']),
+      reconnect: '⚠️ 重连中 2/10：限流 (429) · 20s',
+    });
+    const line = p.render(120)[0] ?? '';
+    expect(strip(line)).toContain('⚠️ 重连中 2/10：限流 (429) · 20s');
+    expect(strip(line)).not.toContain('思考中');
+    expect(line).toContain(`${sgr(darkColors.warning)}⚠️ 重连中 2/10：限流 (429) · 20s`);
+  });
+
+  it('renders the bare wave when there is no state yet', () => {
+    expect(row(pane({ mode: 'working', pulseWave: fakeWave() }), 80).trimEnd()).toBe('■······');
+  });
+
+  it('shortens the phase to its label, then drops it, but never the wave', () => {
+    const p = pane({ mode: 'working', pulseWave: fakeWave('■'), state: working(['思考中 · 12s', '思考中']) });
+    expect(row(p, 16)).toContain('思考中 · 12s');
+    expect(row(p, 12)).toContain('思考中');
+    expect(row(p, 12)).not.toContain('12s');
+    for (let width = 1; width <= 10; width++) expect(row(p, width)).toContain('■');
+  });
+});
+
+describe('StatusBarPaneComponent — blocked', () => {
+  it('names what the session waits for, in the warning colour and bold', () => {
+    const p = pane({ mode: 'blocked', state: blocked(['等待批准 · 4m']) });
+    const line = p.render(80)[0] ?? '';
+    expect(strip(line).trimEnd()).toBe('◆ 等待批准 · 4m');
+    expect(line).toContain(sgr(darkColors.warning));
+    expect(line).toContain('\u001B[1m');
+  });
+
+  it('renders nothing when there is nothing to say', () => {
+    expect(pane({ mode: 'blocked', state: () => null }).render(80)).toEqual([]);
+  });
+});
+
+describe('StatusBarPaneComponent — idle tip', () => {
+  const TIP = '输入 / 查看所有命令，输入 @ 引用文件路径';
+
+  it('shows the tip on the left and the close key on the right', () => {
+    const line = row(pane({ mode: 'idle', tip: TIP }), 80);
+    expect(line.startsWith(`Tips  ${TIP}`)).toBe(true);
+    expect(line.trimEnd().endsWith('Ctrl+B 关闭')).toBe(true);
+    expect(visibleWidth(line)).toBe(80);
+  });
+
+  it('draws the tip in the quietest text token, not a hardcoded grey, and never brighter', () => {
+    const line = pane({ mode: 'idle', tip: TIP }).render(80)[0] ?? '';
+    expect(line).toContain(sgr(darkColors.textMuted));
+    expect(line).not.toContain(sgr(darkColors.textDim));
+    expect(line).not.toContain(sgr(darkColors.text));
+    expect(line).not.toContain(sgr('#999999'));
+  });
+
+  it('gives up the close key before it cuts the tip', () => {
+    const wide = row(pane({ mode: 'idle', tip: TIP }), 80);
+    const tight = row(pane({ mode: 'idle', tip: TIP }), 52);
+    expect(wide).toContain('Ctrl+B');
+    expect(tight).not.toContain('Ctrl+B');
+    expect(tight).toContain(TIP);
+  });
+
+  it('cuts the tip with one ellipsis rather than mid-word into the close key', () => {
+    for (let width = 20; width <= 80; width++) {
+      const line = row(pane({ mode: 'idle', tip: TIP }), width);
+      expect((line.match(/…/g) ?? []).length).toBeLessThanOrEqual(1);
+      expect(line).not.toMatch(/Ctrl\+…/);
     }
   });
 
-  it('renders a bare wave without padding when there is no label or activity', () => {
-    const pane = new StatusBarPaneComponent({ mode: 'thinking', label: '', pulseWave: fakeWave() });
-    expect(pane.render(80)).toEqual(['⬝']);
-  });
-
-  it('appends the collaboration ticker after the wave and label', () => {
-    const pane = new StatusBarPaneComponent({
-      mode: 'tool',
-      label: '重连中 2/10',
-      pulseWave: fakeWave(),
-      activity: activity('coder 向 Scream 求助中！问题：因为缺少基线'),
-    });
-    const line = strip(pane.render(120)[0] ?? '');
-    expect(line).toBe(' ⬝  重连中 2/10  coder 向 Scream 求助中！问题：因为缺少基线');
-  });
-
-  it('re-reads the activity getter on every render (newest notice wins, no rebuild)', () => {
-    let notice: { text: string; color?: string } | null = null;
-    const pane = new StatusBarPaneComponent({
-      mode: 'thinking',
-      label: '',
-      pulseWave: fakeWave(),
-      activity: () => notice,
-    });
-    // Bare wave keeps the pre-existing unpadded form.
-    expect(strip(pane.render(120)[0] ?? '')).toBe('⬝');
-
-    notice = { text: 'coder 向 Scream 求助中！问题：因为 A' };
-    expect(strip(pane.render(120)[0] ?? '')).toContain('因为 A');
-
-    notice = { text: 'Scream 已处理 coder 的请求！' };
-    expect(strip(pane.render(120)[0] ?? '')).toContain('已处理 coder');
-  });
-
-  it('keeps the row to one line and truncates to the width', () => {
-    const pane = new StatusBarPaneComponent({
-      mode: 'waiting',
-      label: 'Waiting...',
-      pulseWave: fakeWave(),
-      activity: activity('coder 向 Scream 求助中！问题：因为需要确认迁移后的测试基线是否覆盖全部用例'),
-    });
-    const lines = pane.render(40);
-    expect(lines.length).toBe(1);
-    expect(visibleWidth(lines[0]!)).toBeLessThanOrEqual(40);
-  });
-
-  it('survives widths 1-3 without throwing or overflowing', () => {
-    for (const width of [1, 2, 3]) {
-      const pane = new StatusBarPaneComponent({
-        mode: 'waiting',
-        label: 'Waiting...',
-        pulseWave: fakeWave(),
-        activity: activity('coder 向 Scream 求助中！'),
-      });
-      for (const line of pane.render(width)) {
-        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-      }
-      const idle = new StatusBarPaneComponent({
-        mode: 'idle',
-        label: '',
-        activity: activity('Scream 已处理 coder 的请求！'),
-      });
-      for (const line of idle.render(width)) {
-        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-      }
-    }
-  });
-
-  it('renders the ticker alone while idle, and nothing when it is empty', () => {
-    const withNotice = new StatusBarPaneComponent({
-      mode: 'idle',
-      label: '',
-      activity: activity('Scream 已处理 coder 的请求！'),
-    });
-    expect(strip(withNotice.render(120)[0] ?? '')).toBe(' Scream 已处理 coder 的请求！');
-
-    const empty = new StatusBarPaneComponent({ mode: 'idle', label: '' });
-    expect(empty.render(80)).toEqual([]);
-  });
-
-  it('lets an idle notice supersede the tip instead of being truncated away', () => {
-    const pane = new StatusBarPaneComponent({
-      mode: 'idle',
-      label: 'Ctrl+F: 模型提供方',
-      labelColor: '#999999',
-      activity: activity('Scream 已处理 coder 的请求！'),
-    });
-    const line = strip(pane.render(80)[0] ?? '');
-    expect(line).toContain('已处理');
-    expect(line).not.toContain('Ctrl+F');
-  });
-
-  it('shows the idle tip when there is no ticker', () => {
-    const pane = new StatusBarPaneComponent({
-      mode: 'idle',
-      label: 'Ctrl+F: 模型提供方',
-      labelColor: '#999999',
-      activity: () => null,
-    });
-    expect(strip(pane.render(80)[0] ?? '')).toBe(' Ctrl+F: 模型提供方');
-  });
-
-  it('update() replaces content without leaking old children', () => {
-    const component = new StatusBarPaneComponent({
-      mode: 'thinking',
-      label: '',
-      pulseWave: fakeWave(),
-    });
-    component.update({ mode: 'idle', label: '' });
-    expect(component.render(80)).toEqual([]);
-    component.update({
-      mode: 'waiting',
-      label: 'Waiting...',
-      pulseWave: fakeWave(),
-    });
-    const lines = component.render(80).map((line) => line.trimEnd());
-    expect(lines.length).toBe(1);
-    expect(lines[0]!.includes('Waiting...')).toBe(true);
-  });
-
-  it('appends the MCP notice chip after the collaboration ticker', () => {
-    const pane = new StatusBarPaneComponent({
-      mode: 'tool',
-      label: '重连中 2/10',
-      pulseWave: fakeWave(),
-      activity: activity('coder 向 Scream 求助中！'),
-      notice: activity('MCP chrome-devtools · 33 tools'),
-    });
-    const line = strip(pane.render(160)[0] ?? '');
-    expect(line).toBe(' ⬝  重连中 2/10  coder 向 Scream 求助中！  MCP chrome-devtools · 33 tools');
-  });
-
-  it('renders the MCP notice alone while idle and re-reads it live', () => {
-    let chip: { text: string; color?: string } | null = null;
-    const pane = new StatusBarPaneComponent({ mode: 'idle', label: '', notice: () => chip });
-    // An empty notice leaves the row silent.
-    expect(pane.render(80)).toEqual([]);
-
-    chip = { text: 'MCP chrome-devtools · 33 tools', color: '#79EB00' };
-    expect(strip(pane.render(120)[0] ?? '')).toBe(' MCP chrome-devtools · 33 tools');
-
-    chip = { text: 'MCP figma connecting…' };
-    expect(strip(pane.render(120)[0] ?? '')).toContain('figma');
-  });
-
-  it('keeps the idle tip visible when an MCP notice arrives', () => {
-    // The startup tip is onboarding copy — a transient MCP notice appends
-    // after it instead of pushing it away.
-    const pane = new StatusBarPaneComponent({
-      mode: 'idle',
-      label: '💡 Tips：输入消息开始对话',
-      notice: activity('MCP chrome-devtools · 33 tools'),
-    });
-    const line = strip(pane.render(120)[0] ?? '');
-    expect(line).toContain('Tips：输入消息开始对话');
-    expect(line).toContain('MCP chrome-devtools · 33 tools');
-
-    // Narrow row: the tip yields width first, the notice always keeps its
-    // slot, and the line stays within the viewport.
-    const narrow = strip(pane.render(80)[0] ?? '');
-    expect(narrow).toContain('MCP chrome-devtools · 33 tools');
-    expect(narrow).toContain('Tips');
-    expect(visibleWidth(narrow)).toBeLessThanOrEqual(80);
-  });
-
-  describe('narrow rows drop segments by priority', () => {
-    const reminder = activity('⏰ 定时任务已触发：检查部署状态');
-    const notice = activity('🔌 MCP chrome-devtools 已连接');
-
-    it('never shows a bare "..." chip: a chip that cannot get a usable width is dropped whole', () => {
-      const bar = new StatusBarPaneComponent({ mode: 'idle', label: '', reminder, notice });
-      const row = strip(bar.render(40)[0] ?? '');
-      expect(row).toContain('⏰ 定时任务已触发：检查部署状态');
-      expect(row).not.toContain('🔌');
-      expect(row).not.toContain('...');
-      expect(visibleWidth(row)).toBeLessThanOrEqual(40);
-    });
-
-    it('truncates a lower-priority chip with a single ellipsis when it still gets room', () => {
-      const bar = new StatusBarPaneComponent({ mode: 'idle', label: '', reminder, notice });
-      const row = strip(bar.render(60)[0] ?? '');
-      expect(row).toContain('⏰ 定时任务已触发：检查部署状态');
-      expect(row).toContain('🔌 MCP chrome-devtools');
-      expect(row).toContain('…');
-      expect(row).not.toContain('...');
-      expect(visibleWidth(row)).toBeLessThanOrEqual(60);
-    });
-
-    it('shows everything unchanged when the row is wide enough', () => {
-      const bar = new StatusBarPaneComponent({ mode: 'idle', label: '', reminder, notice });
-      const row = strip(bar.render(120)[0] ?? '').trimEnd();
-      expect(row).toBe(' ⏰ 定时任务已触发：检查部署状态  🔌 MCP chrome-devtools 已连接');
-    });
-
-    it('drops the label before the MCP notice, and the notice before the reminder', () => {
-      const wave = fakeWave('■·');
-      const tight = new StatusBarPaneComponent({
-        mode: 'tool',
-        label: '执行中：很长很长的工具名称说明',
-        pulseWave: wave,
-        reminder,
-        notice,
-      });
-      const row = strip(tight.render(50)[0] ?? '');
-      expect(row).toContain('⏰ 定时任务已触发：检查部署状态');
-      expect(row).not.toContain('执行中');
-    });
-
-    it('keeps the pulse wave at every width, whatever else is dropped', () => {
-      const bar = new StatusBarPaneComponent({
-        mode: 'tool',
-        label: '执行中',
-        pulseWave: fakeWave('■·····'),
-        reminder,
-        activity: activity('🤝 coder 向 Scream 求助中！问题：需要更多上下文'),
-        notice,
-      });
-      for (const width of [8, 12, 20, 30, 45, 70]) {
-        const row = strip(bar.render(width)[0] ?? '');
-        expect(row.startsWith(' ■·····') || row.startsWith(' ■··')).toBe(true);
-        expect(visibleWidth(row)).toBeLessThanOrEqual(width);
-      }
-    });
-
-    it('prefers the reminder over the collaboration ticker when only one fits', () => {
-      const bar = new StatusBarPaneComponent({
-        mode: 'idle',
-        label: '',
-        reminder,
-        activity: activity('🤝 coder 向 Scream 求助中！问题：需要更多上下文'),
-      });
-      const row = strip(bar.render(40)[0] ?? '');
-      expect(row).toContain('⏰');
-      expect(row).not.toContain('🤝');
-    });
+  it('renders nothing for an idle row with no tip and no cue', () => {
+    expect(pane({ mode: 'idle' }).render(80)).toEqual([]);
+    expect(pane({ mode: 'idle', tip: '' }).render(80)).toEqual([]);
   });
 });
 
 describe('StatusBarPaneComponent — scroll cue', () => {
-  it('shows the cue after the wave while the transcript is scrolled up', () => {
-    const pane = new StatusBarPaneComponent({
-      mode: 'thinking',
-      label: '',
+  const cue = (text: string, color?: string) => () => ({ text, color });
+
+  it('sits on the right of a working row', () => {
+    const p = pane({
+      mode: 'working',
       pulseWave: fakeWave(),
-      scrollCue: activity('↓ 2 new messages'),
+      state: working(['思考中 · 12s']),
+      scrollCue: cue('↓ 2 条新消息 · 向下滚动跟随'),
     });
-    expect(strip(pane.render(80)[0] ?? '').trimEnd()).toBe(' ⬝  ↓ 2 new messages');
+    expect(row(p, 80).trimEnd().endsWith('↓ 2 条新消息 · 向下滚动跟随')).toBe(true);
   });
 
-  it('is mounted on an idle row too, and disappears when the cue ends', () => {
-    let cue: { text: string } | null = { text: '↓ 1 new message' };
-    const pane = new StatusBarPaneComponent({ mode: 'idle', label: '', scrollCue: () => cue });
-    expect(strip(pane.render(80)[0] ?? '').trimEnd()).toBe(' ↓ 1 new message');
-    cue = null;
-    expect(pane.render(80)).toEqual([]);
+  it('takes the close key place on an idle row, and is mounted without a tip', () => {
+    const withTip = row(pane({ mode: 'idle', tip: '一条提示', scrollCue: cue('↓ 向下滚动') }), 80);
+    expect(withTip).toContain('↓ 向下滚动');
+    expect(withTip).not.toContain('Ctrl+B');
+    expect(row(pane({ mode: 'idle', scrollCue: cue('↓ 向下滚动') }), 80)).toContain('↓ 向下滚动');
   });
 
-  it('outranks the collaboration ticker and the label when the row is short', () => {
-    const pane = new StatusBarPaneComponent({
-      mode: 'thinking',
-      label: 'a long reconnect label that would take the row',
+  it('is read live and disappears when it ends', () => {
+    let current: { text: string } | null = { text: '↓ 向下滚动' };
+    const p = pane({ mode: 'idle', scrollCue: () => current });
+    expect(row(p, 80)).toContain('↓ 向下滚动');
+    current = null;
+    expect(p.render(80)).toEqual([]);
+  });
+
+  it('outranks the phase text on a narrow row, and the wave outranks both', () => {
+    const p = pane({
+      mode: 'working',
       pulseWave: fakeWave(),
-      scrollCue: activity('↓ 3 new messages'),
-      activity: activity('agent a → agent b: please review this change'),
+      state: working(['思考中 · 12s']),
+      scrollCue: cue('↓ 2 条新消息 · 向下滚动跟随'),
     });
-    const line = strip(pane.render(34)[0] ?? '');
-    expect(line).toContain('↓ 3 new messages');
-    expect(visibleWidth(line)).toBeLessThanOrEqual(34);
+    expect(row(p, 80)).toContain('思考中 · 12s');
+    expect(row(p, 40)).toContain('↓ 2 条新消息');
+    expect(row(p, 40)).not.toContain('思考中');
+    // The wave is 7 columns wide: from there up it always survives.
+    for (let width = 7; width <= 40; width++) expect(row(p, width)).toContain('■');
+  });
+});
+
+describe('StatusBarPaneComponent — fit contract', () => {
+  it('keeps the row to one line inside the width, at every width', () => {
+    const variants: Array<Partial<StatusBarPaneOptions> & Pick<StatusBarPaneOptions, 'mode'>> = [
+      { mode: 'working', pulseWave: fakeWave(), state: working(['执行中 · 47s', '执行中']), reconnect: '⚠️ 重连中 2/10：限流' },
+      { mode: 'blocked', state: blocked(['等待批准 · 4m']) },
+      { mode: 'idle', tip: '输入 / 查看所有命令，输入 @ 引用文件路径', scrollCue: () => ({ text: '↓ 2 条新消息' }) },
+    ];
+    for (const options of variants) {
+      for (let width = 1; width <= 120; width++) {
+        const lines = pane(options).render(width);
+        expect(lines.length).toBeLessThanOrEqual(1);
+        for (const line of lines) expect(visibleWidth(line), `width ${String(width)}`).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+
+  it('update() replaces the content without leaking old children', () => {
+    const p = pane({ mode: 'idle', tip: '甲' });
+    p.update({ colors: darkColors, mode: 'idle', tip: '乙' });
+    expect(p.children).toHaveLength(1);
+    expect(row(p, 40)).toContain('乙');
+    expect(row(p, 40)).not.toContain('甲');
   });
 });

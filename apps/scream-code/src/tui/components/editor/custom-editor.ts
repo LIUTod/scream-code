@@ -632,8 +632,7 @@ export type EditorActivity = 'idle' | 'running' | 'waiting';
 // Every mark is three cells in every state, so the badge never changes width
 // (the arrow count is the scale: AUTO three, YES two). BOT is a single static
 // robot emoji: 🤖 measures 2 cells in visibleWidth, plus one trailing space = 3,
-// matching the arrows — the same 2-cell emoji convention the footer's 📟 model
-// marker already relies on.
+// matching the arrows (visibleWidth is what the layout trusts for emoji).
 const MODE_MARKS: Readonly<
   Record<PermissionMode, { idle: string; running: readonly string[]; frameMs: number }>
 > = {

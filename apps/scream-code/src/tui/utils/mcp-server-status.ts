@@ -1,75 +1,46 @@
 import type { McpServerInfo, McpServerStatusEvent } from '@scream-code/scream-code-sdk';
 
-import { t } from '@scream-code/config';
+import type { McpSummary } from '../types';
 
 export type McpServerStatusSnapshot = McpServerInfo | McpServerStatusEvent['server'];
+export type McpServerStatus = McpServerStatusSnapshot['status'];
 
-export const MCP_STARTUP_STATUS_ROW_LIMIT = 4;
-
-function mcpStartupStatusPriority(status: McpServerStatusSnapshot['status']): number {
-  switch (status) {
-    case 'failed':
-      return 0;
-    case 'needs-auth':
-      return 1;
-    case 'pending':
-      return 2;
-    case 'connected':
-      return 3;
-    case 'disabled':
-      return 4;
-  }
-}
-
-export function selectMcpStartupStatusRows(
-  servers: readonly McpServerStatusSnapshot[],
-): McpServerStatusSnapshot[] {
-  return [...servers]
-    .filter((server) => server.status !== 'disabled')
-    .toSorted((a, b) => mcpStartupStatusPriority(a.status) - mcpStartupStatusPriority(b.status))
-    .slice(0, MCP_STARTUP_STATUS_ROW_LIMIT);
-}
-
-export function formatMcpStartupStatusSummary(
-  hidden: readonly McpServerStatusSnapshot[],
-  visibleCount: number,
-): string {
+/**
+ * How the servers stand. Disabled servers were switched off on purpose and are
+ * not counted: they are neither healthy nor a problem.
+ */
+export function summarizeMcpServers(statuses: ReadonlyMap<string, McpServerStatus>): McpSummary {
+  let total = 0;
+  let connected = 0;
+  let pending = 0;
   let failed = 0;
   let needsAuth = 0;
-  let connecting = 0;
-  let connected = 0;
-  let disabled = 0;
-  for (const server of hidden) {
-    switch (server.status) {
-      case 'failed':
-        failed++;
-        break;
-      case 'needs-auth':
-        needsAuth++;
-        break;
-      case 'pending':
-        connecting++;
-        break;
-      case 'connected':
-        connected++;
-        break;
-      case 'disabled':
-        disabled++;
-        break;
-    }
+  for (const status of statuses.values()) {
+    if (status === 'disabled') continue;
+    total++;
+    if (status === 'connected') connected++;
+    else if (status === 'pending') pending++;
+    else if (status === 'failed') failed++;
+    else needsAuth++;
   }
-
-  const parts: string[] = [];
-  if (failed > 0) parts.push(t('mcpstatus.failed', { count: failed }));
-  if (needsAuth > 0) parts.push(t('mcpstatus.needs_auth', { count: needsAuth }));
-  if (connecting > 0) parts.push(t('mcpstatus.connecting', { count: connecting }));
-  if (connected > 0) parts.push(t('mcpstatus.connected', { count: connected }));
-  if (disabled > 0) parts.push(t('mcpstatus.disabled_count', { count: disabled }));
-  const detail = parts.join(', ');
-  if (visibleCount === 0) return t('mcpstatus.summary', { detail });
-  return t('mcpstatus.more_summary', { count: hidden.length, detail });
+  return { total, connected, pending, failed, needsAuth };
 }
 
-export function mcpServerStatusKey(server: McpServerStatusSnapshot): string {
-  return JSON.stringify([server.status, server.transport, server.toolCount, server.error]);
+/** Names of the servers in one problem state, sorted so the same set always reads the same. */
+export function mcpServerNames(
+  statuses: ReadonlyMap<string, McpServerStatus>,
+  status: 'failed' | 'needs-auth',
+): string[] {
+  return [...statuses].filter(([, s]) => s === status).map(([name]) => name).toSorted();
+}
+
+export function sameMcpSummary(a: McpSummary | undefined, b: McpSummary | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return (
+    a.total === b.total &&
+    a.connected === b.connected &&
+    a.pending === b.pending &&
+    a.failed === b.failed &&
+    a.needsAuth === b.needsAuth
+  );
 }

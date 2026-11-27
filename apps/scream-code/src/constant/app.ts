@@ -13,6 +13,8 @@ export const SCREAM_CODE_UPDATE_STATE_FILE_NAME = 'latest.json';
 export const SCREAM_CODE_INPUT_HISTORY_DIR_NAME = 'user-history';
 export const SCREAM_CODE_UI_PREFERENCES_FILE_NAME = 'ui-preferences.json';
 export const SCREAM_CODE_COMMAND_USAGE_FILE_NAME = 'command-usage.json';
+/** Per-day token usage, counted from the session logs (see tui/utils/usage-ledger.ts). */
+export const SCREAM_CODE_USAGE_LEDGER_FILE_NAME = 'usage-ledger.json';
 
 // Managed Scream auth provider key shared with OAuth/SDK config.
 export const DEFAULT_OAUTH_PROVIDER_NAME = 'managed:scream-code';

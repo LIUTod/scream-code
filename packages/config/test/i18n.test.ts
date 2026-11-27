@@ -67,10 +67,10 @@ describe('i18n dictionary symmetry', () => {
     expect(mismatches).toEqual([]);
   });
 
-  // Regression guard: the footer gauge label is the same in both locales.
-  it('footer.context_label is defined in both locales', () => {
-    expect(zh['footer.context_label']).toBe('📨 Context');
-    expect(en['footer.context_label']).toBe('📨 Context');
+  // Regression guard: the footer's cache label is defined in both locales.
+  it('footer.cache is defined in both locales', () => {
+    expect(zh['footer.cache']).toBe('缓存');
+    expect(en['footer.cache']).toBe('Cache');
   });
 });
 
@@ -130,7 +130,7 @@ describe('i18n setLocale / getLocale', () => {
     const bogus: string = 'fr';
     mod.setLocale(bogus as Locale);
     expect(mod.getLocale()).toBe('en');
-    expect(mod.t('footer.hit')).toBe('Cache hit');
+    expect(mod.t('footer.cache')).toBe('Cache');
   });
 });
 
@@ -145,10 +145,10 @@ describe('i18n fallback chain (current locale -> zh -> key)', () => {
   });
 
   it('prefers the active locale dictionary when the key exists there', async () => {
-    vi.doMock('../src/i18n/locale/en', () => ({ en: { 'footer.hit': 'HitR-EN' } }));
+    vi.doMock('../src/i18n/locale/en', () => ({ en: { 'footer.cache': 'HitR-EN' } }));
     const mod = await loadI18n({ LANG: 'en_US.UTF-8' });
     mod.setLocale('en');
-    expect(mod.t('footer.hit')).toBe('HitR-EN');
+    expect(mod.t('footer.cache')).toBe('HitR-EN');
   });
 });
 

@@ -99,7 +99,7 @@ describe('footer jobs item', () => {
       contextUsage: 0.1, contextTokens: 1, maxContextTokens: 10, isCompacting: false, isReplaying: false,
       streamingPhase: 'idle', streamingStartTime: 0, pendingUserAction: null, pendingUserActionSince: null,
       theme: 'dark', version: 't', editorCommand: null, notifications: { enabled: true, condition: 'unfocused' },
-      availableModels: {}, lineActive: false, linePlatform: null, ...overrides,
+      availableModels: {}, lineActive: true, linePlatform: 'lark', ...overrides,
     };
     const footer = new FooterComponent(state as never, darkColors, { requestRender: () => {} } as never);
     // eslint-disable-next-line no-control-regex
@@ -113,6 +113,10 @@ describe('footer jobs item', () => {
     expect(await line2({ jobsEnabled: 3, jobsWaiting: 0, jobsHostRunning: true })).not.toMatch(/jobs|待处理|waiting/);
     expect(await line2({ jobsEnabled: 3, jobsWaiting: 1, jobsHostRunning: true })).toMatch(/◆ (待处理 1|1 waiting)\s+◆ Line/);
     expect(await line2({ jobsEnabled: 2, jobsWaiting: 0, jobsHostRunning: false })).toMatch(/◆ jobs (未运行|not running)\s+◆ Line/);
+
+    // The channel only shows while it runs; the jobs item stands on its own without it.
+    expect(await line2({ jobsEnabled: 3, jobsWaiting: 1, jobsHostRunning: true, lineActive: false })).toMatch(/◆ (待处理 1|1 waiting)/);
+    expect(await line2({ jobsEnabled: 3, jobsWaiting: 1, jobsHostRunning: true, lineActive: false })).not.toContain('Line');
   });
 });
 

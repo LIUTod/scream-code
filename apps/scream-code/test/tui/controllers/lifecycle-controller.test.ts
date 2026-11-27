@@ -12,9 +12,7 @@ import {
   TranscriptController,
   type TranscriptControllerHost,
 } from '#/tui/controllers/transcript-controller';
-import { SidebarManager } from '#/tui/components/sidebar/sidebar-manager';
-import type { SidebarHubData, SidebarSessionStats } from '#/tui/components/sidebar/sidebar-panel';
-import { HUB_MODEL_ROW_ID } from '#/tui/utils/hub-probe';
+import type { SidebarSessionStats } from '#/tui/components/sidebar/session-status';
 import { ImageAttachmentStore } from '#/tui/utils/image-attachment-store';
 import * as lineStatus from '#/tui/utils/line-status';
 import type { LifecycleControllerHost } from '#/tui/controllers/lifecycle-controller';
@@ -27,6 +25,11 @@ import type { AuthFlowController } from '#/tui/controllers/auth-flow';
 import type { SessionEventHandler } from '#/tui/controllers/session-event-handler';
 import type { SessionReplayRenderer } from '#/tui/controllers/session-replay';
 import type { SessionManager } from '#/tui/managers/session-manager';
+
+/** A rendered row without its colour codes. */
+function plainRow(lines: string[]): string {
+  return lines.join('\n').replaceAll(/\u001B\[[0-9;]*m/g, '');
+}
 
 /** SGR sequence chalk emits for a hex colour at level 3 (colour assertions). */
 function hexToSgr(hex: string): string {
@@ -94,190 +97,238 @@ describe('LifecycleController', () => {
   });
 
   describe('dock row contract', () => {
-    it('keeps the footer at two rows and the status row at one', () => {
-      // The footer always renders two lines (footer-context locks that); these
-      // constants are what buildLayout reserves for it. A silent change here
-      // would clip the second row on a short terminal.
+    it('keeps the footer at two rows (one on a short terminal) and the status row at one', () => {
+      // The footer renders two lines, folding to one below COMPACT_FOOTER_ROWS
+      // (footer.test locks both); these constants are what panels size against.
+      // A silent change here would let a panel overlap the second row.
       expect(DOCK_FOOTER_ROWS).toBe(2);
       expect(DOCK_STATUS_ROWS).toBe(1);
     });
   });
 
-  describe('collaboration ticker', () => {
+  describe('footer notice slot', () => {
     function makeHost(ui: { requestRender: () => void }) {
       const state = {
         appState: {} as AppState,
         ui,
-        theme: { colors: { warning: '#FFB020', success: '#79EB00' } },
+        theme: { colors: { warning: '#FFB020', success: '#79EB00', accent: '#00FFAA', error: '#FF4040', textMuted: '#6b7280' } },
       } as unknown as TUIState;
       return createMockHost({ state });
     }
 
-    it('shows the newest notice and clears it after the 8s TTL', () => {
+    it('shows the newest collaboration notice and clears it after the 8s TTL', () => {
       vi.useFakeTimers();
       const ui = { requestRender: vi.fn() };
       const controller = new LifecycleController(makeHost(ui));
 
       controller.showCollabActivity('coder 向 Scream 求助中！问题：因为 A', 'request');
-      expect(controller.getCollabActivity()).toEqual({
-        text: 'coder 向 Scream 求助中！问题：因为 A',
-        color: '#FFB020',
-      });
+      expect(controller.getNotice()).toEqual({ text: 'coder 向 Scream 求助中！问题：因为 A', color: '#FFB020' });
       expect(ui.requestRender).toHaveBeenCalled();
 
-      // A newer event replaces the previous one — no queue, no stacking.
+      // A newer event replaces the previous one: same key, no stacking.
       controller.showCollabActivity('Scream 已处理 coder 的请求！', 'handled');
-      expect(controller.getCollabActivity()).toEqual({
-        text: 'Scream 已处理 coder 的请求！',
-        color: '#79EB00',
-      });
+      expect(controller.getNotice()).toEqual({ text: 'Scream 已处理 coder 的请求！', color: '#79EB00' });
 
       vi.advanceTimersByTime(7_999);
-      expect(controller.getCollabActivity()).not.toBeNull();
+      expect(controller.getNotice()).not.toBeNull();
       vi.advanceTimersByTime(1);
-      expect(controller.getCollabActivity()).toBeNull();
-      // The expiry repaints so the row drops the line immediately.
+      expect(controller.getNotice()).toBeNull();
+      // The expiry repaints so the footer drops the line immediately.
       expect(ui.requestRender).toHaveBeenCalledTimes(3);
 
       controller.stopActivityAnimation();
     });
 
-    it('shows an MCP notice in its own slot and clears it after the 3s TTL', () => {
-      vi.useFakeTimers();
-      const ui = { requestRender: vi.fn() };
-      const controller = new LifecycleController(makeHost(ui));
-
-      controller.showMcpActivity('MCP chrome-devtools · 33 tools', '#79EB00');
-      expect(controller.getMcpActivity()).toEqual({
-        text: 'MCP chrome-devtools · 33 tools',
-        color: '#79EB00',
-      });
-      expect(ui.requestRender).toHaveBeenCalled();
-
-      vi.advanceTimersByTime(2_999);
-      expect(controller.getMcpActivity()).not.toBeNull();
-      vi.advanceTimersByTime(1);
-      expect(controller.getMcpActivity()).toBeNull();
-
-      // Newest wins — a burst of servers never stacks on the row.
-      controller.showMcpActivity('MCP figma · 5 tools', '#79EB00');
-      controller.showMcpActivity('MCP figma connecting…', '#6b7280');
-      expect(controller.getMcpActivity()).toEqual({ text: 'MCP figma connecting…', color: '#6b7280' });
-
-      // A session switch drops every transient chip, MCP notice included.
-      controller.clearStatusActivity();
-      expect(controller.getMcpActivity()).toBeNull();
-    });
-
-    it('renders the status row with one chip grammar', () => {
-      vi.useFakeTimers();
-      const previousLevel = chalk.level;
-      chalk.level = 3;
-      let controller: LifecycleController | undefined;
-      let idleController: LifecycleController | undefined;
-      try {
-      const state = createMockTUIState({
-        appState: {
-          streamingPhase: 'waiting',
-          reconnectAttempt: 2,
-          reconnectMaxAttempts: 10,
-          reconnectStatusCode: 429,
-          reconnectDelayMs: 20_000,
-        },
-      });
-      const host = createMockHost({ state });
-      controller = new LifecycleController(host);
-
-      controller.forceUpdateStatusBar();
-      controller.showCollabActivity('🤝 coder 求助：因为缺少基线', 'request');
-      const working = state.statusBarContainer.render(120).join('\n');
-      // Alert chip and the collaboration chip coexist; both use the shared
-      // `symbol label：value` grammar.
-      expect(working).toContain('⚠️ 重连中 2/10：');
-      expect(working).toContain('🤝 coder 求助：因为缺少基线');
-      // Semantic colours: warning for the alert, warning for the request chip.
-      expect(working).toContain(`${hexToSgr(state.theme.colors.warning)}⚠️ 重连中`);
-      expect(working).toContain(`${hexToSgr(state.theme.colors.warning)}🤝 coder`);
-
-      // Idle: the hint becomes `💡 <tip>` and a live notice supersedes it.
-      const idle = createMockTUIState({ appState: { streamingPhase: 'idle' } });
-      const idleHost = createMockHost({ state: idle });
-      idleController = new LifecycleController(idleHost);
-      idleController.forceUpdateStatusBar();
-      const idleRow = idle.statusBarContainer.render(120).join('\n');
-      expect(idleRow).toContain('💡 ');
-      // The hint uses the theme's dim token, not a hardcoded grey.
-      expect(idleRow).toContain(`${hexToSgr(idle.theme.colors.textDim)}💡 `);
-      expect(idleRow).not.toContain(hexToSgr('#999999'));
-      idleController.showCollabActivity('✓ Scream 已处理 coder 的请求', 'handled');
-      const afterNotice = idle.statusBarContainer.render(120).join('\n');
-      expect(afterNotice).toContain('✓ Scream 已处理');
-      expect(afterNotice).not.toContain('💡');
-
-      } finally {
-        controller?.stopActivityAnimation();
-        idleController?.stopActivityAnimation();
-        chalk.level = previousLevel;
-      }
-    });
-
-    it('mounts the ticker on both the idle and the working row', () => {
-      vi.useFakeTimers();
-      const state = createMockTUIState({
-        appState: { streamingPhase: 'idle', reconnectAttempt: undefined },
-      });
-      const host = createMockHost({ state });
-      const controller = new LifecycleController(host);
-
-      controller.forceUpdateStatusBar();
-      expect(state.statusBarContainer.render(80).join('\n')).not.toContain('求助中');
-
-      controller.showCollabActivity('coder 向 Scream 求助中！问题：因为 A', 'request');
-      // Idle row reads the live getter — no rebuild needed for the notice.
-      expect(state.statusBarContainer.render(80).join('\n')).toContain('求助中');
-
-      // The working row mounts the same getter, so the phase change keeps it.
-      state.appState.streamingPhase = 'waiting';
-      controller.forceUpdateStatusBar();
-      expect(state.statusBarContainer.render(80).join('\n')).toContain('求助中');
-
-      controller.stopActivityAnimation();
-      state.statusBarContainer.clear();
-      controller.forceUpdateStatusBar();
-      expect(state.statusBarContainer.render(80).join('\n')).not.toContain('求助中');
-    });
-
     it('re-arms the TTL on every new event', () => {
       vi.useFakeTimers();
-      const ui = { requestRender: vi.fn() };
-      const controller = new LifecycleController(makeHost(ui));
+      const controller = new LifecycleController(makeHost({ requestRender: vi.fn() }));
 
       controller.showCollabActivity('first', 'request');
       vi.advanceTimersByTime(6_000);
       controller.showCollabActivity('second', 'handled');
       vi.advanceTimersByTime(6_000);
       // 12s after the first event, but only 6s after the latest one.
-      expect(controller.getCollabActivity()?.text).toBe('second');
-
+      expect(controller.getNotice()?.text).toBe('second');
       vi.advanceTimersByTime(2_000);
-      expect(controller.getCollabActivity()).toBeNull();
+      expect(controller.getNotice()).toBeNull();
       controller.stopActivityAnimation();
     });
 
-    it('stopActivityAnimation clears the notice and its timer', () => {
+    it('shows one notice at a time, by priority: reminder, MCP problem, collaboration, MCP progress', () => {
+      vi.useFakeTimers();
+      const controller = new LifecycleController(makeHost({ requestRender: vi.fn() }));
+
+      controller.showMcpNotice('progress', 'MCP 连接中 2/5', '#6b7280');
+      expect(controller.getNotice()?.text).toBe('MCP 连接中 2/5');
+      controller.showCollabActivity('🤝 coder 求助：缺少样例', 'request');
+      expect(controller.getNotice()?.text).toBe('🤝 coder 求助：缺少样例');
+      controller.showMcpNotice('failed', '1 个 MCP 服务器失败 · /mcp', '#FF4040');
+      expect(controller.getNotice()?.text).toBe('1 个 MCP 服务器失败 · /mcp');
+      controller.showReminderActivity('⏰ 定时任务已触发：检查 CI', 'fired');
+      expect(controller.getNotice()?.text).toBe('⏰ 定时任务已触发：检查 CI');
+
+      // They are read one after another as each one expires.
+      vi.advanceTimersByTime(15_000);
+      expect(controller.getNotice()).toBeNull();
+      controller.stopActivityAnimation();
+    });
+
+    it('hands over to the next notice when the first expires', () => {
+      vi.useFakeTimers();
+      const controller = new LifecycleController(makeHost({ requestRender: vi.fn() }));
+      controller.showReminderActivity('⏰ 提醒', 'fired');
+      controller.showCollabActivity('🤝 求助', 'request');
+      expect(controller.getNotice()?.text).toBe('⏰ 提醒');
+      vi.advanceTimersByTime(10_000);
+      expect(controller.getNotice()).toBeNull();
+
+      controller.showReminderActivity('⏰ 提醒', 'fired');
+      controller.showCollabActivity('🤝 求助', 'request');
+      vi.advanceTimersByTime(8_001);
+      // The collaboration notice ran out while the reminder was ahead of it.
+      expect(controller.getNotice()?.text).toBe('⏰ 提醒');
+      controller.stopActivityAnimation();
+    });
+
+    it('colours a reminder with the accent, and a missed one with the warning colour', () => {
+      vi.useFakeTimers();
+      const controller = new LifecycleController(makeHost({ requestRender: vi.fn() }));
+      controller.showReminderActivity('⏰ 定时任务已触发', 'fired');
+      expect(controller.getNotice()?.color).toBe('#00FFAA');
+      controller.showReminderActivity('⚠️ 定时任务已过期，仍触发', 'missed');
+      expect(controller.getNotice()?.color).toBe('#FFB020');
+      controller.stopActivityAnimation();
+    });
+
+    it('removes an MCP progress notice when the servers settle, and keeps the others', () => {
+      vi.useFakeTimers();
+      const controller = new LifecycleController(makeHost({ requestRender: vi.fn() }));
+      controller.showMcpNotice('progress', 'MCP 连接中 2/5', '#6b7280');
+      controller.showMcpNotice('needs-auth', '1 个 MCP 服务器需要认证 · /mcp', '#FFB020');
+      controller.clearMcpNotice('progress');
+      expect(controller.getNotice()?.text).toBe('1 个 MCP 服务器需要认证 · /mcp');
+      controller.clearMcpNotice('needs-auth');
+      expect(controller.getNotice()).toBeNull();
+    });
+
+    it('a session switch drops every notice', () => {
+      vi.useFakeTimers();
+      const controller = new LifecycleController(makeHost({ requestRender: vi.fn() }));
+      controller.showReminderActivity('⏰ 提醒', 'fired');
+      controller.showCollabActivity('🤝 求助', 'request');
+      controller.showMcpNotice('failed', 'x', '#f00');
+      controller.clearStatusActivity();
+      expect(controller.getNotice()).toBeNull();
+    });
+
+    it('stopActivityAnimation clears the notices and their timer', () => {
       vi.useFakeTimers();
       const ui = { requestRender: vi.fn() };
-      const host = makeHost(ui);
-      const controller = new LifecycleController(host);
+      const controller = new LifecycleController(makeHost(ui));
 
       controller.showCollabActivity('leftover', 'request');
       controller.stopActivityAnimation();
-      expect(controller.getCollabActivity()).toBeNull();
+      expect(controller.getNotice()).toBeNull();
 
       // The cleared timer must not fire after shutdown.
       const before = ui.requestRender.mock.calls.length;
       vi.advanceTimersByTime(30_000);
       expect(ui.requestRender.mock.calls.length).toBe(before);
+    });
+  });
+
+  describe('status row', () => {
+    const originalLevel = chalk.level;
+    beforeEach(() => {
+      chalk.level = 3;
+    });
+    afterEach(() => {
+      chalk.level = originalLevel;
+    });
+
+    it('says the phase and how long while working, and the reconnect detail when a retry runs', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-11-27T10:00:00Z'));
+      const state = createMockTUIState({
+        appState: { streamingPhase: 'thinking', streamingStartTime: Date.now() - 12_000, reconnectAttempt: 0 },
+      });
+      const controller = new LifecycleController(createMockHost({ state }));
+      controller.forceUpdateStatusBar();
+      expect(state.statusBarContainer.render(100).join('\n')).toContain('思考中 · 12s');
+
+      // The clock is read live: no rebuild is needed for it to move.
+      vi.advanceTimersByTime(3_000);
+      expect(state.statusBarContainer.render(100).join('\n')).toContain('思考中 · 15s');
+
+      Object.assign(state.appState, {
+        streamingPhase: 'waiting',
+        reconnectAttempt: 2,
+        reconnectMaxAttempts: 10,
+        reconnectStatusCode: 429,
+        reconnectDelayMs: 20_000,
+      });
+      controller.forceUpdateStatusBar();
+      const retry = state.statusBarContainer.render(120).join('\n');
+      expect(retry).toContain('⚠️ 重连中 2/10：');
+      expect(retry).toContain(`${hexToSgr(state.theme.colors.warning)}⚠️ 重连中`);
+      expect(retry).not.toContain('思考中');
+      controller.stopActivityAnimation();
+    });
+
+    it('names what the session waits for instead of going empty', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-11-27T10:00:00Z'));
+      const state = createMockTUIState({
+        appState: {
+          streamingPhase: 'tool',
+          streamingStartTime: Date.now() - 300_000,
+          pendingUserAction: 'approval',
+          pendingUserActionSince: Date.now() - 240_000,
+        },
+      });
+      (state.livePane as { pendingApproval: unknown }).pendingApproval = { id: 'a' };
+      const controller = new LifecycleController(createMockHost({ state }));
+      controller.forceUpdateStatusBar();
+      expect(plainRow(state.statusBarContainer.render(100))).toContain('◆ 等待批准 · 4m');
+
+      (state.livePane as { pendingApproval: unknown }).pendingApproval = null;
+      (state.livePane as { pendingQuestion: unknown }).pendingQuestion = { id: 'q' };
+      Object.assign(state.appState, { pendingUserAction: 'question', pendingUserActionSince: Date.now() });
+      controller.forceUpdateStatusBar();
+      expect(plainRow(state.statusBarContainer.render(100))).toContain('◆ 等待回答');
+
+      (state.livePane as { pendingQuestion: unknown }).pendingQuestion = null;
+      Object.assign(state.appState, { pendingUserAction: null, isCompacting: true });
+      controller.forceUpdateStatusBar();
+      expect(plainRow(state.statusBarContainer.render(100))).toContain('◆ 压缩中');
+      controller.stopActivityAnimation();
+    });
+
+    it('stays empty while a dialog owns the screen', () => {
+      const state = createMockTUIState({ appState: { streamingPhase: 'idle' } });
+      (state as { activeDialog: string | null }).activeDialog = 'help';
+      const controller = new LifecycleController(createMockHost({ state }));
+      controller.forceUpdateStatusBar();
+      expect(state.statusBarContainer.render(100)).toEqual([]);
+      controller.stopActivityAnimation();
+    });
+
+    it('shows one tip while the chat is empty, with its close key, and notices are not on this row', () => {
+      vi.useFakeTimers();
+      const state = createMockTUIState({ appState: { streamingPhase: 'idle', reconnectAttempt: undefined } });
+      // Following the output, so the scroll cue is not what shares the row.
+      (state.ui as unknown as { isFollowingOutput: boolean }).isFollowingOutput = true;
+      const controller = new LifecycleController(createMockHost({ state }));
+      controller.forceUpdateStatusBar();
+      const row = state.statusBarContainer.render(120).join('\n');
+      expect(row).toContain('Tips');
+      expect(row).toContain('Ctrl+B 关闭');
+      expect(row).not.toContain('💡');
+      expect(row).toContain(hexToSgr(state.theme.colors.textMuted));
+
+      controller.showCollabActivity('✓ Scream 已处理 coder 的请求', 'handled');
+      expect(state.statusBarContainer.render(120).join('\n')).not.toContain('已处理');
+      controller.stopActivityAnimation();
     });
   });
 
@@ -474,100 +525,6 @@ describe('LifecycleController', () => {
       expect(process.stdout.listenerCount('error')).toBe(beforeStdout);
       expect(process.stderr.listenerCount('error')).toBe(beforeStderr);
       expect(host.onEmergencyExit).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('sidebar hub probe gating', () => {
-    // The gate under test is one line in `readSidebarHub`, but it is the whole
-    // privacy promise of the Hub panel: no outbound traffic while the sidebar
-    // is off screen. Driving it through the private seam keeps the production
-    // API unchanged, and avoids `buildSidebarData` (which would shell out to
-    // git for the sibling panel).
-    interface ProbeSpy {
-      calls: number;
-      sampleIfStale(): void;
-      snapshot(): { samples: never[]; roundAt: undefined; stale: false; pending: false };
-    }
-
-    function makeController(): {
-      host: LifecycleControllerHost;
-      controller: LifecycleController;
-      manager: SidebarManager;
-      probe: ProbeSpy;
-    } {
-      const host = createMockHost();
-      const manager = new SidebarManager(() => {});
-      // `toggle()` refuses to open an empty sidebar, so the gate needs a panel
-      // on the stack — a stub, because this test is about visibility only.
-      manager.register({
-        id: 'stub',
-        title: 'Stub',
-        width: 30,
-        build: () => ({ invalidate: () => {}, render: () => [] }),
-      });
-      host.state.sidebarManager = manager;
-      setProviderLatency(host, { ms: 120, sampledAt: Date.now() });
-      const controller = new LifecycleController(host);
-      const probe: ProbeSpy = {
-        calls: 0,
-        sampleIfStale() {
-          probe.calls += 1;
-        },
-        snapshot: () => ({ samples: [], roundAt: undefined, stale: false, pending: false }),
-      };
-      (controller as unknown as { hubProbe: ProbeSpy }).hubProbe = probe;
-      return { host, controller, manager, probe };
-    }
-
-    function readHub(controller: LifecycleController): SidebarHubData {
-      return (controller as unknown as { readSidebarHub(): SidebarHubData }).readSidebarHub();
-    }
-
-    // `sessionEventHandler` is a read-only host field; the seam is the host's
-    // own contract, so reach it the way the runtime would.
-    function setProviderLatency(
-      host: LifecycleControllerHost,
-      value: { ms: number | undefined; sampledAt: number | undefined },
-    ): void {
-      (host as unknown as {
-        sessionEventHandler: { getProviderLatency(): typeof value };
-      }).sessionEventHandler = { getProviderLatency: () => value };
-    }
-
-    it('does not probe while the sidebar is closed', () => {
-      const { controller, manager, probe } = makeController();
-      manager.close();
-
-      const data = readHub(controller);
-
-      expect(probe.calls).toBe(0);
-      // The provider row is measured from real requests, so it survives a
-      // closed sidebar — that is not outbound traffic.
-      expect(data.samples.map((sample) => sample.id)).toEqual([HUB_MODEL_ROW_ID]);
-      // 120ms is over the probe line but a healthy first token: the measured row
-      // is judged on its own ladder, so it reads green.
-      expect(data.samples[0]).toMatchObject({ ms: 120, tone: 'ok' });
-    });
-
-    it('probes once per rebuild while visible, and stops again when closed', () => {
-      const { controller, manager, probe } = makeController();
-
-      manager.toggle();
-      readHub(controller);
-      readHub(controller);
-      expect(probe.calls).toBe(2);
-
-      manager.close();
-      readHub(controller);
-      expect(probe.calls).toBe(2);
-    });
-
-    it('keeps the measured row dim when nothing has been measured yet', () => {
-      const { host, controller, manager } = makeController();
-      setProviderLatency(host, { ms: undefined, sampledAt: undefined });
-      manager.close();
-
-      expect(readHub(controller).samples[0]).toMatchObject({ ms: undefined, tone: 'dim' });
     });
   });
 
@@ -905,84 +862,3 @@ describe('status-bar wave colour', () => {
   });
 });
 
-/**
- * The scheduled-task reminder keeps its own slot on the status row: it must not
- * be evicted by a collaboration chip, it outlives one (10s vs 8s), and it is
- * drawn to the left so the row's truncation eats the collaboration line first.
- */
-describe('scheduled-task reminder chip', () => {
-  const originalLevel = chalk.level;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    chalk.level = 3;
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    chalk.level = originalLevel;
-  });
-
-  function mount() {
-    const state = createMockTUIState({ appState: { streamingPhase: 'waiting' } });
-    const controller = new LifecycleController(createMockHost({ state }));
-    controller.updateActivityPane();
-    return { state, controller };
-  }
-
-  it('renders the reminder on the working row in the accent colour', () => {
-    const { state, controller } = mount();
-    controller.showReminderActivity('⏰ 定时任务已触发：检查 CI 构建状态', 'fired');
-
-    const line = state.statusBarContainer.render(120).join('\n');
-    expect(line).toContain('⏰ 定时任务已触发：检查 CI 构建状态');
-    expect(line).toContain(hexToSgr(state.theme.colors.accent));
-  });
-
-  it('uses the warning colour for a stale task', () => {
-    const { state, controller } = mount();
-    controller.showReminderActivity('⚠️ 定时任务已过期，仍触发：检查 CI', 'missed');
-
-    const line = state.statusBarContainer.render(120).join('\n');
-    expect(line).toContain(hexToSgr(state.theme.colors.warning));
-  });
-
-  it('sits before the collaboration chip so it survives truncation', () => {
-    const { state, controller } = mount();
-    controller.showReminderActivity('⏰ 定时任务已触发：检查 CI', 'fired');
-    controller.showCollabActivity('🤝 coder 求助：缺少样例', 'request');
-
-    const line = state.statusBarContainer.render(200).join('\n');
-    expect(line.indexOf('⏰')).toBeGreaterThanOrEqual(0);
-    expect(line.indexOf('⏰')).toBeLessThan(line.indexOf('🤝'));
-  });
-
-  it('expires after its own 10s, one tick after the collaboration chip', () => {
-    const { state, controller } = mount();
-    controller.showReminderActivity('⏰ 定时任务已触发：检查 CI', 'fired');
-    controller.showCollabActivity('🤝 coder 求助：缺少样例', 'request');
-
-    vi.advanceTimersByTime(8_001);
-    let line = state.statusBarContainer.render(200).join('\n');
-    expect(line).not.toContain('🤝');
-    expect(line).toContain('⏰');
-
-    vi.advanceTimersByTime(2_000);
-    line = state.statusBarContainer.render(200).join('\n');
-    expect(line).not.toContain('⏰');
-  });
-
-  it('clears both chips together on a session switch', () => {
-    const { state, controller } = mount();
-    controller.showReminderActivity('⏰ 定时任务已触发：检查 CI', 'fired');
-    controller.showCollabActivity('🤝 coder 求助：缺少样例', 'request');
-
-    controller.clearStatusActivity();
-
-    const line = state.statusBarContainer.render(200).join('\n');
-    expect(line).not.toContain('⏰');
-    expect(line).not.toContain('🤝');
-    expect(controller.getReminderActivity()).toBeNull();
-    expect(controller.getCollabActivity()).toBeNull();
-  });
-});

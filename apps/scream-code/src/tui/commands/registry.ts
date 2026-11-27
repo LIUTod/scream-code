@@ -38,7 +38,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'sidebar',
     aliases: ['sb'],
     description: 'registry.sidebar_desc',
-    argumentHint: '[toggle|next|prev|panel <id>|width <n>]',
+    argumentHint: '[width <n|auto>]',
     priority: 215,
     availability: 'always',
   },

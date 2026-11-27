@@ -7,23 +7,24 @@ import { GutterContainer } from '../components/chrome/gutter-container';
 import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
 import { SESSION_TIPS, TIP_ROTATION_INTERVAL_MS } from '../constant/scream-tui';
 import { StatusBarPaneComponent, type StatusChipLine } from '../components/panes/status-bar-pane';
+import { NoticeBoard } from '../utils/notice-board';
+import { workState } from '../utils/status-text';
 import { ScrollCue } from '../utils/scroll-cue';
 import {
   SIDEBAR_MIN_VIEWPORT_WIDTH,
   type SidebarData,
   type SidebarGoalData,
-  type SidebarHubData,
   type SidebarJobsData,
   type SidebarSessionStats,
-} from '../components/sidebar/sidebar-panel';
-import { jobsPanel } from '../components/sidebar/panels/jobs-panel';
+} from '../components/sidebar/session-status';
 import { createGitStatusCache, type GitStatusCache } from '#/utils/git/git-status';
-import { sessionPanel } from '../components/sidebar/panels/session-panel';
-import { agentsPanel } from '../components/sidebar/panels/agents-panel';
-import { goalPanel } from '../components/sidebar/panels/goal-panel';
-import { hubPanel } from '../components/sidebar/panels/hub-panel';
-import { buildHubSamples, createHubProbe } from '../utils/hub-probe';
-import { CHROME_GUTTER, DOCK_FOOTER_ROWS, DOCK_STATUS_ROWS, TODO_PANEL_MIN_WIDTH } from '../constant/rendering';
+import {
+  CHROME_GUTTER,
+  DOCK_FOOTER_ROWS,
+  DOCK_STATUS_ROWS,
+  STATUS_ROW_MIN_WIDTH,
+  TODO_PANEL_MIN_WIDTH,
+} from '../constant/rendering';
 import { USER_MESSAGE_BULLET } from '../constant/symbols';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
@@ -52,7 +53,9 @@ import { resolveWaveColor, WAVE_YELLOW_AT_MS } from '../utils/wave-color';
 import { PulseWaveLoader } from '../components/chrome/pulse-wave-loader';
 import { type ActivityPaneMode } from '../components/panes/activity-pane';
 
-type EffectiveActivityPaneMode = ActivityPaneMode | 'idle';
+type EffectiveActivityPaneMode = ActivityPaneMode | 'idle' | 'blocked';
+
+export type McpNoticeKind = 'progress' | 'failed' | 'needs-auth';
 
 /** Wording used for the retry reason in the status bar. */
 type ReconnectReasonKey =
@@ -122,23 +125,28 @@ export interface LifecycleControllerHost {
   onEmergencyExit(exitCode?: number): never;
 }
 
-/** How long a collaboration ticker line stays on the status bar (newest wins). */
-const COLLAB_ACTIVITY_TTL_MS = 8_000;
-/** How long a scheduled-task reminder stays: longer than the collaboration
- *  chip because a cron fire is time-sensitive and must not slip by. */
-const REMINDER_ACTIVITY_TTL_MS = 10_000;
-/** How long an MCP server notice stays on the status bar (own slot, transient
- *  by design — startup connect chatter must not occupy the transcript).
- *  Short on purpose: the notice appears once loading finishes and clears
- *  quickly instead of parking on the row. */
-const MCP_ACTIVITY_TTL_MS = 3_000;
+/**
+ * The footer's notice slot shows one notice at a time. Lower priority number is
+ * shown first: a fired reminder is time-sensitive and must not slip by, an MCP
+ * problem needs the person, a collaboration request can wait a moment, and
+ * connect chatter yields to everything.
+ */
+const NOTICE_PRIORITY = { reminder: 1, mcpFailed: 2, mcpAuth: 2.5, collab: 3, mcpProgress: 4 } as const;
+const COLLAB_NOTICE_TTL_MS = 8_000;
+/** Longer than the collaboration notice: a cron fire is time-sensitive. */
+const REMINDER_NOTICE_TTL_MS = 10_000;
+/** MCP problems stay on screen as long as the footer pill does; the notice is the heads-up. */
+const MCP_PROBLEM_NOTICE_TTL_MS = 8_000;
+/** Connect progress is refreshed while servers connect and removed when they settle. */
+const MCP_PROGRESS_NOTICE_TTL_MS = 15_000;
 /** Footer git badge freshness window; the deferred read refreshes past it. */
 const GIT_DIFF_TTL_MS = 15_000;
 /** Window after a command-driven line write during which the poll stands down. */
 const MANUAL_LINE_WRITE_GRACE_MS = 5_000;
-/** Footer renders exactly two rows (footer.ts); the dock must reserve both.
- *  The status row keeps one row even when it renders nothing. Both live in
- *  constant/rendering so panels can size against them; re-exported here. */
+/** The footer renders two rows (one on a short terminal, see COMPACT_FOOTER_ROWS);
+ *  the dock reserves the two. The status row keeps one row even when it renders
+ *  nothing. Both live in constant/rendering so panels can size against them;
+ *  re-exported here. */
 export { DOCK_FOOTER_ROWS, DOCK_STATUS_ROWS };
 
 export class LifecycleController {
@@ -167,18 +175,11 @@ export class LifecycleController {
   private statusBarLoader: PulseWaveLoader | undefined;
   /** Counts the replies that arrive while the transcript is scrolled up. */
   private readonly scrollCue = new ScrollCue();
-  /** Single-slot collaboration ticker (subagent ↔ main agent traffic). */
-  private collabActivity: { text: string; color: string } | null = null;
-  private collabTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Single-slot scheduled-task reminder (⏰ cron chip). Sits in its own slot so
-   *  a collaboration request can never evict a fired reminder. */
-  private reminderActivity: { text: string; color: string } | null = null;
-  private reminderTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Single-slot MCP server notice (connect / connecting / disabled). Own slot
-   *  for the same reason: a burst of server statuses must never evict a
-   *  collaboration request or a fired reminder. */
-  private mcpActivity: { text: string; color: string } | null = null;
-  private mcpTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The footer's notice slot: reminders, collaboration requests and MCP
+   *  notices queue here and are shown one at a time. */
+  private readonly notices = new NoticeBoard(() => {
+    this.host.state.ui?.requestRender();
+  });
   /** Sum all four token buckets into the session's total token consumption. */
   private static sumTokens(usage: TokenUsage): number {
     return usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation + usage.output;
@@ -186,9 +187,6 @@ export class LifecycleController {
 
   private tipRotationTimer: ReturnType<typeof setInterval> | undefined;
   private currentTipIndex = pickTipIndex(SESSION_TIPS, undefined);
-  /** Sidebar Hub probe: read-through TTL, no timer — probing happens because a
-   *  frame asked, so a closed sidebar produces no traffic. */
-  private readonly hubProbe = createHubProbe();
   /** Git status cache behind the footer's working-tree diff. Rebuilt when the
    * workDir changes; `getStatus()` is TTL-cached so polling is cheap. */
   private gitStatusCache: GitStatusCache | undefined;
@@ -349,7 +347,7 @@ export class LifecycleController {
     }
   }
 
-  /** The Jobs panel's last snapshot, refreshed by the jobs poll. */
+  /** The sidebar's jobs row, refreshed by the jobs poll. */
   private sidebarJobs: SidebarJobsData | undefined;
 
   /**
@@ -515,57 +513,35 @@ export class LifecycleController {
         component: this.host.state.statusBarContainer,
         shrink: 1,
         minSize: DOCK_STATUS_ROWS,
-        visible: (viewport) => viewport.width >= 60,
+        visible: (viewport) => viewport.width >= STATUS_ROW_MIN_WIDTH,
       },
       { component: this.host.state.editorContainer, shrink: 1, minSize: 3 },
       {
         component: this.ensureFooterWrap(),
-        // The footer is a fixed two-row block (status line + context line).
-        // It must not shrink below its rendered height, otherwise the context
-        // row is clipped away on a short terminal.
+        // The footer is a fixed block of its rendered height: two rows, or one
+        // on a short terminal (it folds itself, see COMPACT_FOOTER_ROWS). It
+        // must not shrink below that, otherwise a row is clipped away.
         shrink: 0,
-        minSize: DOCK_FOOTER_ROWS,
+        minSize: 1,
       },
     ]);
-    // Register the sidebar panels once (idempotent). The stacked sidebar
-    // renders all visible panels top-to-bottom: Jobs (background jobs and what
-    // waits for the person; only when there is any), Session (aggregated
-    // counters), Agents, Goal, Hub. The working tree is in the footer, so the
-    // sidebar has no Git panel. Panels read their data from the provider below.
-    {
-      const m = this.host.state.sidebarManager;
-      if (!m.allPanels.some((p) => p.id === 'jobs')) {
-        m.register(jobsPanel);
-      }
-      if (!m.allPanels.some((p) => p.id === 'session')) {
-        m.register(sessionPanel);
-      }
-      if (!m.allPanels.some((p) => p.id === 'agents')) {
-        m.register(agentsPanel);
-      }
-      if (!m.allPanels.some((p) => p.id === 'goal')) {
-        m.register(goalPanel);
-      }
-      // Hub last on purpose: when a short terminal clips the sidebar, the
-      // sacrificial block is the network readout, not the live goal or agents.
-      if (!m.allPanels.some((p) => p.id === 'hub')) {
-        m.register(hubPanel);
-      }
-      m.setDataProvider(() => this.buildSidebarData());
-    }
+    // The session-status sidebar reads its numbers from here on every frame it
+    // is open (and only then), so the data is a cheap snapshot: stats are
+    // memoized, the usage count lives in its own tracker.
+    this.host.state.sidebarManager.setDataProvider(() => this.buildSidebarData());
 
     // Wide-terminal sidebar: the output region becomes a horizontal split of
     // the transcript ScrollView (left) and the sidebar (right). The sidebar is
     // hidden below SIDEBAR_MIN_VIEWPORT_WIDTH columns and while closed, matching
     // the existing todoPanel/statusBar width gates.
-    const sidebar = this.host.state.sidebarPane;
+    const sidebar = this.host.state.sidebarView;
     const topRegion = new HStack([
       { component: transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
       {
         component: sidebar,
-        // Content-driven width: SidebarContainer renders at the manager's
-        // width (or empty when closed), so open/close resizes the split
-        // without rebuilding the layout.
+        // Content-driven width: the sidebar's body answers the stack's width
+        // question from the manager (or is empty when closed), so open/close
+        // and a resize move the split without rebuilding the layout.
         basis: 'auto',
         grow: 0,
         shrink: 0,
@@ -585,36 +561,16 @@ export class LifecycleController {
     this.host.state.layoutRoot = layoutRoot;
   }
 
-  /** Build the sidebar data snapshot (git + session stats + goal) read by the
-   * stacked panels. Panels re-read this every frame via getData(), so the
-   * snapshot stays cheap: git is TTL-cached and stats are memoized. */
+  /** The sidebar's data snapshot: jobs, session stats, agents, goal and the
+   *  first-token history. The sidebar re-reads it every frame, so it stays cheap. */
   private buildSidebarData(): SidebarData {
     const appState = this.host.state.appState;
     return {
       ...(this.sidebarJobs === undefined ? {} : { jobs: this.sidebarJobs }),
       sessionStats: this.readSidebarSessionStats(appState),
       agents: this.host.sessionEventHandler.getSubagentSlots(),
-      hub: this.readSidebarHub(),
       goal: this.readSidebarGoal(appState),
-    };
-  }
-
-  /**
-   * Hub block. Probe rounds are kicked off from the render path only (the
-   * sidebar container stops rendering while closed), and the round is always
-   * fire-and-forget — a dead endpoint can never hold up a frame. The model row
-   * is different: it reads the first-token latency of real requests, so it is
-   * measured rather than probed, and it goes stale on its own budget.
-   */
-  private readSidebarHub(): SidebarHubData {
-    // Probing is gated on the sidebar actually being on screen. The manager can
-    // also ask for the panel stack while closed (`/sidebar next`, a bare
-    // `/sidebar`), and that bookkeeping must not turn into outbound traffic.
-    if (this.host.state.sidebarManager?.isOpen === true) this.hubProbe.sampleIfStale();
-    const snapshot = this.hubProbe.snapshot();
-    return {
-      samples: buildHubSamples(snapshot, this.host.sessionEventHandler.getProviderLatency()),
-      pending: snapshot.pending,
+      firstToken: this.host.sessionEventHandler.getFirstTokenHistory(),
     };
   }
 
@@ -845,14 +801,17 @@ export class LifecycleController {
   }
 
   /**
-   * Updates the fixed status bar above the editor to reflect the current
-   * work phase. Called only when the phase actually changes. Uses its OWN
-   * spinner/pulse instances (a component can only have one parent, so the
-   * activity pane's instances must not be shared). Recreating a loader on
-   * every call would leak setInterval timers (each PulseWaveLoader.start()
-   * registers one and the old instance is never stopped), so the previous
-   * instance is explicitly stopped before a new one is mounted. Idle leaves
-   * the bar empty.
+   * Updates the fixed status row above the editor to reflect the current mode.
+   * Called only when the mode actually changes. Uses its OWN pulse wave (a
+   * component can only have one parent). Recreating a loader on every call
+   * would leak setInterval timers (each PulseWaveLoader.start() registers one
+   * and the old instance is never stopped), so the previous instance is
+   * explicitly stopped before a new one is mounted.
+   *
+   *   working  wave + phase + how long (read live, so the clock moves)
+   *   blocked  what the session waits for the person to do (approval, answer)
+   *            or a compaction; the row used to be empty exactly then
+   *   idle     one tip while the chat is empty
    */
   private updateStatusBar(mode: EffectiveActivityPaneMode): void {
     const { state } = this.host;
@@ -862,71 +821,58 @@ export class LifecycleController {
     this.statusBarLoader = undefined;
     this.stopTipRotation();
 
+    const colors = state.theme.colors;
+    const live = () => workState(state.appState);
+    const scrollCue = () => this.getScrollCue();
+
     switch (mode) {
       case 'waiting':
       case 'composing':
       case 'tool':
-      case 'thinking':
+      case 'thinking': {
         // Every working phase shows the same pulse wave, reasoning included: the
         // reasoning rows now live inside the activity block, and a folded block
         // is too quiet to tell at a glance that work is still going on.
         // PulseWaveLoader renders reliably under layout-root swaps (an approval
-        // dialog replaces the root and restores it); the MoonLoader animation did
-        // not survive that restore, so a single wave is used everywhere.
-        {
-          const loader = new PulseWaveLoader(state.ui, () => this.currentWaveColor());
-          this.statusBarLoader = loader;
-          state.statusBarContainer.addChild(
-            new StatusBarPaneComponent({
-              mode,
-              label: this.buildReconnectLabel(state),
-              // Alert semantics: the reconnect chip is the only warning-level
-              // text that shares this row outside the collab ticker.
-              labelColor: state.theme.colors.warning,
-              pulseWave: loader,
-              reminder: () => this.getReminderActivity(),
-              activity: () => this.getCollabActivity(),
-              notice: () => this.getMcpActivity(),
-              scrollCue: () => this.getScrollCue(),
-            }),
-          );
-        }
+        // dialog replaces the root and restores it).
+        const loader = new PulseWaveLoader(state.ui, () => this.currentWaveColor());
+        this.statusBarLoader = loader;
+        state.statusBarContainer.addChild(
+          new StatusBarPaneComponent({
+            mode: 'working',
+            colors,
+            pulseWave: loader,
+            state: live,
+            reconnect: this.buildReconnectLabel(state),
+            scrollCue,
+          }),
+        );
         break;
-      case 'idle':
-      case 'hidden': {
-        if (mode === 'hidden') break;
-        // When the chat is completely empty (fresh session / just switched),
-        // show a one-line hint above the editor pointing at the model-provider
-        // partner page, with Ctrl+F to open it. Once the user sends anything
-        // the phase leaves idle and the bar rebuilds, so the hint disappears
-        // automatically — no extra state to clean up.
+      }
+      case 'blocked':
+        state.statusBarContainer.addChild(new StatusBarPaneComponent({ mode: 'blocked', colors, state: live, scrollCue }));
+        break;
+      case 'idle': {
+        // While the chat is completely empty (fresh session / just switched)
+        // the row shows one tip. Once the user sends anything the phase leaves
+        // idle and the row rebuilds, so the tip disappears automatically.
         const showHint = state.transcriptEntries.length === 0 && !isEmptySessionHintDismissed();
-        // Quiet interactive cue: dimmed label, lighter than body text.
         const tip = showHint ? (SESSION_TIPS[this.currentTipIndex] ?? SESSION_TIPS[0]!) : undefined;
-        // The row is also the collaboration ticker's home and reads its getter
-        // live, so it is mounted even without a tip: a notice arriving while the
-        // session is idle (e.g. an acknowledgement after the turn ended) shows
-        // up without waiting for the next phase change. When a tip and a notice
-        // coexist, the tip keeps its place and the notice is truncated after it.
+        // The row is mounted even without a tip: the scroll cue reads live and
+        // may appear while the session sits idle.
         state.statusBarContainer.addChild(
           new StatusBarPaneComponent({
             mode: 'idle',
-            // The tip copy already opens with its own icon (`💡 Tips：…`), so
-            // it keeps the shared `symbol label：value` grammar as-is; the hint
-            // is the lowest-priority segment and yields to a live notice.
-            label: tip === undefined ? '' : composeTipLabel(t(tip.i18nKey), tip, state.theme.colors.primary),
-            // Semantic colour instead of a hardcoded grey so both themes read
-            // the hint as secondary text.
-            labelColor: state.theme.colors.textDim,
-            reminder: () => this.getReminderActivity(),
-            activity: () => this.getCollabActivity(),
-            notice: () => this.getMcpActivity(),
-            scrollCue: () => this.getScrollCue(),
+            colors,
+            ...(tip === undefined ? {} : { tip: composeTipLabel(t(tip.i18nKey), tip, colors.primary) }),
+            scrollCue,
           }),
         );
         if (tip !== undefined) this.startTipRotation();
         break;
       }
+      case 'hidden':
+        break;
     }
     state.ui.requestRender();
   }
@@ -998,92 +944,70 @@ export class LifecycleController {
   }
 
   /**
-   * Shows a one-slot collaboration notice above the editor: the newest request
-   * or acknowledgement replaces the previous one and expires after
-   * `COLLAB_ACTIVITY_TTL_MS`. Rendered live by the status row, so no rebuild
-   * (and no animation reset) is involved.
+   * Collaboration request or acknowledgement (subagent ↔ main agent traffic).
+   * A newer one replaces the previous one; it shows in the footer's notice slot
+   * for `COLLAB_NOTICE_TTL_MS` or until a higher-priority notice takes the slot.
    */
   showCollabActivity(text: string, tone: 'request' | 'handled'): void {
     const colors = this.host.state.theme.colors;
-    this.collabActivity = { text, color: tone === 'request' ? colors.warning : colors.success };
-    if (this.collabTimer !== undefined) clearTimeout(this.collabTimer);
-    this.collabTimer = setTimeout(() => {
-      this.collabTimer = undefined;
-      this.collabActivity = null;
-      this.host.state.ui?.requestRender();
-    }, COLLAB_ACTIVITY_TTL_MS);
+    this.notices.post({
+      key: 'collab',
+      text,
+      color: tone === 'request' ? colors.warning : colors.success,
+      priority: NOTICE_PRIORITY.collab,
+      ttlMs: COLLAB_NOTICE_TTL_MS,
+    });
     this.host.state.ui?.requestRender();
   }
 
-  /** Live getter consumed by the status row on every render. */
-  getCollabActivity(): { text: string; color: string } | null {
-    return this.collabActivity;
-  }
-
   /**
-   * Shows a scheduled-task reminder on the status row (`⏰ 定时任务已触发：…`).
-   *
-   * Own slot, own TTL: the reminder outlives the collaboration chip because a
-   * cron fire is time-sensitive, and neither can push the other off the row.
-   * `missed` (a stale/overdue task) switches to `warning` so an out-of-date
-   * schedule is not mistaken for a fresh one.
+   * Scheduled-task reminder (`⏰ 定时任务已触发：…`). First in line: it outlives
+   * the collaboration notice because a cron fire is time-sensitive. `missed` (a
+   * stale/overdue task) switches to `warning` so an out-of-date schedule is not
+   * mistaken for a fresh one.
    */
   showReminderActivity(text: string, tone: 'fired' | 'missed'): void {
     const colors = this.host.state.theme.colors;
-    this.reminderActivity = { text, color: tone === 'missed' ? colors.warning : colors.accent };
-    if (this.reminderTimer !== undefined) clearTimeout(this.reminderTimer);
-    this.reminderTimer = setTimeout(() => {
-      this.reminderTimer = undefined;
-      this.reminderActivity = null;
-      this.host.state.ui?.requestRender();
-    }, REMINDER_ACTIVITY_TTL_MS);
+    this.notices.post({
+      key: 'reminder',
+      text,
+      color: tone === 'missed' ? colors.warning : colors.accent,
+      priority: NOTICE_PRIORITY.reminder,
+      ttlMs: REMINDER_NOTICE_TTL_MS,
+    });
     this.host.state.ui?.requestRender();
-  }
-
-  /** Live getter consumed by the status row on every render. */
-  getReminderActivity(): { text: string; color: string } | null {
-    return this.reminderActivity;
   }
 
   /**
-   * Shows an MCP server notice on the status row (connected / connecting /
-   * disabled). Single slot, newest wins, expires after `MCP_ACTIVITY_TTL_MS`;
-   * the row reads it live, so no rebuild (and no wave reset) is involved.
-   * The colour is chosen by the caller (success / muted).
+   * MCP notice. `progress` is the connect summary (kept fresh by the caller and
+   * removed with `clearMcpNotice` once the servers settle); `failed` and
+   * `needs-auth` are the heads-up for a problem, which also lives on as the
+   * footer pill. Healthy servers say nothing.
    */
-  showMcpActivity(text: string, color: string): void {
-    this.mcpActivity = { text, color };
-    if (this.mcpTimer !== undefined) clearTimeout(this.mcpTimer);
-    this.mcpTimer = setTimeout(() => {
-      this.mcpTimer = undefined;
-      this.mcpActivity = null;
-      this.host.state.ui?.requestRender();
-    }, MCP_ACTIVITY_TTL_MS);
+  showMcpNotice(kind: McpNoticeKind, text: string, color: string): void {
+    const spec =
+      kind === 'progress'
+        ? { priority: NOTICE_PRIORITY.mcpProgress, ttlMs: MCP_PROGRESS_NOTICE_TTL_MS }
+        : kind === 'failed'
+          ? { priority: NOTICE_PRIORITY.mcpFailed, ttlMs: MCP_PROBLEM_NOTICE_TTL_MS }
+          : { priority: NOTICE_PRIORITY.mcpAuth, ttlMs: MCP_PROBLEM_NOTICE_TTL_MS };
+    this.notices.post({ key: `mcp-${kind}`, text, color, ...spec });
     this.host.state.ui?.requestRender();
   }
 
-  /** Live getter consumed by the status row on every render. */
-  getMcpActivity(): { text: string; color: string } | null {
-    return this.mcpActivity;
+  clearMcpNotice(kind: McpNoticeKind): void {
+    this.notices.remove(`mcp-${kind}`);
+    this.host.state.ui?.requestRender();
   }
 
-  /** Drops every transient chip (session switch, shutdown). */
+  /** Live getter the footer reads on every render: the notice to draw now. */
+  getNotice(): { text: string; color: string } | null {
+    return this.notices.top();
+  }
+
+  /** Drops every notice (session switch, shutdown). */
   clearStatusActivity(): void {
-    if (this.collabTimer !== undefined) {
-      clearTimeout(this.collabTimer);
-      this.collabTimer = undefined;
-    }
-    this.collabActivity = null;
-    if (this.reminderTimer !== undefined) {
-      clearTimeout(this.reminderTimer);
-      this.reminderTimer = undefined;
-    }
-    this.reminderActivity = null;
-    if (this.mcpTimer !== undefined) {
-      clearTimeout(this.mcpTimer);
-      this.mcpTimer = undefined;
-    }
-    this.mcpActivity = null;
+    this.notices.clear();
   }
 
   /**
@@ -1095,7 +1019,7 @@ export class LifecycleController {
     this.statusBarLoader?.stop();
     this.statusBarLoader = undefined;
     this.stopTipRotation();
-    this.clearStatusActivity();
+    this.notices.dispose();
   }
 
   /** Current tip index (for Ctrl+F to check if the visible tip is the ad). */
@@ -1125,9 +1049,10 @@ export class LifecycleController {
   private resolveActivityPaneMode(): EffectiveActivityPaneMode {
     const { state } = this.host;
     if (state.activeDialog !== null) return 'hidden';
-    if (state.livePane.pendingApproval !== null) return 'hidden';
-    if (state.appState.isCompacting) return 'hidden';
-    if (state.livePane.pendingQuestion !== null) return 'hidden';
+    // Waiting on the person, or compacting: the row names it instead of going empty.
+    if (state.livePane.pendingApproval !== null) return 'blocked';
+    if (state.appState.isCompacting) return 'blocked';
+    if (state.livePane.pendingQuestion !== null) return 'blocked';
 
     // streamingPhase is the single source of truth for the work phase. Both
     // tool phases share the activity-pane mode: 'tool-args' is the model
