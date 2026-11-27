@@ -73,39 +73,35 @@ describe('heatmapLines', () => {
     return { lines: heat.lines.map(strip), weeks: heat.weeks };
   };
 
-  it('is a calendar: weeks across, seven weekdays down with Monday, Wednesday and Friday named, and a legend', () => {
+  it('is a calendar: weeks across, seven weekdays down with Monday, Wednesday and Friday named, a blank row and a legend', () => {
     const { lines } = rowsOf(52);
     // Months, seven weekdays, a blank row of air, the legend.
     expect(lines).toHaveLength(1 + 7 + 1 + 1);
     expect(lines.at(-2)).toBe('');
     const names = (rows: string[]): string[] => rows.slice(1, 8).map((l) => /^\S*/.exec(l)![0]);
     expect(names(lines)).toEqual(['', '周一', '', '周三', '', '周五', '']);
-    expect(lines.at(-1)).toContain('少 ░░ ▒▒ ▓▓ ██ 多');
+    expect(lines.at(-1)).toContain('少 ░ ▒ ▓ █ 多');
     setLocale('en');
     const en = heatmapLines(snapshot({}), 52, darkColors).lines.map(strip);
     expect(names(en)).toEqual(['', 'Mon', '', 'Wed', '', 'Fri', '']);
-    expect(en.at(-1)).toContain('Less ░░ ▒▒ ▓▓ ██ More');
+    expect(en.at(-1)).toContain('Less ░ ▒ ▓ █ More');
   });
 
-  it('makes a day as wide as still shows a worthwhile stretch, and cuts a long history to its recent weeks', () => {
-    // A new install: the whole (short) history fits with three-column days.
-    expect(heatmapLines(snapshot({}), 52, darkColors)).toMatchObject({ cell: 3, weeks: 15 });
-    // Forty weeks of history do not fit in 52 columns: two-column days, the recent half year.
-    const long = snapshot({ '2026-02-06': day(10), [TODAY]: day(10) });
-    expect(heatmapLines(long, 52, darkColors)).toMatchObject({ cell: 2, weeks: 23 });
-    // A wide sidebar draws the whole year, a year at most.
-    expect(heatmapLines(long, 400, darkColors)).toMatchObject({ cell: 3, weeks: 52 });
-    // While the history is still being counted the cells are laid out for a long one, so they do not jump when it lands.
-    expect(heatmapLines(snapshot({}, { loading: 0.3 }), 52, darkColors).cell).toBe(2);
-    // Too narrow for two columns a day: one, and a few weeks at least.
-    expect(heatmapLines(long, 20, darkColors)).toMatchObject({ cell: 1, weeks: 15 });
-    expect(heatmapLines(long, 6, darkColors).weeks).toBe(8);
+  it('draws a column a day, as many weeks as fit, a year at most and a few at least', () => {
+    expect(rowsOf(30).weeks).toBe(25);
+    expect(rowsOf(49).weeks).toBe(44);
+    expect(rowsOf(57).weeks).toBe(52);
+    expect(rowsOf(400).weeks).toBe(52);
+    expect(rowsOf(6).weeks).toBe(10);
+    // One character a day: the grid is exactly as wide as the weeks.
+    const { lines, weeks } = rowsOf(49, snapshot({ [TODAY]: day(10) }));
+    expect(visibleWidth(lines[1]!.trimEnd())).toBeLessThanOrEqual(5 + weeks);
   });
 
   it('keeps every row inside the room it was given, the future blank', () => {
     for (const width of [20, 30, 44, 52, 56, 80]) {
       for (const line of heatmapLines(snapshot({ [TODAY]: day(10) }), width, darkColors).lines) {
-        expect(visibleWidth(line), `width ${String(width)}`).toBeLessThanOrEqual(Math.max(width, 12));
+        expect(visibleWidth(line), `width ${String(width)}`).toBeLessThanOrEqual(Math.max(width, 15));
       }
     }
     // Today is a Friday: the Saturday cell of this week has not happened yet.
@@ -113,48 +109,35 @@ describe('heatmapLines', () => {
     expect(visibleWidth(lines[7]!.trimEnd())).toBeLessThan(visibleWidth(lines[6]!.trimEnd()));
   });
 
-  it('writes months in the interface language, each above the week it starts in, never two touching', () => {
-    const { weeks, cell } = heatmapLines(snapshot({}), 52, darkColors);
-    const zh = rowsOf(52).lines[0]!;
-    expect(zh.trim().split(/\s+/).at(-1)).toBe('11月');
-    expect(zh.trim().split(/\s+/).every((w) => /^\d+月$/.test(w))).toBe(true);
-    // 2026-11-01 is a Sunday three weeks before the week of today: its label sits over that week's column.
-    expect(visibleWidth(zh.slice(0, zh.indexOf('11月')))).toBe(5 + (weeks - 4) * cell);
+  it('writes months in the interface language, spread evenly, the oldest dropped first when they would touch', () => {
+    const zh = rowsOf(57).lines[0]!;
+    const zhWords = zh.trim().split(/\s+/);
+    expect(zhWords.at(-1)).toBe('11月');
+    expect(zhWords.every((w) => /^\d+月$/.test(w))).toBe(true);
+    // The names never touch: a slot is at least as wide as the widest name plus a space.
+    expect(zhWords.length).toBeLessThan(13);
 
     setLocale('en');
-    // The English weekday names are a column narrower, which can add a week.
-    const heat = heatmapLines(snapshot({}), 52, darkColors);
-    const en = strip(heat.lines[0]!);
-    const words = en.trim().split(/\s+/);
-    expect(words.at(-1)).toBe('Nov');
-    expect(words.every((w) => /^[A-Z][a-z]{2}$/.test(w))).toBe(true);
-    expect(en.indexOf('Nov')).toBe(4 + (heat.weeks - 4) * heat.cell);
-    expect(en).not.toMatch(/[a-z][A-Z]/);
-  });
-
-  it('spreads the months evenly on a one-column grid, the oldest dropped first when they would crowd', () => {
-    setLocale('en');
-    const long = snapshot({ '2026-02-06': day(10), [TODAY]: day(10) });
-    const narrow = strip(heatmapLines(long, 20, darkColors).lines[0]!);
+    const wide = strip(heatmapLines(snapshot({}), 57, darkColors).lines[0]!);
+    expect(wide).toMatch(/Nov +Dec +Jan +Feb +Mar +Apr +May +Jun +Jul +Aug +Sep +Oct +Nov/);
+    const narrow = strip(heatmapLines(snapshot({}), 24, darkColors).lines[0]!);
     const words = narrow.trim().split(/\s+/);
     expect(words.at(-1)).toBe('Nov');
-    expect(words.length).toBeLessThanOrEqual(4);
+    expect(words.length).toBeLessThan(13);
     expect(narrow).not.toMatch(/[a-z][A-Z]/);
   });
 
-  it('shades by the quartiles of the days that were used, and shows unused days as a dot', () => {
+  it('shades by the quartiles of the days that were used, in the brand colour, and shows unused days as a quiet dot', () => {
     const days: Record<string, DayUsage> = {};
     // Ten used days, 1..10 (the weekday rows are Sun..Sat; these fall in the last two weeks).
     for (let i = 0; i < 10; i++) {
       const d = new Date(2026, 10, 27 - i);
       days[`${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`] = day((10 - i) * 100);
     }
-    const cells = heatmapLines(snapshot(days), 30, darkColors).lines.slice(1, 8).map(strip).join('');
-    expect(cells).toContain('█');
-    expect(cells).toContain('░');
-    expect(cells).toContain('·');
-    // Coloured with the brand colour, the unused dots in the quiet one.
-    const raw = heatmapLines(snapshot(days), 30, darkColors).lines.join('');
+    const heat = heatmapLines(snapshot(days), 30, darkColors).lines;
+    const cells = heat.slice(1, 8).map(strip).join('');
+    for (const glyph of ['█', '▓', '▒', '░', '·']) expect(cells).toContain(glyph);
+    const raw = heat.join('');
     expect(raw).toContain(sgr(darkColors.primary));
     expect(raw).toContain(sgr(darkColors.textMuted));
   });

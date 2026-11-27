@@ -101,14 +101,7 @@ const GLYPH = ['·', '░', '▒', '▓', '█'] as const;
 const TREND_BARS = '▁▂▃▄▅▆▇█';
 const TREND_CELLS = 10;
 const MAX_WEEKS = 52;
-/** A day is drawn up to this many columns wide. */
-const MAX_CELL_COLS = 3;
-/** The heatmap is laid out for at least this many weeks, so a new install does not get giant cells. */
-const MIN_HISTORY_WEEKS = 12;
-/** Fewer weeks than this are never traded for a wider day. */
-const MIN_SHOWN_WEEKS = 16;
-/** While the history is still being counted, lay out for this many weeks so the cells do not jump as it fills. */
-const LOADING_HISTORY_WEEKS = 26;
+const MIN_WEEKS = 10;
 /** A two-column table needs this much room; narrower, each reading gets its own row. */
 const TWO_COLUMNS_FROM = 44;
 const TOP_MODELS = 3;
@@ -159,107 +152,57 @@ function parseKey(key: string): Date {
 }
 
 /**
- * The calendar: weeks across, weekdays down (Sunday first, Monday, Wednesday and
- * Friday named), the months along the top, five shades by the quartiles of the
- * days that were used. `width` is the room for the whole block.
- *
- * A terminal cell is about twice as tall as it is wide, so a day drawn one column
- * wide is a thin sliver and the whole picture looks squeezed. The grid therefore
- * makes a day two or three columns wide (the last column is air between days), as
- * wide as still shows 16 weeks (or the whole history when it is shorter); a longer history is cut to its recent
- * weeks, and only a sidebar too narrow for that goes back to one column. Days and months are written in the interface language.
+ * The calendar, drawn the way the reference project draws its activity map: a
+ * column a day, weeks across (a year at most), weekdays down (Sunday first,
+ * Monday, Wednesday and Friday named), the months along the top spread evenly,
+ * five shades by the quartiles of the days that were used, unused days a quiet
+ * dot, a blank row, then the legend. Days and months are written in the
+ * interface language. `width` is the room for the whole block.
  */
-export function heatmapLines(
-  snapshot: UsageSnapshot,
-  width: number,
-  colors: ColorPalette,
-  options: { cell?: number } = {},
-): { lines: string[]; weeks: number; cell: number } {
+export function heatmapLines(snapshot: UsageSnapshot, width: number, colors: ColorPalette): { lines: string[]; weeks: number } {
   const labelCols = Math.max(...[1, 3, 5].map((d) => displayWidth(t(`sidebar.weekday_${String(d)}`)))) + 1;
-  const room = Math.max(8, width - labelCols);
+  const weeks = Math.min(MAX_WEEKS, Math.max(MIN_WEEKS, width - labelCols));
   const today = parseKey(snapshot.today);
-  // How many weeks the history spans decides how wide a day can be; while it is still being counted, assume a long one.
-  let first: string | undefined;
-  for (const [key, day] of snapshot.days) if (day.tokens > 0 && (first === undefined || key < first)) first = key;
-  const spanWeeks = first === undefined ? 0 : Math.ceil((today.getTime() - parseKey(first).getTime()) / (7 * 86_400_000)) + 1;
-  const wanted = Math.min(MAX_WEEKS, Math.max(snapshot.loading === undefined ? MIN_HISTORY_WEEKS : LOADING_HISTORY_WEEKS, spanWeeks + 1));
-  // The widest day that still shows a worthwhile stretch of history: a long history is cut to its recent weeks
-  // rather than squeezed into slivers.
-  const fitting = [MAX_CELL_COLS, 2, 1].find((c) => Math.floor(room / c) >= Math.min(wanted, MIN_SHOWN_WEEKS)) ?? 1;
-  const cell = options.cell ?? fitting;
-  const weeks = Math.max(4, Math.min(MAX_WEEKS, Math.floor(room / cell)));
   const start = parseKey(addDays(localDateKey(today.getTime() - today.getDay() * 86_400_000 + 43_200_000), -(weeks - 1) * 7));
   const quartile = quartiles(snapshot.days);
   const quiet = chalk.hex(colors.textMuted);
   const ink = chalk.hex(colors.primary);
 
-  // A used day is its shade with a column of air after it, so neighbours stay apart and every day can be told from
-  // the next (a one-column day has no room for the air); an unused one is a dot on the same rhythm.
-  const glyphs = cell >= 2 ? cell - 1 : 1;
-  const solid = (shade: number): string => ink(GLYPH[shade]!.repeat(glyphs)) + ' '.repeat(cell - glyphs);
-  const dot = quiet(GLYPH[0]) + ' '.repeat(cell - 1);
-  const grid: string[][] = Array.from({ length: 7 }, () => Array.from({ length: weeks }, () => ' '.repeat(cell)));
-  const monthStarts: Array<{ week: number; month: number }> = [];
+  const grid: string[][] = Array.from({ length: 7 }, () => Array.from({ length: weeks }, () => ' '));
+  const monthStarts: number[] = [];
   let lastMonth = -1;
   for (let week = 0; week < weeks; week++) {
     for (let day = 0; day < 7; day++) {
       const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + week * 7 + day);
       if (date.getTime() > today.getTime()) continue;
       if (day === 0 && date.getMonth() !== lastMonth) {
-        monthStarts.push({ week, month: date.getMonth() + 1 });
+        monthStarts.push(date.getMonth() + 1);
         lastMonth = date.getMonth();
       }
       const tokens = snapshot.days.get(localDateKey(date.getTime() + 43_200_000))?.tokens ?? 0;
       const shade =
         tokens <= 0 || quartile === null ? 0 : tokens >= quartile[2] ? 4 : tokens >= quartile[1] ? 3 : tokens >= quartile[0] ? 2 : 1;
-      grid[day]![week] = shade === 0 ? dot : solid(shade);
+      grid[day]![week] = shade === 0 ? quiet(GLYPH[0]) : ink(GLYPH[shade]!);
     }
   }
 
-  // Months. A day two columns or wider leaves room to write each month where its first week is; on a one-column
-  // grid the labels are spread evenly instead (the way a year-long calendar does), the oldest dropped first
-  // when they would crowd. Either way two labels never touch.
-  const total = weeks * cell;
-  const names = monthStarts.map((m) => ({ ...m, text: t(`sidebar.month_${String(m.month)}`) }));
-  const widest = Math.max(...names.map((m) => displayWidth(m.text)));
-  const header: string[] = Array.from({ length: total }, () => ' ');
-  const write = (col: number, text: string): void => {
-    let at = col;
-    for (const ch of text) {
-      if (at >= total) return;
-      header[at] = ch;
-      at += displayWidth(ch);
-      for (let k = 1; k < displayWidth(ch) && at - displayWidth(ch) + k < total; k++) header[at - displayWidth(ch) + k] = '';
-    }
-  };
-  if (cell >= 2) {
-    // Newest first: they are the ones read.
-    let nextStart = total + 1;
-    const kept: typeof names = [];
-    for (const m of [...names].toReversed()) {
-      const col = m.week * cell;
-      if (col + displayWidth(m.text) > total || col + displayWidth(m.text) + 1 > nextStart) continue;
-      kept.unshift(m);
-      nextStart = col;
-    }
-    for (const m of kept) write(m.week * cell, m.text);
-  } else {
-    let kept = [...names];
-    while (kept.length > 1 && Math.floor(total / kept.length) < widest + 1) kept = kept.slice(1);
-    const slot = Math.floor(total / Math.max(kept.length, 1));
-    kept.forEach((m, i) => write(i * slot, m.text));
-  }
-  const lines = [' '.repeat(labelCols) + quiet(header.join('').trimEnd())];
+  // Months spread evenly over the grid; the oldest are dropped first when the names would touch.
+  const names = monthStarts.map((m) => t(`sidebar.month_${String(m)}`));
+  const widest = Math.max(...names.map((n) => displayWidth(n)));
+  let kept = names;
+  while (kept.length > 1 && Math.floor(weeks / kept.length) < widest + 1) kept = kept.slice(1);
+  const slot = Math.floor(weeks / Math.max(kept.length, 1));
+  const header = kept.map((n) => n + ' '.repeat(Math.max(0, slot - displayWidth(n)))).join('');
+  const lines = [' '.repeat(labelCols) + quiet(header.trimEnd())];
   for (let day = 0; day < 7; day++) {
     const label = day === 1 || day === 3 || day === 5 ? t(`sidebar.weekday_${String(day)}`) : '';
     lines.push(quiet(label + ' '.repeat(Math.max(0, labelCols - displayWidth(label)))) + grid[day]!.join(''));
   }
-  // A blank row of air, then the legend.
   lines.push(
     '',
-    ' '.repeat(labelCols) + quiet(`${t('sidebar.less')} `) + [1, 2, 3, 4].map((shade) => ink(GLYPH[shade]!.repeat(glyphs))).join(' ') + quiet(` ${t('sidebar.more')}`),
+    ' '.repeat(labelCols) + quiet(`${t('sidebar.less')} `) + [1, 2, 3, 4].map((shade) => ink(GLYPH[shade]!)).join(' ') + quiet(` ${t('sidebar.more')}`),
   );
-  return { lines, weeks, cell };
+  return { lines, weeks };
 }
 
 /** A model's name in `room` columns: the head when that keeps the names apart, else the tail (versions sit at the end). */
