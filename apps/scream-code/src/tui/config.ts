@@ -50,6 +50,11 @@ export const TuiConfigFileSchema = z.object({
       notification_condition: NotificationConditionSchema.optional(),
     })
     .optional(),
+  updates: z
+    .object({
+      prompt: z.boolean().optional(),
+    })
+    .optional(),
   // TOML file shape: like block uses snake_case keys (tool_priority).
   // The runtime TuiLikePreferences (camelCase) is produced by normalizeTuiConfig.
   like: z
@@ -100,6 +105,10 @@ export const TuiConfigSchema = z.object({
   language: z.enum(['zh', 'en']),
   editorCommand: z.string().nullable(),
   notifications: NotificationsConfigSchema,
+  // Ask with a card when a newer version is found (立即更新 / 暂不更新 /
+  // 永不提醒). False = never ask; the welcome panel still shows the version.
+  // Optional so callers that rebuild a config need not restate it; absent = ask.
+  updatePrompt: z.boolean().optional(),
   like: TuiLikePreferencesSchema,
   fusionPlan: z.object({
     timeoutSeconds: z.number().int().min(30).max(3600),
@@ -134,6 +143,7 @@ export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
   language: getLocale(),
   editorCommand: null,
   notifications: DEFAULT_NOTIFICATIONS_CONFIG,
+  updatePrompt: true,
   like: {},
   fusionPlan: {
     timeoutSeconds: 600,
@@ -226,6 +236,7 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
       condition:
         config.notifications?.notification_condition ?? DEFAULT_NOTIFICATIONS_CONFIG.condition,
     },
+    updatePrompt: config.updates?.prompt ?? true,
     like: {
       nickname: normalizeOptionalString(like.nickname),
       tone: normalizeOptionalString(like.tone),
@@ -295,6 +306,9 @@ command = "${escapeTomlBasicString(config.editorCommand ?? '')}" # Empty uses $V
 [notifications]
 enabled = ${String(config.notifications.enabled)} # true | false
 notification_condition = "${config.notifications.condition}" # "unfocused" | "always"
+
+[updates]
+prompt = ${String(config.updatePrompt !== false)} # Ask when a newer version is found
 
 [like]
 nickname = "${nickname}"

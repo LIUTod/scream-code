@@ -56,6 +56,7 @@ notification_condition = "always"
       theme: 'light',
       editorCommand: 'code --wait',
       notifications: { enabled: false, condition: 'always' },
+      updatePrompt: true,
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
@@ -90,6 +91,7 @@ command = "   "
       theme: 'auto',
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
+      updatePrompt: true,
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
@@ -149,6 +151,7 @@ autoStart = true
       theme: 'light',
       editorCommand: 'vim',
       notifications: { enabled: false, condition: 'always' },
+      updatePrompt: true,
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
@@ -199,5 +202,14 @@ task = " work "
     expect(
       renderTuiConfig({ ...DEFAULT_TUI_CONFIG, subagentModels: { coder: 'k2' } }),
     ).not.toContain('[modelTiers]');
+  });
+});
+
+describe('update prompt setting', () => {
+  it('asks by default, and keeps "never" through a save and reload', () => {
+    expect(parseTuiConfig('').updatePrompt).toBe(true);
+    const off = parseTuiConfig(renderTuiConfig({ ...DEFAULT_TUI_CONFIG, updatePrompt: false }));
+    expect(off.updatePrompt).toBe(false);
+    expect(renderTuiConfig({ ...DEFAULT_TUI_CONFIG, updatePrompt: undefined })).toContain('prompt = true');
   });
 });

@@ -63,7 +63,7 @@ import {
   type McpNoticeKind,
 } from './controllers/lifecycle-controller';
 import { InputController, type InputControllerHost } from './controllers/input-controller';
-import type { TuiConfig } from './config';
+import { loadTuiConfig, saveTuiConfig, type TuiConfig } from './config';
 import {
   getNoActiveSessionMessage,
 } from './constant/scream-tui';
@@ -103,7 +103,7 @@ import { SessionManager, type SessionsPrefetch } from './managers/session-manage
 import { DialogManager } from './managers/dialog-manager';
 import { refreshProviderBalance, supportsBalance } from './api-balance';
 import { ChoicePickerComponent } from './components/dialogs/choice-picker';
-import { isStreaming } from './utils/app-state';
+import { isBusy, isStreaming } from './utils/app-state';
 import { peekHostSession, wakeHost } from '#/host/control';
 import { startBackground } from '#/host/service';
 import { readLastSeen, writeLastSeen } from '#/host/activity';
@@ -244,6 +244,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   constructor(harness: ScreamHarness, startupInput: ScreamTUIStartupInput) {
+    this.updatePromptEnabled = startupInput.tuiConfig.updatePrompt !== false;
     this.harness = harness;
     const tuiOptions: ScreamTUIOptions = {
       initialAppState: createInitialAppState(startupInput),
@@ -447,9 +448,13 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // when the user explicitly asked for the session picker (-s): that flow
     // mounts its own editor replacement and must win.
     if (!this.state.appState.model && this.state.startupState !== 'picker') {
-      void this.showOnboardingCard(() => void this.maybeShowEmbeddingSetup());
+      void this.showOnboardingCard(() => void this.maybeShowEmbeddingSetup(() => {
+        this.maybeShowUpdatePrompt();
+      }));
     } else {
-      void this.maybeShowEmbeddingSetup();
+      void this.maybeShowEmbeddingSetup(() => {
+        this.maybeShowUpdatePrompt();
+      });
     }
     return shouldReplayHistory;
   }
@@ -1255,6 +1260,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   async fetchSessions(): Promise<void> {
     await this.sessionManager.fetchSessions();
   }
+  /** A newer version waiting to be offered by the startup card (see maybeShowUpdatePrompt). */
+  private pendingUpdateVersion: string | undefined;
+  private updatePromptEnabled = true;
+
   private async checkForUpdates(): Promise<void> {
     try {
       // The shell already fired a detached refresh; read whatever the cache
@@ -1266,6 +1275,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       const target = selectUpdateTarget(this.state.appState.version, cache.latest);
       if (target !== null) {
         this.setAppState({ hasNewVersion: true, latestVersion: target.version });
+        // Asked by the startup card chain (maybeShowUpdatePrompt) unless turned off.
+        if (this.updatePromptEnabled) this.pendingUpdateVersion = target.version;
       }
     } catch {
       /* silently ignore */
@@ -1362,7 +1373,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
    * engine in the background (local files only, no network); missing model →
    * surface a download card so /knowledge and /memory work on first try.
    */
-  private async maybeShowEmbeddingSetup(): Promise<void> {
+  private async maybeShowEmbeddingSetup(onDone?: () => void): Promise<void> {
     if (this.state.startupState === 'picker') return;
     try {
       await getKnowledgeStore();
@@ -1371,10 +1382,12 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
           // Warm-up is best-effort; the ingest/search gates surface errors
           // with full context when the user actually needs the model.
         });
+        onDone?.();
         return;
       }
     } catch {
       // Store/engine init failure — /knowledge's own flows surface it later.
+      onDone?.();
       return;
     }
     const card = new EmbeddingSetupCardComponent({
@@ -1382,6 +1395,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       onDownload: () => {
         void (async () => {
           this.restoreEditor();
+          onDone?.();
           const spinner = this.showProgressSpinner(t('kw.embedding_downloading'));
           let ok = false;
           let error: string | undefined;
@@ -1408,9 +1422,54 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       },
       onSkip: () => {
         this.restoreEditor();
+        onDone?.();
       },
     });
     this.mountEditorReplacement(card);
+  }
+
+  /**
+   * Last of the startup cards (after onboarding and the embedding setup, so
+   * they never stack): a newer version was found → ask 立即更新 / 暂不更新 /
+   * 永不提醒. Asked once per run, only while the editor is free; 永不提醒 is
+   * saved to tui.toml. The welcome panel shows the new version either way.
+   */
+  private maybeShowUpdatePrompt(): void {
+    const latest = this.pendingUpdateVersion;
+    if (latest === undefined) return;
+    const { state } = this;
+    if (isBusy(state.appState) || state.activeDialog !== null || !state.editorContainer.children.includes(state.editor)) return;
+    this.pendingUpdateVersion = undefined;
+    this.mountEditorReplacement(
+      new ChoicePickerComponent({
+        title: t('update.prompt_title', { latest, current: state.appState.version }),
+        hint: t('update.prompt_hint'),
+        colors: state.theme.colors,
+        options: [
+          { value: 'now', label: t('update.prompt_now') },
+          { value: 'later', label: t('update.prompt_later') },
+          { value: 'never', label: t('update.prompt_never'), description: t('update.prompt_never_desc') },
+        ],
+        onSelect: (value) => {
+          this.restoreEditor();
+          if (value === 'now') {
+            void import('./commands/update').then(({ handleUpdateCommand }) => handleUpdateCommand(this));
+          } else if (value === 'never') {
+            void loadTuiConfig()
+              .then((current) => saveTuiConfig({ ...current, updatePrompt: false }))
+              .then(() => {
+                this.showStatus(t('update.prompt_never_saved'));
+              })
+              .catch((error: unknown) => {
+                this.showError(String(error));
+              });
+          }
+        },
+        onCancel: () => {
+          this.restoreEditor();
+        },
+      }),
+    );
   }
 
   clearTranscriptAndRedraw(): void {

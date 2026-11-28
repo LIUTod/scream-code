@@ -380,6 +380,13 @@ export const zh: Record<string, string> = {
   'update.npm_install': '正在通过 npm 安装最新版本...',
   'update.install_label': '安装 scream-code',
   'update.done': '更新完成。请重启 Scream Code 以使用新版本。',
+  'update.prompt_title': '发现新版本 {latest}（当前 {current}）',
+  'update.prompt_hint': '↑↓ 选择 · Enter 确认 · Esc 关闭',
+  'update.prompt_now': '立即更新',
+  'update.prompt_later': '暂不更新',
+  'update.prompt_never': '永不提醒',
+  'update.prompt_never_desc': '以后不再弹出；欢迎区仍显示新版本，随时可用 /update',
+  'update.prompt_never_saved': '已关闭更新提醒，需要时输入 /update',
 
   // ─── MCP ──────────────────────
   'mcp.connecting': '⏳ 连接中',

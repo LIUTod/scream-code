@@ -381,6 +381,13 @@ export const en: Record<string, string> = {
   'update.npm_install': 'Installing latest version via npm...',
   'update.install_label': 'Install scream-code',
   'update.done': 'Update complete. Restart Scream Code to use the new version.',
+  'update.prompt_title': 'Version {latest} is available (you have {current})',
+  'update.prompt_hint': '↑↓ choose · Enter confirm · Esc close',
+  'update.prompt_now': 'Update now',
+  'update.prompt_later': 'Not now',
+  'update.prompt_never': "Don't remind me",
+  'update.prompt_never_desc': 'No more prompts; the welcome panel still shows the new version, and /update works any time',
+  'update.prompt_never_saved': 'Update prompts turned off; type /update when you want it',
 
   // ─── MCP ──────────────────────
   'mcp.connecting': '⏳ Connecting',
