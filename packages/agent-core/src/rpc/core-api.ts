@@ -432,6 +432,18 @@ export interface RemoveScreamProviderPayload {
 }
 export interface UndoHistoryPayload {
   readonly count: number;
+  /**
+   * `restore`: also put back the files the write tools changed in those turns
+   * (see FileHistory); `keep` (the default): undo the conversation alone.
+   */
+  readonly files?: 'restore' | 'keep' | undefined;
+}
+
+export interface UndoHistoryResult {
+  /** Files put back (rewritten, or deleted when those turns had created them). */
+  readonly restored: readonly string[];
+  /** Files left as they are: changed since by someone else, too large to have been kept, or a failed write. */
+  readonly skipped: ReadonlyArray<{ readonly path: string; readonly reason: 'changed' | 'too_large' | 'failed' }>;
 }
 
 export interface SideQuestionPayload {
@@ -521,7 +533,9 @@ export interface AgentAPI {
   setRlmMaxDepth: (payload: SetRlmMaxDepthPayload) => void;
   stopBackground: (payload: StopBackgroundPayload) => void;
   clearContext: (payload: EmptyPayload) => void;
-  undoHistory: (payload: UndoHistoryPayload) => void;
+  undoHistory: (payload: UndoHistoryPayload) => UndoHistoryResult;
+  /** The files the write tools changed in the turns an undo of `count` would remove, oldest first. */
+  previewUndoFiles: (payload: UndoHistoryPayload) => readonly string[];
   activateSkill: (payload: ActivateSkillPayload) => void;
   getBackgroundOutput: (payload: GetBackgroundOutputPayload) => string;
   getBackgroundOutputPath: (payload: GetBackgroundOutputPathPayload) => string | undefined;

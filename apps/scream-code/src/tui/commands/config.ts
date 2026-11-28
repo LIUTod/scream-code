@@ -3,7 +3,7 @@ import { parseRlmMaxDepthArg } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 
 import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
-import { ModelSelectorComponent, getThinkingLevels } from '../components/dialogs/model-selector';
+import { ModelSelectorComponent, getThinkingLevels, modelDisplayName } from '../components/dialogs/model-selector';
 import { PermissionSelectorComponent } from '../components/dialogs/permission-selector';
 import { SettingsSelectorComponent, type SettingsSelection } from '../components/dialogs/settings-selector';
 import { showSubagentModelBinder } from '../components/dialogs/subagent-model-binder';
@@ -616,6 +616,10 @@ export async function showModelPicker(
       onChangeThinking: (alias, level) => {
         void changeThinkingLevel(host, alias, level);
       },
+      fallbackValue: host.state.appState.modelTiers?.fallback,
+      onChangeFallback: (alias) => {
+        void changeFallbackModel(host, alias);
+      },
       onCancel: () => {
         host.restoreEditor();
         back?.();
@@ -623,6 +627,30 @@ export async function showModelPicker(
       breadcrumb: back === undefined ? undefined : t('settings.title'),
     }),
   );
+}
+
+/**
+ * Set or clear the fallback model (Tab in the model selector). It lives in
+ * `tui.toml` `[modelTiers] fallback` and reaches running sessions at once
+ * through the live model-tier bindings.
+ */
+async function changeFallbackModel(host: SlashCommandHost, alias: string | undefined): Promise<void> {
+  try {
+    const current = await loadTuiConfig();
+    const modelTiers = { ...current.modelTiers };
+    if (alias === undefined) delete modelTiers.fallback;
+    else modelTiers.fallback = alias;
+    await saveTuiConfig({ ...current, modelTiers });
+    host.setAppState({ modelTiers });
+    host.showStatus(
+      alias === undefined
+        ? t('model.fallback_cleared')
+        : t('model.fallback_set', { model: modelDisplayName(alias, host.state.appState.availableModels[alias]) }),
+      host.state.theme.colors.success,
+    );
+  } catch (error) {
+    host.showError(t('model.fallback_save_failed', { msg: error instanceof Error ? error.message : String(error) }));
+  }
 }
 
 /**

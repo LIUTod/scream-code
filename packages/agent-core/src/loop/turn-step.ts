@@ -32,6 +32,7 @@ import type {
   MediaProjectionState,
   RecordStepUsageResult,
   StructureRepairState,
+  FallbackModelState,
 } from './types';
 
 type ChatStreamingCallbacks = Pick<
@@ -84,6 +85,10 @@ export interface ExecuteLoopStepDeps {
   readonly mediaProjection?: MediaProjectionState | undefined;
   /** Turn-shared request-structure repair state (see `StructureRepairState`). */
   readonly structureRepair?: StructureRepairState | undefined;
+  /** See RunTurnInput.fallbackLlm. */
+  readonly fallbackLlm?: (() => LLM | undefined) | undefined;
+  /** Turn-shared fallback model state (see `FallbackModelState`). */
+  readonly fallbackModel?: FallbackModelState | undefined;
   /**
    * Crash-recovery draft sink: receives throttled full snapshots of the
    * in-flight stream (and an empty pair to clear once real parts land).
@@ -151,7 +156,21 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     recordUsage,
     mediaProjection,
     structureRepair,
+    fallbackLlm,
+    fallbackModel,
   } = deps;
+  // The fallback model, once a request of this turn handed over to it.
+  const stepLlm = (): LLM => fallbackModel?.llm ?? llm;
+  // Offered while the turn is still on the session model.
+  const fallback =
+    fallbackLlm === undefined || fallbackModel === undefined
+      ? undefined
+      : {
+          resolve: fallbackLlm,
+          onSwitch: (next: LLM) => {
+            fallbackModel.llm = next;
+          },
+        };
 
   if (hooks?.beforeStep !== undefined) {
     const beforeStep = await hooks.beforeStep({
@@ -235,7 +254,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   let response: LLMChatResponse;
   try {
     response = await chatWithRetry({
-      llm,
+      llm: stepLlm(),
       params: chatParams,
       dispatchEvent,
       turnId,
@@ -244,6 +263,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       maxAttempts: maxRetryAttempts,
       outageWaitMs,
       log,
+      fallback: fallbackModel?.llm === undefined ? fallback : undefined,
     });
   } catch (error) {
     // Request recovery: when the provider rejects the request because of
@@ -256,7 +276,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     effectiveMessages = projectMessages(messages);
     log?.warn(recovery);
     response = await chatWithRetry({
-      llm,
+      llm: stepLlm(),
       params: { ...chatParams, messages: effectiveMessages },
       dispatchEvent,
       turnId,
@@ -265,6 +285,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       maxAttempts: maxRetryAttempts,
       outageWaitMs,
       log,
+      fallback: fallbackModel?.llm === undefined ? fallback : undefined,
     });
   }
   const usage = response.usage;
@@ -329,7 +350,8 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
         usage,
         stopReason: effectiveStopReason,
         signal,
-        llm,
+        // The model that actually answered this step (the fallback one once it took over).
+        llm: stepLlm(),
         finalStep,
       });
       stopTurnAfterStep = stopTurnAfterStep || afterStep?.stopTurn === true;

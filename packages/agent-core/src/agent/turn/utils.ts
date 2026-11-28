@@ -72,6 +72,7 @@ export function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | und
         errorMessage: event.errorMessage,
         statusCode: event.statusCode,
         errorCode: event.errorCode,
+        ...(event.fallbackModel === undefined ? {} : { fallbackModel: event.fallbackModel }),
       };
     case 'content.part':
       return undefined;

@@ -421,6 +421,24 @@ describe('SessionEventHandler', () => {
     expect(host.setAppState).toHaveBeenCalledWith({ reconnectAttempt: 2, sessionApiCalls: 1 });
   });
 
+  it('announces the switch to the fallback model by its display name', () => {
+    const host = createMockHost();
+    host.state.appState.availableModels = { backup: { model: 'glm-5.4', displayName: 'GLM 5.4' } as never };
+    const showFallbackNotice = vi.fn();
+    (host as unknown as { showFallbackNotice: (text: string) => void }).showFallbackNotice = showFallbackNotice;
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      { ...baseEvent('turn.step.retrying'), turnId: 1, nextAttempt: 1, fallbackModel: 'backup' } as unknown as Event,
+      vi.fn(),
+    );
+    expect(showFallbackNotice).toHaveBeenCalledWith('主模型不可用，已切到 GLM 5.4');
+
+    showFallbackNotice.mockClear();
+    handler.handleEvent({ ...baseEvent('turn.step.retrying'), turnId: 1, nextAttempt: 2 } as unknown as Event, vi.fn());
+    expect(showFallbackNotice).not.toHaveBeenCalled();
+  });
+
   it('settles approvals still waiting for a row when the step completes', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);

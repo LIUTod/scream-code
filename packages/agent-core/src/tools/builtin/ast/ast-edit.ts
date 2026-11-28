@@ -18,7 +18,7 @@ import {
   formatDiagnosticsNotice,
   reconcileEditReminders,
 } from '../file/lsp-diagnostics';
-import { withFileMutationLock } from '../file/mutation-queue';
+import { type FileMutationRecorder, withFileMutationLock } from '../file/mutation-queue';
 import AST_EDIT_DESCRIPTION from './ast-edit.md';
 import {
   expandRewrite,
@@ -79,6 +79,8 @@ export class AstEditTool implements BuiltinTool<AstEditInput> {
      * the outside-change check does not report it back as someone else's.
      */
     private readonly editSnapshots?: EditSnapshotStore,
+    /** Keeps the original of every file it changes, for undoing a turn's files (see FileHistory). */
+    private readonly fileHistory?: FileMutationRecorder,
   ) {}
 
   async resolveExecution(args: AstEditInput): Promise<ToolExecution> {
@@ -243,7 +245,7 @@ export class AstEditTool implements BuiltinTool<AstEditInput> {
         recordedAt: 'edit',
       });
       return { ok: true as const, matchCount: fresh.matchCount };
-    });
+    }, this.fileHistory);
 
     if (!applied.ok) return { output: applied.output, isError: applied.isError };
 

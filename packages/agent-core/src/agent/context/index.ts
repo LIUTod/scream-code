@@ -261,6 +261,31 @@ export class ContextMemory {
   }
 
   /**
+   * Ids of the real user prompts an {@link undo} of `count` would remove,
+   * newest first. Walks the history the same way: injections are passed over
+   * and a compaction summary ends the walk, so fewer than `count` come back
+   * when the history before it is out of reach.
+   */
+  latestRealPromptId(): string | undefined {
+    return this.promptIdsToUndo(1)[0];
+  }
+
+  promptIdsToUndo(count: number): string[] {
+    const ids: string[] = [];
+    if (count <= 0) return ids;
+    for (let i = this._history.length - 1; i >= 0; i--) {
+      const message = this._history[i];
+      if (message === undefined || message.origin?.kind === 'injection') continue;
+      if (message.origin?.kind === 'compaction_summary') break;
+      if (isRealUserPrompt(message)) {
+        if (message.id !== undefined) ids.push(message.id);
+        if (ids.length >= count) break;
+      }
+    }
+    return ids;
+  }
+
+  /**
    * Remove the last N user-prompt turns from the conversation history.
    * This is the core of the `/undo` command: it walks the history backward,
    * removes all messages belonging to each undone turn, and adjusts token

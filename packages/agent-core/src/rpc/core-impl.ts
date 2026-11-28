@@ -182,6 +182,7 @@ export interface ScreamCoreOptions {
     task?: string;
     judge?: string;
     housekeeping?: string;
+    fallback?: string;
   };
 }
 
@@ -271,6 +272,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     task?: string;
     judge?: string;
     housekeeping?: string;
+    fallback?: string;
   };
   private readonly sessionStore: SessionStore;
   /** Tracks/reaps LSP child processes for every session in this core. */
@@ -335,7 +337,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
    */
   setModelTierBindings(
     getter:
-      | (() => { read?: string; task?: string; judge?: string; housekeeping?: string })
+      | (() => { read?: string; task?: string; judge?: string; housekeeping?: string; fallback?: string })
       | undefined,
   ): void {
     this.modelTierBindings = getter;
@@ -1032,6 +1034,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   undoHistory({ sessionId, ...payload }: SessionAgentPayload<UndoHistoryPayload>) {
     return this.sessionApi(sessionId).undoHistory(payload);
+  }
+
+  previewUndoFiles({ sessionId, ...payload }: SessionAgentPayload<UndoHistoryPayload>) {
+    return this.sessionApi(sessionId).previewUndoFiles(payload);
   }
 
   activateSkill({

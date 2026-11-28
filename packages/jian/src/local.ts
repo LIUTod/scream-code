@@ -11,6 +11,7 @@ import {
   readdir,
   readFile,
   rename,
+  rm,
   stat,
   realpath as fsRealpath,
   writeFile,
@@ -1185,6 +1186,18 @@ export class LocalJian implements Jian {
     await writeFile(tmpPath, data, encoding);
     await rename(tmpPath, resolved);
     return data.length;
+  }
+
+  async removeFile(path: string): Promise<void> {
+    const resolved = this._resolvePath(path);
+    try {
+      await rm(resolved, { force: true, recursive: false });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      // `rm` without `recursive` refuses a directory; a missing file was forced.
+      if (code === 'ENOENT') return;
+      throw error;
+    }
   }
 
   async mkdir(path: string, options?: { parents?: boolean; existOk?: boolean }): Promise<void> {

@@ -21,12 +21,47 @@ import * as path from 'node:path';
 
 const tails = new Map<string, Promise<void>>();
 
-export function withFileMutationLock<T>(filePath: string, task: () => Promise<T>): Promise<T> {
+/**
+ * Sees every mutation of a file by the structured write tools, inside the
+ * path's lock: `beforeMutation` before the write (so the original content can
+ * be kept for an undo), `afterMutation` after it, whether it succeeded or not.
+ * A recorder never fails a write: its errors are swallowed.
+ */
+export interface FileMutationRecorder {
+  beforeMutation(filePath: string): Promise<void>;
+  afterMutation(filePath: string): Promise<void>;
+}
+
+async function quietly(step: (() => Promise<void>) | undefined): Promise<void> {
+  if (step === undefined) return;
+  try {
+    await step();
+  } catch {
+    // The history is a convenience; the write itself must go on.
+  }
+}
+
+export function withFileMutationLock<T>(
+  filePath: string,
+  task: () => Promise<T>,
+  recorder?: FileMutationRecorder,
+): Promise<T> {
   const key = path.resolve(filePath);
   const previous = tails.get(key) ?? Promise.resolve();
+  const recorded =
+    recorder === undefined
+      ? task
+      : async (): Promise<T> => {
+          await quietly(() => recorder.beforeMutation(key));
+          try {
+            return await task();
+          } finally {
+            await quietly(() => recorder.afterMutation(key));
+          }
+        };
   // Chain behind the previous mutation whether it succeeded or failed: a failed
   // write must not block every later write to the same file.
-  const result = previous.then(task, task);
+  const result = previous.then(recorded, recorded);
   const tail: Promise<void> = result.then(
     () => undefined,
     () => undefined,

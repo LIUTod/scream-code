@@ -175,6 +175,13 @@ autoStart = true
     });
   });
 
+  it('keeps the fallback model in the same [modelTiers] table', () => {
+    const rendered = renderTuiConfig({ ...DEFAULT_TUI_CONFIG, modelTiers: { housekeeping: 'mini', fallback: 'backup' } });
+    expect(rendered).toContain('fallback = "backup"');
+    expect(parseTuiConfig(rendered).modelTiers).toEqual({ housekeeping: 'mini', fallback: 'backup' });
+    expect(parseTuiConfig('[modelTiers]\nfallback = "  "\n').modelTiers).toEqual({});
+  });
+
   it('drops empty and whitespace-only tier aliases when normalizing', () => {
     const parsed = parseTuiConfig(`
 [modelTiers]

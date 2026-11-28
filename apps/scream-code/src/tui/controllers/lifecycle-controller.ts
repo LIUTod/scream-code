@@ -130,7 +130,9 @@ export interface LifecycleControllerHost {
  * problem needs the person, a collaboration request can wait a moment, and
  * connect chatter yields to everything.
  */
-const NOTICE_PRIORITY = { reminder: 1, mcpFailed: 2, mcpAuth: 2.5, collab: 3, mcpProgress: 4 } as const;
+const NOTICE_PRIORITY = { reminder: 1, fallback: 1.5, mcpFailed: 2, mcpAuth: 2.5, collab: 3, mcpProgress: 4 } as const;
+/** How long the "switched to the fallback model" notice stays. */
+const FALLBACK_NOTICE_TTL_MS = 15_000;
 const COLLAB_NOTICE_TTL_MS = 8_000;
 /** Longer than the collaboration notice: a cron fire is time-sensitive. */
 const REMINDER_NOTICE_TTL_MS = 10_000;
@@ -977,6 +979,22 @@ export class LifecycleController {
       color: tone === 'missed' ? colors.warning : colors.accent,
       priority: NOTICE_PRIORITY.reminder,
       ttlMs: REMINDER_NOTICE_TTL_MS,
+    });
+    this.host.state.ui?.requestRender();
+  }
+
+  /**
+   * The turn handed over to the fallback model because the main model keeps
+   * failing. Right after a fired reminder: it explains why replies now come
+   * from another model.
+   */
+  showFallbackNotice(text: string): void {
+    this.notices.post({
+      key: 'fallback',
+      text,
+      color: this.host.state.theme.colors.warning,
+      priority: NOTICE_PRIORITY.fallback,
+      ttlMs: FALLBACK_NOTICE_TTL_MS,
     });
     this.host.state.ui?.requestRender();
   }

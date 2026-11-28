@@ -7,9 +7,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  FETCH_INLINE_CHARS,
   FetchURLInputSchema,
   FetchURLTool,
   HttpFetchError,
+  PAGE_ANSWER_MIN_CHARS,
   type UrlFetcher,
 } from '../../src/tools/builtin/web/fetch-url';
 import { toolContentString } from './fixtures/fake-jian';
@@ -101,8 +103,10 @@ describe('FetchURLTool', () => {
     expect(toolContentString(result)).toContain('empty');
   });
 
-  it('truncates oversized fetched content through the shared builder', async () => {
-    const tool = new FetchURLTool(fakeFetcher('x'.repeat(60_000)));
+  it('truncates oversized fetched content through the shared builder when the page cannot be saved', async () => {
+    const tool = new FetchURLTool(fakeFetcher('x'.repeat(60_000)), {
+      persist: vi.fn().mockRejectedValue(new Error('read-only temp dir')),
+    });
     const result = await executeTool(tool, {
       turnId: 't1',
       toolCallId: 'c-large',
@@ -257,5 +261,73 @@ describe('FetchURLTool', () => {
     // "full response body" phrasing).
     const message = (result as { message?: string }).message ?? '';
     expect(message).toContain('full response body');
+  });
+});
+
+describe('FetchURLTool — questions and long pages', () => {
+  const run = (tool: FetchURLTool, args: { url: string; question?: string }) =>
+    executeTool(tool, { turnId: 't1', toolCallId: 'c1', args, signal });
+  const longPage = 'p'.repeat(PAGE_ANSWER_MIN_CHARS + 10);
+
+  it('answers a question about a long page with the helper model, and saves the page', async () => {
+    const answer = vi.fn().mockResolvedValue('Version 4.2 adds streaming.');
+    const persist = vi.fn().mockResolvedValue('/tmp/scream-fetch-output-x.txt');
+    const tool = new FetchURLTool(fakeFetcher(longPage), { answer, persist });
+    const result = await run(tool, { url: 'https://example.com/changelog', question: 'What does 4.2 add?' });
+
+    expect(result.isError).toBe(false);
+    const text = toolContentString(result);
+    expect(text.startsWith('Version 4.2 adds streaming.')).toBe(true);
+    expect(text).toContain('/tmp/scream-fetch-output-x.txt');
+    expect(text).not.toContain('pppp');
+    expect(answer).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://example.com/changelog', question: 'What does 4.2 add?', content: longPage }),
+    );
+    expect(persist).toHaveBeenCalledWith(longPage);
+  });
+
+  it('returns a short page as it is even with a question', async () => {
+    const answer = vi.fn();
+    const tool = new FetchURLTool(fakeFetcher('short page'), { answer });
+    const result = await run(tool, { url: 'https://example.com', question: 'anything?' });
+    expect(toolContentString(result)).toBe('short page');
+    expect(answer).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the page text when the helper fails or there is none', async () => {
+    for (const answer of [vi.fn().mockRejectedValue(new Error('helper down')), undefined]) {
+      const tool = new FetchURLTool(fakeFetcher(longPage), { answer, persist: vi.fn() });
+      const result = await run(tool, { url: 'https://example.com', question: 'what?' });
+      expect(result.isError).toBe(false);
+      expect(toolContentString(result).startsWith('pppp')).toBe(true);
+    }
+  });
+
+  it('saves a long page without a question and returns its start with the path', async () => {
+    const page = 'q'.repeat(FETCH_INLINE_CHARS + 5_000);
+    const persist = vi.fn().mockResolvedValue('/tmp/scream-fetch-output-y.txt');
+    const tool = new FetchURLTool(fakeFetcher(page), { persist });
+    const result = await run(tool, { url: 'https://example.com' });
+    const text = toolContentString(result);
+    expect(text.startsWith('q'.repeat(FETCH_INLINE_CHARS))).toBe(true);
+    expect(text).not.toContain('q'.repeat(FETCH_INLINE_CHARS + 1));
+    expect(text).toContain(`${String(page.length)} characters`);
+    expect(text).toContain('/tmp/scream-fetch-output-y.txt');
+    expect(persist).toHaveBeenCalledWith(page);
+  });
+
+  it('keeps the old cut when the page cannot be saved', async () => {
+    const page = 'r'.repeat(FETCH_INLINE_CHARS + 5_000);
+    const tool = new FetchURLTool(fakeFetcher(page), { persist: vi.fn().mockRejectedValue(new Error('disk full')) });
+    const result = await run(tool, { url: 'https://example.com' });
+    expect(result.isError).toBe(false);
+    expect(toolContentString(result)).not.toContain('saved to');
+  });
+
+  it('declares the optional question parameter', () => {
+    const tool = new FetchURLTool(fakeFetcher());
+    expect(FetchURLInputSchema.safeParse({ url: 'https://example.com', question: 'q' }).success).toBe(true);
+    expect((tool.parameters as { properties: Record<string, unknown> }).properties).toHaveProperty('question');
+    expect((tool.parameters as { required?: string[] }).required ?? []).not.toContain('question');
   });
 });

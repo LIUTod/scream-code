@@ -6,7 +6,7 @@ import {
   calculateRateLimitBackoffMs,
 } from '@scream-code/ltod';
 
-import { isScreamError, isTransientFailure, toScreamErrorPayload } from '#/errors';
+import { ErrorCodes, isScreamError, isTransientFailure, toScreamErrorPayload } from '#/errors';
 import type { Logger } from '#/logging/types';
 
 import { abortable } from '../utils/abort';
@@ -50,6 +50,21 @@ const RETRY_FACTOR = 2;
 // Up to 25% jitter on top of the exponential base to avoid herd retries.
 const JITTER_FACTOR = 0.25;
 
+/**
+ * Consecutive transient failures (overload, 5xx, network, timeout) of the
+ * session model after which a configured fallback model takes over, instead
+ * of spending minutes of backoff on a provider that is down.
+ */
+export const FALLBACK_AFTER_TRANSIENT_FAILURES = 3;
+
+/** The fallback model of a request: resolved only when it is needed. */
+export interface ChatFallback {
+  /** The fallback model's LLM, or undefined when none is set or it does not resolve. */
+  readonly resolve: () => LLM | undefined;
+  /** Called once when the request switches, so the rest of the turn stays on it. */
+  readonly onSwitch: (llm: LLM) => void;
+}
+
 export interface ChatWithRetryInput {
   readonly llm: LLM;
   readonly params: LLMChatParams;
@@ -76,6 +91,13 @@ export interface ChatWithRetryInput {
   /** Clock, for tests. */
   readonly now?: (() => number) | undefined;
   readonly log?: Logger | undefined;
+  /**
+   * A model to switch to when the session model keeps failing: after
+   * {@link FALLBACK_AFTER_TRANSIENT_FAILURES} transient failures in a row,
+   * on an authentication error or a missing model, on a quota no other key
+   * can cover, or once the retry budget is spent. Tried once per request.
+   */
+  readonly fallback?: ChatFallback | undefined;
 }
 
 /** The first wait once the budget is spent, doubled each time up to {@link OUTAGE_MAX_DELAY_MS}. */
@@ -100,8 +122,42 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
     try {
       return await input.llm.chat(paramsForAttempt(input, 1, effectiveMaxAttempts));
     } catch (error) {
-      logRequestFailure(input, error, 1, effectiveMaxAttempts);
-      throw error;
+      logRequestFailure(input, input.llm, error, 1, effectiveMaxAttempts);
+      // No retry budget, but a fallback model still stands in once for a
+      // model that is down, out of quota or unusable.
+      const fallback = input.fallback;
+      const worthSwitching =
+        fallback !== undefined &&
+        !input.params.signal.aborted &&
+        !isAbortError(error) &&
+        !isContextOverflowError(error) &&
+        (needsAnotherModel(error) || isQuotaExhaustedError(error) || isTransientFailure(toScreamErrorPayload(error)));
+      const next = worthSwitching ? fallback.resolve() : undefined;
+      if (fallback === undefined || next === undefined || next.modelName === input.llm.modelName) throw error;
+      input.log?.warn('llm request: switching to the fallback model', {
+        from: input.llm.modelName,
+        to: next.modelName,
+        reason: 'no retry budget',
+      });
+      fallback.onSwitch(next);
+      input.dispatchEvent({
+        type: 'step.retrying',
+        turnId: input.turnId,
+        step: input.currentStep,
+        stepUuid: input.stepUuid,
+        failedAttempt: 1,
+        nextAttempt: 1,
+        maxAttempts: effectiveMaxAttempts,
+        delayMs: 0,
+        fallbackModel: next.modelName,
+        ...retryErrorFields(error),
+      });
+      try {
+        return await next.chat(paramsForAttempt(input, 1, effectiveMaxAttempts));
+      } catch (fallbackError) {
+        logRequestFailure(input, next, fallbackError, 1, effectiveMaxAttempts);
+        throw fallbackError;
+      }
     }
   }
 
@@ -115,10 +171,56 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
   const now = input.now ?? Date.now;
   let firstFailureAt: number | undefined;
   let outageWaits = 0;
+  // The model this request is sent to: the session model, or the fallback
+  // once it has taken over.
+  let llm = input.llm;
+  let fallbackTried = false;
+  let transientStreak = 0;
 
   for (let attempt = 1; ; attempt += 1) {
+    /**
+     * Hand the request to the fallback model, once. Returns false when there is
+     * none (or it is the same model), so the caller goes on as before. On a
+     * switch the budgets start over for the new model and the next attempt is 1.
+     */
+    // oxlint-disable-next-line no-loop-func -- per-attempt helper that resets this request's retry state on a switch.
+    const switchToFallback = (error: unknown, reason: string): boolean => {
+      // A cancelled request is not a failing model.
+      if (fallbackTried || input.fallback === undefined || input.params.signal.aborted || isAbortError(error)) return false;
+      fallbackTried = true;
+      const next = input.fallback.resolve();
+      if (next === undefined || next.modelName === llm.modelName) return false;
+      input.params.signal.throwIfAborted();
+      logRequestFailure(input, llm, error, attempt, maxAttempts);
+      input.log?.warn('llm request: switching to the fallback model', {
+        from: llm.modelName,
+        to: next.modelName,
+        reason,
+      });
+      llm = next;
+      input.fallback.onSwitch(next);
+      input.dispatchEvent({
+        type: 'step.retrying',
+        turnId: input.turnId,
+        step: input.currentStep,
+        stepUuid: input.stepUuid,
+        failedAttempt: attempt,
+        nextAttempt: 1,
+        maxAttempts,
+        delayMs: 0,
+        fallbackModel: next.modelName,
+        ...retryErrorFields(error),
+      });
+      rotations = 0;
+      firstFailureAt = undefined;
+      outageWaits = 0;
+      transientStreak = 0;
+      attempt = 0;
+      return true;
+    };
+
     try {
-      return await input.llm.chat(paramsForAttempt(input, attempt, maxAttempts));
+      return await llm.chat(paramsForAttempt(input, attempt, maxAttempts));
     } catch (error) {
       // Overflow errors can't be fixed by retrying — they need compaction.
       // Fail fast so the turn-level handler can trigger emergency compaction
@@ -126,7 +228,7 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
       // recognized: the ltod error class and the ScreamError(CONTEXT_OVERFLOW)
       // wrap some non-ltod provider adapters produce.
       if (isContextOverflowError(error)) {
-        logRequestFailure(input, error, attempt, maxAttempts);
+        logRequestFailure(input, llm, error, attempt, maxAttempts);
         throw error;
       }
 
@@ -137,8 +239,11 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
       // exhausted account still fails after a few short 30s backoffs.
       const attemptLimit = computeAttemptLimit(error, maxAttempts);
 
-      if (!input.llm.isRetryableError(error)) {
-        logRequestFailure(input, error, attempt, attemptLimit);
+      if (llm.isRetryableError === undefined || !llm.isRetryableError(error)) {
+        // A bad key or a model that does not exist fails the same way on every
+        // retry; another model may well work.
+        if (needsAnotherModel(error) && switchToFallback(error, 'unusable model')) continue;
+        logRequestFailure(input, llm, error, attempt, attemptLimit);
         throw error;
       }
 
@@ -150,7 +255,7 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
       if (
         isQuotaExhaustedError(error) &&
         rotations < maxRotations &&
-        input.llm.rotateAuth?.() === true
+        llm.rotateAuth?.() === true
       ) {
         rotations += 1;
         input.params.signal.throwIfAborted();
@@ -170,9 +275,17 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
         attempt -= 1;
         continue;
       }
+      // A quota no other key covers: the account is out, for this model at least.
+      if (isQuotaExhaustedError(error) && switchToFallback(error, 'quota exhausted')) continue;
+      // A provider that keeps failing is likely down for a while.
+      transientStreak = isTransientFailure(toScreamErrorPayload(error)) ? transientStreak + 1 : 0;
+      if (transientStreak >= FALLBACK_AFTER_TRANSIENT_FAILURES && switchToFallback(error, 'repeated failures')) {
+        continue;
+      }
 
       firstFailureAt ??= now();
       if (attempt >= attemptLimit) {
+        if (switchToFallback(error, 'retry budget spent')) continue;
         const outageUntil =
           input.outageWaitMs === undefined || input.outageWaitMs <= 0 ? undefined : firstFailureAt + input.outageWaitMs;
         if (outageUntil !== undefined && waitsOutOutage(error) && now() < outageUntil) {
@@ -205,7 +318,7 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
           await sleepForRetry(delayMs, input.params.signal);
           continue;
         }
-        logRequestFailure(input, error, attempt, attemptLimit);
+        logRequestFailure(input, llm, error, attempt, attemptLimit);
         throw error;
       }
 
@@ -266,8 +379,16 @@ function readRetryAfterMs(error: unknown): number | null {
   return typeof value === 'number' && value > 0 ? value : null;
 }
 
+/** An error no retry of the same model can fix, but another model might: a rejected key, a model that is gone. */
+function needsAnotherModel(error: unknown): boolean {
+  const payload = toScreamErrorPayload(error);
+  if (payload.code === ErrorCodes.PROVIDER_AUTH_ERROR) return true;
+  return payload.code === ErrorCodes.PROVIDER_API_ERROR && payload.details?.['statusCode'] === 404;
+}
+
 function logRequestFailure(
   input: ChatWithRetryInput,
+  llm: LLM,
   error: unknown,
   attempt: number,
   maxAttempts: number,
@@ -276,7 +397,7 @@ function logRequestFailure(
   input.log?.warn('llm request failed', {
     turnStep: `${input.turnId}.${String(input.currentStep)}`,
     attempt: `${String(attempt)}/${String(maxAttempts)}`,
-    model: input.llm.modelName,
+    model: llm.modelName,
     ...retryErrorFields(error),
   });
 }

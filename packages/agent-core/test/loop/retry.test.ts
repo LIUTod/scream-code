@@ -592,3 +592,156 @@ describe('chatWithRetry: waiting out an outage (unattended work)', () => {
     await expect(promise).rejects.toThrow();
   });
 });
+
+describe('chatWithRetry: fallback model', () => {
+  function scripted(name: string, failures: Array<() => Error>): { llm: LLM; calls: () => number } {
+    let calls = 0;
+    return {
+      calls: () => calls,
+      llm: {
+        systemPrompt: '',
+        modelName: name,
+        isRetryableError: (e) => isRetryableGenerateError(e),
+        async chat(): Promise<LLMChatResponse> {
+          calls += 1;
+          const failure = failures[calls - 1];
+          if (failure !== undefined) throw failure();
+          return okResponse();
+        },
+      },
+    };
+  }
+  const forever = (error: () => Error): Array<() => Error> => Array.from({ length: 50 }, () => error);
+
+  async function run(
+    main: LLM,
+    fallback: LLM | undefined,
+    extra: Partial<Parameters<typeof chatWithRetry>[0]> = {},
+  ): Promise<{ result: Promise<LLMChatResponse>; events: LoopStepRetryingEvent[]; switched: LLM[] }> {
+    const events: LoopStepRetryingEvent[] = [];
+    const switched: LLM[] = [];
+    const result = chatWithRetry({
+      ...makeInput(main, new AbortController().signal),
+      dispatchEvent: (async (event: LoopEvent) => {
+        if (event.type === 'step.retrying') events.push(event);
+      }) as LoopEventDispatcher,
+      fallback: { resolve: () => fallback, onSwitch: (llm) => switched.push(llm) },
+      ...extra,
+    });
+    return { result, events, switched };
+  }
+
+  it('hands over after three transient failures in a row instead of minutes of backoff', async () => {
+    vi.useFakeTimers();
+    try {
+      const main = scripted('main', forever(() => new APIStatusError(503, 'overloaded')));
+      const backup = scripted('backup', []);
+      const { result, events, switched } = await run(main.llm, backup.llm);
+      await vi.runAllTimersAsync();
+      await expect(result).resolves.toEqual(okResponse());
+      expect(main.calls()).toBe(3);
+      expect(backup.calls()).toBe(1);
+      expect(switched).toEqual([backup.llm]);
+      const handover = events.find((event) => event.fallbackModel !== undefined);
+      expect(handover).toMatchObject({ fallbackModel: 'backup', nextAttempt: 1, delayMs: 0, failedAttempt: 3 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('switches at once on a rejected key or a missing model, but not on a request the provider refuses', async () => {
+    for (const status of [401, 404]) {
+      const main = scripted('main', forever(() => new APIStatusError(status, 'nope')));
+      const backup = scripted('backup', []);
+      const { result } = await run(main.llm, backup.llm);
+      await expect(result, String(status)).resolves.toEqual(okResponse());
+      expect(main.calls(), String(status)).toBe(1);
+    }
+    const bad = scripted('main', forever(() => new APIStatusError(400, 'bad request')));
+    const backup = scripted('backup', []);
+    const { result, switched } = await run(bad.llm, backup.llm);
+    await expect(result).rejects.toBeInstanceOf(APIStatusError);
+    expect(switched).toEqual([]);
+    expect(backup.calls()).toBe(0);
+  });
+
+  it('switches on a quota no other key covers, before any quota backoff', async () => {
+    const main = scripted(
+      'main',
+      forever(() => new APIProviderRateLimitError('Allocated quota exceeded', null, 'QUOTA_EXHAUSTED', 1)),
+    );
+    const backup = scripted('backup', []);
+    const { result } = await run(main.llm, backup.llm);
+    await expect(result).resolves.toEqual(okResponse());
+    expect(main.calls()).toBe(1);
+  });
+
+  it('behaves as before when no fallback is set, or the fallback is the same model', async () => {
+    for (const fallback of [undefined, scripted('main', []).llm]) {
+      const main = scripted('main', forever(() => new APIStatusError(401, 'Invalid API key')));
+      const { result, switched, events } = await run(main.llm, fallback);
+      await expect(result).rejects.toBeInstanceOf(APIStatusError);
+      expect(main.calls()).toBe(1);
+      expect(switched).toEqual([]);
+      expect(events.some((event) => event.fallbackModel !== undefined)).toBe(false);
+    }
+  });
+
+  it('switches once: a fallback that fails too ends the request with its error', async () => {
+    const main = scripted('main', forever(() => new APIStatusError(401, 'Invalid API key')));
+    const backup = scripted('backup', forever(() => new APIStatusError(403, 'forbidden')));
+    const { result, switched } = await run(main.llm, backup.llm);
+    await expect(result).rejects.toMatchObject({ statusCode: 403 });
+    expect(switched).toHaveLength(1);
+    expect(main.calls()).toBe(1);
+    expect(backup.calls()).toBe(1);
+  });
+
+  it('never switches for a cancelled request', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const main = scripted('main', forever(() => new APIConnectionError('terminated')));
+    const backup = scripted('backup', []);
+    const switched: LLM[] = [];
+    await expect(
+      chatWithRetry({
+        ...makeInput(main.llm, ac.signal),
+        fallback: { resolve: () => backup.llm, onSwitch: (llm) => switched.push(llm) },
+      }),
+    ).rejects.toBeDefined();
+    expect(switched).toEqual([]);
+    expect(backup.calls()).toBe(0);
+  });
+});
+
+describe('chatWithRetry: fallback model without a retry budget', () => {
+  it('still switches once when the budget is a single attempt', async () => {
+    const main: LLM = {
+      systemPrompt: '',
+      modelName: 'main',
+      isRetryableError: (e) => isRetryableGenerateError(e),
+      async chat() {
+        throw new APIStatusError(503, 'overloaded');
+      },
+    };
+    let backupCalls = 0;
+    const backup: LLM = {
+      systemPrompt: '',
+      modelName: 'backup',
+      async chat() {
+        backupCalls += 1;
+        return okResponse();
+      },
+    };
+    const switched: LLM[] = [];
+    await expect(
+      chatWithRetry({
+        ...makeInput(main, new AbortController().signal),
+        maxAttempts: 1,
+        fallback: { resolve: () => backup, onSwitch: (llm) => switched.push(llm) },
+      }),
+    ).resolves.toEqual(okResponse());
+    expect(backupCalls).toBe(1);
+    expect(switched).toEqual([backup]);
+  });
+});

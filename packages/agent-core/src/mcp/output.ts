@@ -15,11 +15,16 @@
  *  4. Collapse a single-text-part result to a plain string output; otherwise
  *     emit the `ContentPart[]` as-is.
  *
- * `mcpResultToExecutableOutput` is the single entry point; the per-step
- * helpers stay private so callers cannot bypass the limits.
+ * `mcpResultToModelOutput` is the entry point the tool layer uses: a result
+ * whose text is too long for the context is saved to a file first and the
+ * model gets a preview and the path (see {@link MCP_INLINE_TEXT_CHARS}).
+ * `mcpResultToExecutableOutput` is the synchronous pipeline under it; the
+ * per-step helpers stay private so callers cannot bypass the limits.
  */
 
 import type { ContentPart } from '@scream-code/ltod';
+
+import { persistToolOutput, previewOf, type PersistOutput } from '../tools/support/persist-output';
 
 import type { MCPContentBlock, MCPToolResult } from './types';
 
@@ -31,6 +36,60 @@ export const MCP_MAX_OUTPUT_CHARS = 100_000;
 const MCP_OUTPUT_TRUNCATED_TEXT = `\n\n[Output truncated: exceeded ${String(
   MCP_MAX_OUTPUT_CHARS,
 )} character limit. Use pagination or more specific queries to get remaining content.]`;
+
+/**
+ * Text longer than this (all text parts together) is not put in the context:
+ * the whole output is saved to a file and the model gets the first
+ * {@link MCP_PREVIEW_CHARS} characters, the size and the path, and reads the
+ * rest with the Read tool when it needs it. Nothing is lost, and one chatty
+ * call no longer takes tens of thousands of tokens. The 100K cut above only
+ * applies when the file cannot be written.
+ */
+export const MCP_INLINE_TEXT_CHARS = 20_000;
+export const MCP_PREVIEW_CHARS = 2_000;
+
+const persistToTempFile: PersistOutput = (text) => persistToolOutput('mcp', text);
+
+/**
+ * The tool layer's entry point: {@link mcpResultToExecutableOutput}, after an
+ * oversized text output has been saved to a file and replaced by a preview,
+ * its size and the path. Media parts are kept as they are (they have their
+ * own per-part cap).
+ */
+export async function mcpResultToModelOutput(
+  result: MCPToolResult,
+  qualifiedToolName: string,
+  persist: PersistOutput = persistToTempFile,
+): Promise<{ output: string | ContentPart[]; isError: boolean }> {
+  const texts: string[] = [];
+  const others: MCPContentBlock[] = [];
+  for (const block of result.content) {
+    const part = convertMCPContentBlock(block);
+    if (part?.type === 'text') texts.push(part.text);
+    else if (part !== null) others.push(block);
+  }
+  const chars = texts.reduce((sum, text) => sum + text.length, 0);
+  if (chars <= MCP_INLINE_TEXT_CHARS) return mcpResultToExecutableOutput(result, qualifiedToolName);
+
+  const full = texts.join('\n\n');
+  let path: string | undefined;
+  try {
+    path = await persist(full);
+  } catch {
+    path = undefined;
+  }
+  if (path === undefined) return mcpResultToExecutableOutput(result, qualifiedToolName);
+
+  const lines = full.split('\n').length;
+  const notice =
+    `\n\n[Output too long to show in full: ${String(full.length)} characters, ${String(lines)} lines. ` +
+    `The whole output is saved to ${path} — read it with the Read tool (line_offset / n_lines for a part) ` +
+    `instead of calling this tool again.]`;
+  return mcpResultToExecutableOutput(
+    { ...result, content: [{ type: 'text', text: previewOf(full, MCP_PREVIEW_CHARS) + notice }, ...others] },
+    qualifiedToolName,
+  );
+}
 
 // Binary parts (image_url / audio_url / video_url) have an independent per-part
 // byte cap and do NOT share the text character budget. base64 length is not a

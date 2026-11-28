@@ -21,7 +21,7 @@ import type { EditSnapshotStore } from '../../support/edit-snapshot-store';
 import { renameArgAliases } from '../../support/arg-aliases';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
-import { withFileMutationLock } from './mutation-queue';
+import { type FileMutationRecorder, withFileMutationLock } from './mutation-queue';
 import { scanCache } from '../../support/scan-cache';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { scanConflictLines } from './conflict-detect';
@@ -118,6 +118,8 @@ export class WriteTool implements BuiltinTool<WriteInput> {
      * earlier Read is recognised as working across its own change.
      */
     private readonly editSnapshots?: EditSnapshotStore,
+    /** Keeps the original of every file it changes, for undoing a turn's files (see FileHistory). */
+    private readonly fileHistory?: FileMutationRecorder,
   ) {}
 
   async resolveExecution(args: WriteInput): Promise<ToolExecution> {
@@ -140,7 +142,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // Same-path mutations serialize (see mutation-queue): a batch or two
       // sub-agents can write one file concurrently, and the read-modify-write
       // step must not interleave.
-      execute: ({ signal }) => withFileMutationLock(path, () => this.execution(args, path, signal)),
+      execute: ({ signal }) => withFileMutationLock(path, () => this.execution(args, path, signal), this.fileHistory),
     };
   }
 

@@ -146,6 +146,12 @@ export interface Jian {
   writeTextAtomic(path: string, data: string, options?: { encoding?: BufferEncoding }): Promise<number>;
   /** Create a directory at `path`. */
   mkdir(path: string, options?: { parents?: boolean; existOk?: boolean }): Promise<void>;
+  /**
+   * Delete the file at `path`. A missing file is not an error; a directory is
+   * refused (only files are removed). Used to take back a file an agent
+   * created when its turn is undone.
+   */
+  removeFile(path: string): Promise<void>;
 
   // ── Process execution ───────────────────────────────────────────────
 

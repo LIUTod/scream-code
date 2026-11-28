@@ -258,6 +258,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.getAgent(agentId).undoHistory(payload);
   }
 
+  previewUndoFiles({ agentId, ...payload }: AgentScopedPayload<UndoHistoryPayload>) {
+    return this.getAgent(agentId).previewUndoFiles(payload);
+  }
+
   async activateSkill({ agentId, ...payload }: AgentScopedPayload<ActivateSkillPayload>) {
     await this.getAgent(agentId).activateSkill(payload);
     if (agentId === 'main') {

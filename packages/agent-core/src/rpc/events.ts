@@ -196,6 +196,11 @@ export interface TurnStepRetryingEvent {
    * carries no classification.
    */
   readonly errorCode?: string | undefined;
+  /**
+   * Set when the next attempt goes to the fallback model instead of the
+   * session model: its alias. The attempt count starts over for it.
+   */
+  readonly fallbackModel?: string | undefined;
 }
 
 export interface TurnStepInterruptedEvent {

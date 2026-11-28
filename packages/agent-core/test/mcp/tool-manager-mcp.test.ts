@@ -1,3 +1,5 @@
+import { readFile, rm } from 'node:fs/promises';
+
 import type { ContentPart, Tool, ToolAnnotations } from '@scream-code/ltod';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -5,13 +7,10 @@ import type { Agent } from '../../src/agent';
 import { ToolManager } from '../../src/agent/tool';
 import type { McpConnectionManager } from '../../src/mcp';
 import { mapMcpAnnotations } from '../../src/mcp/connection-manager';
+import { MCP_PREVIEW_CHARS } from '../../src/mcp/output';
 import type { MCPClient } from '../../src/mcp/types';
 import { testAgent } from '../agent/harness/agent';
 import { executeTool } from '../tools/fixtures/execute-tool';
-
-const MCP_OUTPUT_TRUNCATED_TEXT =
-  '\n\n[Output truncated: exceeded 100000 character limit. ' +
-  'Use pagination or more specific queries to get remaining content.]';
 
 function fakeAgent(calls: unknown[] = []): Agent {
   return {
@@ -389,7 +388,7 @@ describe('ToolManager MCP integration', () => {
     expect(reconnect).not.toHaveBeenCalled();
   });
 
-  it('truncates oversized MCP text output with a clear notice', async () => {
+  it('saves oversized MCP text output to a file and returns a preview with the path', async () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
     const client: MCPClient = {
@@ -419,11 +418,14 @@ describe('ToolManager MCP integration', () => {
       signal: new AbortController().signal,
     });
 
-    // applyOutputLimits slices to the budget and merges the truncation
-    // notice into the last text part so the single-text case still collapses
-    // to a plain string.
+    // The whole text goes to a file; the model gets a preview, the size and the path.
     expect(result.isError).toBe(false);
-    expect(result.output).toBe('x'.repeat(100_000) + MCP_OUTPUT_TRUNCATED_TEXT);
+    const output = result.output as string;
+    expect(output.startsWith('x'.repeat(MCP_PREVIEW_CHARS))).toBe(true);
+    expect(output).toContain('100001 characters');
+    const path = /saved to (\S+) /.exec(output)?.[1];
+    expect(await readFile(path!, 'utf8')).toBe('x'.repeat(100_001));
+    await rm(path!);
   });
 
   it('wraps modestly-sized MCP image output in mcp_tool_result companions', async () => {
@@ -562,15 +564,17 @@ describe('ToolManager MCP integration', () => {
     expect(result.isError).toBe(false);
     expect(Array.isArray(result.output)).toBe(true);
     const parts = result.output as ContentPart[];
-    // Text fills the whole 100k budget; image must still survive intact and
-    // the trailing truncation marker must not appear (text was not cut off).
-    expect(parts).toEqual([
-      { type: 'text', text: 'A'.repeat(100_000) },
-      {
-        type: 'image_url',
-        imageUrl: { url: 'data:image/png;base64,' + 'B'.repeat(500_000) },
-      },
-    ]);
+    // The long text goes to a file (preview + path); the image survives intact.
+    expect(parts).toHaveLength(2);
+    const preview = parts[0]!.type === 'text' ? parts[0]!.text : '';
+    expect(preview.startsWith('A'.repeat(MCP_PREVIEW_CHARS))).toBe(true);
+    const path = /saved to (\S+) /.exec(preview)?.[1];
+    expect(await readFile(path!, 'utf8')).toBe('A'.repeat(100_000));
+    await rm(path!);
+    expect(parts[1]).toEqual({
+      type: 'image_url',
+      imageUrl: { url: 'data:image/png;base64,' + 'B'.repeat(500_000) },
+    });
   });
 
   it('oversized binary part does not affect neighboring small binary parts', async () => {

@@ -1,6 +1,9 @@
+import * as path from 'node:path';
+
 import type { Component } from '@liutod-scream/pi-tui';
 
 import { t } from '@scream-code/config';
+import { ChoicePickerComponent } from '../components/dialogs/choice-picker';
 import { CompactionComponent } from '../components/dialogs/compaction';
 import { WelcomeComponent } from '../components/chrome/welcome';
 import { ActivityGroupComponent } from '../components/messages/activity-group';
@@ -40,6 +43,67 @@ export async function handleRevokeCommand(
     return;
   }
 
+  if (findRevokeAnchorEntryIndex(host.state.transcriptEntries, count) === undefined) {
+    host.showError(t('revoke.nothing'));
+    return;
+  }
+
+  // Files the write tools changed in those turns: offer to put them back too.
+  // An engine that cannot tell (or a failed look-up) undoes the conversation alone.
+  let files: readonly string[] = [];
+  try {
+    files = await session.previewUndoFiles(count);
+  } catch {
+    files = [];
+  }
+  if (files.length === 0) {
+    await performRevoke(host, session, count, 'keep');
+    return;
+  }
+  const workDir = host.state.appState.workDir;
+  const shown = files.slice(0, REVOKE_FILES_SHOWN).map((file) => `  ${displayPath(file, workDir)}`);
+  if (files.length > REVOKE_FILES_SHOWN) shown.push(`  ${t('revoke.files_more', { count: files.length - REVOKE_FILES_SHOWN })}`);
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: t('revoke.files_title', { count: files.length }),
+      hint: t('revoke.files_hint'),
+      colors: host.state.theme.colors,
+      details: [...shown, '', t('revoke.files_shell_note')],
+      options: [
+        { value: 'restore', label: t('revoke.files_restore'), description: t('revoke.files_restore_desc', { count: files.length }) },
+        { value: 'keep', label: t('revoke.files_keep'), description: t('revoke.files_keep_desc') },
+      ],
+      onSelect: (value) => {
+        host.restoreEditor();
+        void performRevoke(host, session, count, value === 'restore' ? 'restore' : 'keep');
+      },
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
+  );
+}
+
+/** Files listed in the choice before `/revoke` asks whether to put them back. */
+const REVOKE_FILES_SHOWN = 6;
+
+/** A path under the working directory reads relative to it; anything else stays absolute. */
+function displayPath(file: string, workDir: string): string {
+  const relative = path.relative(workDir, file);
+  return relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : file;
+}
+
+async function performRevoke(
+  host: SlashCommandHost,
+  session: NonNullable<SlashCommandHost['session']>,
+  count: number,
+  files: 'restore' | 'keep',
+): Promise<void> {
+  // The choice may have stayed open while something else started.
+  if (isBusy(host.state.appState)) {
+    host.showError(t('revoke.streaming'));
+    return;
+  }
   const entries = host.state.transcriptEntries;
   const lastUserIndex = findRevokeAnchorEntryIndex(entries, count);
   if (lastUserIndex === undefined) {
@@ -47,13 +111,16 @@ export async function handleRevokeCommand(
     return;
   }
 
+  let result: Awaited<ReturnType<typeof session.undoHistory>>;
   try {
-    await session.undoHistory(count);
+    result = await session.undoHistory(count, { files });
   } catch (error) {
     const message = formatErrorMessage(error);
     host.showError(t('revoke.failed', { msg: message }));
     return;
   }
+  // An older engine answers nothing about files.
+  if (result !== undefined && result !== null) reportRestoredFiles(host, result);
 
   const children = host.state.transcriptContainer.children;
   const lastUserComponentIndex = findRevokeAnchorComponentIndex(children, count);
@@ -76,6 +143,28 @@ export async function handleRevokeCommand(
   // would repaint over whatever slid into that region.
   host.state.ui.resetTextSelection();
   host.state.ui.requestRender();
+}
+
+/** Say which files came back and which were left alone (changed since, too large, a failed write). */
+function reportRestoredFiles(
+  host: SlashCommandHost,
+  result: { readonly restored: readonly string[]; readonly skipped: ReadonlyArray<{ path: string; reason: string }> },
+): void {
+  const colors = host.state.theme.colors;
+  if (result.restored.length > 0) {
+    host.showStatus(t('revoke.files_restored', { count: result.restored.length }), colors.success);
+  }
+  if (result.skipped.length > 0) {
+    const workDir = host.state.appState.workDir;
+    const names = result.skipped.map((entry) => displayPath(entry.path, workDir)).join(', ');
+    const changed = result.skipped.every((entry) => entry.reason === 'changed');
+    host.showStatus(
+      changed
+        ? t('revoke.files_skipped_changed', { count: result.skipped.length, files: names })
+        : t('revoke.files_skipped', { count: result.skipped.length, files: names }),
+      colors.warning,
+    );
+  }
 }
 
 // ── Parsing ─────────────────────────────────────────────────────────────

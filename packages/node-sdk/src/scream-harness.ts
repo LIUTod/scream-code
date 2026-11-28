@@ -98,7 +98,7 @@ export class ScreamHarness {
    */
   setModelTierBindings(
     getter:
-      | (() => { read?: string; task?: string; judge?: string; housekeeping?: string })
+      | (() => { read?: string; task?: string; judge?: string; housekeeping?: string; fallback?: string })
       | undefined,
   ): void {
     this.rpc.core.setModelTierBindings(getter);

@@ -1,4 +1,5 @@
 import { visibleWidth } from '@liutod-scream/pi-tui';
+import { t } from '@scream-code/config';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -221,5 +222,52 @@ describe('providerDisplayName', () => {
   it('leaves other providers as they were', () => {
     expect(providerDisplayName('acme')).toBe('acme');
     expect(providerDisplayName('managed:nimbus')).toBe('nimbus');
+  });
+});
+
+describe('ModelSelectorComponent — fallback model', () => {
+  const DOWN = '\u001B[B';
+  const TAB = '\t';
+  const rows = (selector: ModelSelectorComponent): string[] => selector.render(100).map(strip);
+
+  it('sets the highlighted model as the fallback with Tab, tags its row, and clears it with Tab again', () => {
+    const calls: Array<string | undefined> = [];
+    const selector = make({ onChangeFallback: (alias) => calls.push(alias) });
+    selector.handleInput(DOWN); // bravo-5 (in use) → cedar-3
+    expect(rows(selector).join('\n')).toContain('Tab 设为备用');
+    selector.handleInput(TAB);
+    expect(calls).toEqual(['cedar-3']);
+    const tagged = rows(selector).find((row) => row.includes('Cedar 3'))!;
+    expect(tagged).toMatch(/Cedar 3 备用/);
+    expect(rows(selector).join('\n')).toContain('Tab 取消备用');
+    selector.handleInput(TAB);
+    expect(calls).toEqual(['cedar-3', undefined]);
+    expect(rows(selector).find((row) => row.includes('Cedar 3'))).not.toContain('备用');
+  });
+
+  it('does nothing on the model in use, and offers no Tab there', () => {
+    const calls: Array<string | undefined> = [];
+    const selector = make({ onChangeFallback: (alias) => calls.push(alias) });
+    selector.handleInput(TAB);
+    expect(calls).toEqual([]);
+    expect(rows(selector).join('\n')).not.toContain('Tab');
+  });
+
+  it('shows the configured fallback, and Tab never lands in the search line', () => {
+    const selector = make({ fallbackValue: 'echo-5', onChangeFallback: () => {} });
+    expect(rows(selector).find((row) => row.includes('Echo 5'))).toMatch(/Echo 5 备用/);
+    const before = rows(selector).length;
+    selector.handleInput(DOWN);
+    selector.handleInput(TAB);
+    // No search line appeared (it would add a row with the typed query).
+    expect(rows(selector)).toHaveLength(before);
+    expect(rows(selector).some((row) => row.startsWith(t('model.search_label')))).toBe(false);
+  });
+
+  it('without a handler, Tab does nothing and no hint is shown', () => {
+    const selector = make();
+    selector.handleInput(DOWN);
+    selector.handleInput(TAB);
+    expect(rows(selector).join('\n')).not.toMatch(/Tab|备用/);
   });
 });

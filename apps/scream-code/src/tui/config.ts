@@ -71,23 +71,29 @@ export const TuiConfigFileSchema = z.object({
   // `/model diy` per-purpose bindings: one alias per role class plus the
   // housekeeping model used for compaction summaries. An absent key means
   // "follow the main model" (the engine then falls back to config.toml).
+  // `fallback` (set in `/model` with B) is the model a turn switches to when
+  // the main model keeps failing; absent means no fallback.
   modelTiers: z
     .object({
       read: z.string().optional(),
       task: z.string().optional(),
       judge: z.string().optional(),
       housekeeping: z.string().optional(),
+      fallback: z.string().optional(),
     })
     .optional(),
 });
 
-/** Keys of the `[modelTiers]` table, in render order. */
+/** The per-purpose bindings `/model diy` offers, in render order. */
 export const MODEL_TIER_KEYS = ['read', 'task', 'judge', 'housekeeping'] as const;
 
 export type ModelTierKey = (typeof MODEL_TIER_KEYS)[number];
 
-/** Live per-purpose model bindings (see {@link MODEL_TIER_KEYS}). */
-export type ModelTierBindings = Partial<Record<ModelTierKey, string>>;
+/** Every key of the `[modelTiers]` table: the `/model diy` ones plus the fallback model set in `/model`. */
+const MODEL_TIER_TABLE_KEYS = [...MODEL_TIER_KEYS, 'fallback'] as const;
+
+/** Live per-purpose model bindings (see {@link MODEL_TIER_TABLE_KEYS}). */
+export type ModelTierBindings = Partial<Record<(typeof MODEL_TIER_TABLE_KEYS)[number], string>>;
 
 export const TuiConfigSchema = z.object({
   theme: TuiThemeSchema,
@@ -109,6 +115,7 @@ export const TuiConfigSchema = z.object({
       task: z.string().optional(),
       judge: z.string().optional(),
       housekeeping: z.string().optional(),
+      fallback: z.string().optional(),
     })
     .optional(),
 });
@@ -256,7 +263,7 @@ function normalizeSubagentModels(
 
 function normalizeModelTiers(raw: TuiConfigFileShape['modelTiers']): ModelTierBindings {
   const out: ModelTierBindings = {};
-  for (const key of MODEL_TIER_KEYS) {
+  for (const key of MODEL_TIER_TABLE_KEYS) {
     const alias = normalizeOptionalString(raw?.[key]);
     if (alias !== undefined) out[key] = alias;
   }
@@ -303,7 +310,7 @@ workerCount = ${config.fusionPlan.workerCount} # 1..3, default 3${tablesBlock}
 }
 
 function renderModelTiersBlock(tiers: ModelTierBindings): string {
-  const lines = MODEL_TIER_KEYS.flatMap((key) => {
+  const lines = MODEL_TIER_TABLE_KEYS.flatMap((key) => {
     const alias = tiers[key];
     if (alias === undefined || alias.length === 0) return [];
     return [`${key} = "${escapeTomlBasicString(alias)}"`];

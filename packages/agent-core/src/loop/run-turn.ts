@@ -24,6 +24,7 @@ import type {
   LoopTurnStopReason,
   MediaProjectionState,
   StructureRepairState,
+  FallbackModelState,
   RecordStepUsageResult,
   TokenCapState,
   TurnResult,
@@ -60,6 +61,11 @@ export interface RunTurnInput {
   readonly maxRetryAttempts?: number;
   /** See ChatWithRetryInput.outageWaitMs. */
   readonly outageWaitMs?: number | undefined;
+  /**
+   * The fallback model's LLM, resolved only when a request needs it (so a
+   * binding changed mid-session applies at once). See `ChatFallback`.
+   */
+  readonly fallbackLlm?: (() => LLM | undefined) | undefined;
   /**
    * Generic execution deadline per tool call, in milliseconds. `undefined`
    * falls back to the built-in default (`TOOL_DEADLINE_MS`); values `<= 0` are
@@ -128,6 +134,8 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   const mediaProjection: MediaProjectionState = { mode: 'normal' };
   // Same idea for a rejected message structure: repair once, keep it.
   const structureRepair: StructureRepairState = { active: false };
+  // Once a request hands over to the fallback model, the rest of the turn stays on it.
+  const fallbackModel: FallbackModelState = { llm: undefined };
   const recordStepUsage = async (
     stepUsage: TokenUsage,
   ): Promise<RecordStepUsageResult | void> => {
@@ -185,6 +193,8 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         pendingSteerKind: input.pendingSteerKind,
         mediaProjection,
         structureRepair,
+        fallbackLlm: input.fallbackLlm,
+        fallbackModel,
         onStreamingDraft: input.onStreamingDraft,
       });
       activeStep = undefined;

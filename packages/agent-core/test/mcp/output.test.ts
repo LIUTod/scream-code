@@ -2,7 +2,14 @@ import { ContentBlockSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { ContentPart } from '@scream-code/ltod';
 import { describe, expect, test } from 'vitest';
 
-import { convertMCPContentBlock, mcpResultToExecutableOutput } from '../../src/mcp/output';
+import {
+  convertMCPContentBlock,
+  MCP_INLINE_TEXT_CHARS,
+  MCP_MAX_OUTPUT_CHARS,
+  MCP_PREVIEW_CHARS,
+  mcpResultToExecutableOutput,
+  mcpResultToModelOutput,
+} from '../../src/mcp/output';
 import type { MCPContentBlock, MCPToolResult } from '../../src/mcp/types';
 
 const MCP_OUTPUT_TRUNCATED_TEXT =
@@ -320,5 +327,79 @@ describe('mcpResultToExecutableOutput', () => {
       { type: 'text', text: 'A'.repeat(100_000) },
       { type: 'image_url', imageUrl: { url: 'data:image/png;base64,' + 'B'.repeat(500_000) } },
     ]);
+  });
+});
+
+describe('mcpResultToModelOutput — oversized text goes to a file', () => {
+  const result = (content: MCPContentBlock[], isError = false): MCPToolResult => ({ content, isError });
+
+  test('leaves an output that fits the context as it is', async () => {
+    let saved = 0;
+    const out = await mcpResultToModelOutput(result([{ type: 'text', text: 'hello' }]), 'mcp__s__t', async () => {
+      saved += 1;
+      return '/tmp/x';
+    });
+    expect(out).toEqual({ output: 'hello', isError: false });
+    expect(saved).toBe(0);
+  });
+
+  test('saves the whole text and gives the model a preview, the size and the path; media stays', async () => {
+    const first = 'a'.repeat(MCP_INLINE_TEXT_CHARS);
+    const second = 'line\n'.repeat(10);
+    let saved = '';
+    const out = await mcpResultToModelOutput(
+      result(
+        [
+          { type: 'text', text: first },
+          { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+          { type: 'text', text: second },
+        ],
+        true,
+      ),
+      'mcp__s__t',
+      async (text) => {
+        saved = text;
+        return '/tmp/scream-mcp-output-test.txt';
+      },
+    );
+    expect(saved).toBe(`${first}\n\n${second}`);
+    expect(out.isError).toBe(true);
+    const parts = out.output as Array<{ type: string; text?: string }>;
+    expect(parts[0]?.type).toBe('text');
+    const text = parts[0]!.text!;
+    expect(text.startsWith('a'.repeat(MCP_PREVIEW_CHARS))).toBe(true);
+    expect(text).not.toContain('a'.repeat(MCP_PREVIEW_CHARS + 1));
+    expect(text).toContain(`${String(saved.length)} characters`);
+    expect(text).toContain('/tmp/scream-mcp-output-test.txt');
+    expect(text).toContain('Read tool');
+    expect(parts.some((part) => part.type === 'image_url')).toBe(true);
+  });
+
+  test('falls back to the in-context cut when the file cannot be written', async () => {
+    const big = 'b'.repeat(MCP_MAX_OUTPUT_CHARS + 500);
+    for (const persist of [async () => undefined, async () => {
+      throw new Error('disk full');
+    }]) {
+      const out = await mcpResultToModelOutput(result([{ type: 'text', text: big }]), 'mcp__s__t', persist);
+      expect(out.output).toBe(mcpResultToExecutableOutput(result([{ type: 'text', text: big }]), 'mcp__s__t').output);
+    }
+  });
+
+  test('never cuts the preview inside a surrogate pair', async () => {
+    const text = `${'x'.repeat(MCP_PREVIEW_CHARS - 1)}😀${'y'.repeat(MCP_INLINE_TEXT_CHARS)}`;
+    const out = await mcpResultToModelOutput(result([{ type: 'text', text }]), 'mcp__s__t', async () => '/tmp/p.txt');
+    const preview = (out.output as string).split('\n\n[')[0]!;
+    expect(preview).toBe('x'.repeat(MCP_PREVIEW_CHARS - 1));
+  });
+
+  test('writes a real private file by default', async () => {
+    const { readFile, stat, rm } = await import('node:fs/promises');
+    const big = 'z'.repeat(MCP_INLINE_TEXT_CHARS + 10);
+    const out = await mcpResultToModelOutput(result([{ type: 'text', text: big }]), 'mcp__s__t');
+    const path = /saved to (\S+) /.exec(out.output as string)?.[1];
+    expect(path).toBeDefined();
+    expect(await readFile(path!, 'utf8')).toBe(big);
+    if (process.platform !== 'win32') expect((await stat(path!)).mode & 0o777).toBe(0o600);
+    await rm(path!);
   });
 });

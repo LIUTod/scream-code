@@ -107,6 +107,8 @@ export interface ModelTierBindings {
   readonly task?: string;
   readonly judge?: string;
   readonly housekeeping?: string;
+  /** The model a turn switches to when the session model keeps failing (set in `/model`). */
+  readonly fallback?: string;
 }
 
 /**

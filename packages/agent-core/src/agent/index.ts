@@ -10,6 +10,7 @@ import {
   generate,
   isRetryableGenerateError,
   type ChatProvider,
+  type ProviderRequestAuth,
   type Message,
   type Tool,
   type TokenUsage,
@@ -43,7 +44,8 @@ import {
 import type { PromisableMethods } from '../utils/types';
 import { BackgroundManager } from './background';
 import { EventSubscriptionBus } from './events';
-import { FullCompaction, MicroCompaction, type CompactionStrategy } from './compaction';
+import type { FileHistory } from '../session/file-history';
+import { FullCompaction, MicroCompaction, resolveHousekeeping, type CompactionStrategy } from './compaction';
 import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
@@ -143,6 +145,8 @@ export interface AgentOptions {
   /** Session-wide token meter behind `loop_control.max_session_tokens`
    *  (shared by every agent of the session; see SessionTokenMeter). */
   readonly tokenMeter?: SessionTokenMeter | undefined;
+  /** Session-wide file history (see FileHistory); shared by every agent of the session. */
+  readonly fileHistory?: FileHistory | undefined;
 }
 
 /**
@@ -177,6 +181,16 @@ export interface AgentServices {
 /** How long a prompt waits for a first load of the (cached) embedding model. */
 const MEMORY_ENGINE_WAIT_MS = 2000;
 
+/** Page text sent to the helper model that answers `FetchURL` questions (about 30K tokens). */
+const PAGE_ANSWER_MAX_CHARS = 120_000;
+
+const PAGE_ANSWER_SYSTEM_PROMPT = [
+  'You answer one question from one web page for another assistant.',
+  'Use only the page. Keep facts, numbers, names, versions, code and commands exactly as written; quote short passages where wording matters.',
+  'If the page does not answer the question, say so and say what it does cover.',
+  'Answer in the language of the question. Be concise: no preamble, no advice beyond the page.',
+].join('\n');
+
 export class Agent {
   readonly type: AgentType;
   /** Stable id of this agent inside its session ('main' for the root agent);
@@ -205,6 +219,7 @@ export class Agent {
   readonly lspSupervisor: LspProcessSupervisor | undefined;
   /** Session-wide token meter (undefined outside a session). */
   readonly tokenMeter: SessionTokenMeter | undefined;
+  readonly fileHistory: FileHistory | undefined;
   readonly log: Logger;
   /** In-process event bus for extensions running inside the agent process. */
   readonly eventBus: EventSubscriptionBus;
@@ -291,6 +306,10 @@ export class Agent {
     this.hooks = options.hookEngine;
     this.lspSupervisor = options.lspSupervisor;
     this.tokenMeter = options.tokenMeter;
+    this.fileHistory = options.fileHistory;
+    // File changes are filed under the main agent's latest real user prompt
+    // (the one an undo would remove with them), whichever agent makes them.
+    if (this.type === 'main') this.fileHistory?.setPromptSource(() => this.context.latestRealPromptId());
     this.eventBus = new EventSubscriptionBus();
     const embedCacheDir = options.screamHomeDir !== undefined
       ? join(options.screamHomeDir, 'cache', 'fastembed')
@@ -867,6 +886,89 @@ export class Agent {
   }
 
   /**
+   * Answer a question from a fetched page, for `FetchURL` with a question: the
+   * page goes to the housekeeping model (the cheap one bound in `/model diy`
+   * or `housekeeping_model`), or to the session model when none is set, and
+   * only the answer comes back to the turn. The page text is capped at
+   * {@link PAGE_ANSWER_MAX_CHARS}; usage is billed to the model that answered.
+   */
+  async answerFromPage(request: {
+    readonly url: string;
+    readonly question: string;
+    readonly content: string;
+    readonly signal?: AbortSignal | undefined;
+  }): Promise<string> {
+    const page = request.content.length > PAGE_ANSWER_MAX_CHARS
+      ? `${request.content.slice(0, PAGE_ANSWER_MAX_CHARS)}\n[page cut at ${String(PAGE_ANSWER_MAX_CHARS)} characters]`
+      : request.content;
+    const messages: Message[] = [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: `Question: ${request.question}\n\nPage: ${request.url}\n\n<page>\n${page}\n</page>`,
+          },
+        ],
+        toolCalls: [],
+      },
+    ];
+    const housekeeping = resolveHousekeeping(this);
+    let result: Awaited<ReturnType<typeof generate>>;
+    if (housekeeping === undefined) {
+      const attempt = () =>
+        this.generate(
+          this.config.provider.withThinking(this.config.thinkingLevel),
+          PAGE_ANSWER_SYSTEM_PROMPT,
+          [],
+          messages,
+          undefined,
+          { signal: request.signal },
+        );
+      try {
+        result = await attempt();
+      } catch (error) {
+        if (!isRetryableGenerateError(error) || request.signal?.aborted === true) throw error;
+        result = await attempt();
+      }
+      this.recordAuxiliaryUsage(result.usage);
+    } else {
+      const send = (auth: ProviderRequestAuth) =>
+        this.generate(
+          // Carry the session's thinking level: always-thinking models reject 'off'.
+          housekeeping.provider.withThinking(this.config.thinkingLevel),
+          PAGE_ANSWER_SYSTEM_PROMPT,
+          [],
+          messages,
+          undefined,
+          { signal: request.signal, auth },
+        );
+      const attempt = () =>
+        // An explicit empty auth keeps the session model's OAuth wrapper away
+        // from another provider (see the housekeeping path in compaction).
+        housekeeping.authRequest === undefined ? send({}) : housekeeping.authRequest(send);
+      try {
+        result = await attempt();
+      } catch (error) {
+        if (!isRetryableGenerateError(error) || request.signal?.aborted === true) throw error;
+        result = await attempt();
+      }
+      try {
+        if (result.usage !== null && result.usage !== undefined) {
+          this.usage.record(housekeeping.modelName, result.usage, 'session');
+        }
+      } catch (error) {
+        this.log.warn('page answer usage record failed', error);
+      }
+    }
+    const content = result.message.content;
+    const answer = typeof content === 'string'
+      ? content
+      : content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+    return this.deobfuscateInboundText(answer.trim());
+  }
+
+  /**
    * Usage of an auxiliary (non-loop) request. Best-effort like the cache
    * warmer's: exit memory extraction runs while the session is closing, when
    * the wire sink may already be gone — accounting must never fail the call.
@@ -903,6 +1005,50 @@ export class Agent {
       generate: (provider, systemPrompt, tools, history, callbacks, options) =>
         this.routedGenerateWithCapture(provider, systemPrompt, tools, history, callbacks, options),
       completionBudgetConfig,
+      obfuscator: this.obfuscator,
+    });
+  }
+
+  /**
+   * The fallback model's LLM, built like {@link llm} from the alias bound in
+   * `/model` (the live `fallback` tier). Undefined when none is set, when it is
+   * the session model itself, or when the alias no longer resolves. It
+   * authenticates with its own provider and is not captured for the cache
+   * warmer: it only stands in while the session model is down.
+   */
+  resolveFallbackLlm(): LtodLLM | undefined {
+    const alias = this.subagentHost?.resolveModelTier('fallback');
+    if (alias === undefined || alias === this.config.modelAlias) return undefined;
+    const resolved = this.modelProvider?.tryResolveChatModel(alias);
+    if (resolved === undefined) {
+      this.log.warn('fallback model does not resolve in the provider registry; staying on the session model', {
+        fallbackModel: alias,
+      });
+      return undefined;
+    }
+    const loopControl = this.screamConfig?.loopControl;
+    const systemPrompt = this.resolveRuntimeSystemPrompt(this.config.systemPrompt);
+    const authRequest = resolved.authRequest;
+    const generate: GenerateFn = async (provider, prompt, tools, history, callbacks, options) => {
+      if (authRequest === undefined) {
+        this.logLlmRequest(provider, prompt, tools, history, options);
+        return this.rawGenerate(provider, prompt, tools, history, callbacks, options);
+      }
+      return authRequest((auth) => {
+        const requestOptions = { ...options, auth };
+        this.logLlmRequest(provider, prompt, tools, history, requestOptions);
+        return this.rawGenerate(provider, prompt, tools, history, callbacks, requestOptions);
+      });
+    };
+    return new LtodLLM({
+      // A model that cannot think rejects a thinking level; one that can carries the session's.
+      provider: resolved.provider.withThinking(resolved.capabilities.thinking ? this.config.thinkingLevel : 'off'),
+      modelName: resolved.modelName,
+      systemPrompt,
+      systemPromptBlocks: systemPromptForRequest(systemPrompt),
+      capability: resolved.capabilities,
+      generate,
+      completionBudgetConfig: resolveCompletionBudget({ reservedContextSize: loopControl?.reservedContextSize }),
       obfuscator: this.obfuscator,
     });
   }
@@ -1264,8 +1410,21 @@ export class Agent {
       clearContext: () => {
         this.context.clear();
       },
-      undoHistory: (payload) => {
+      undoHistory: async (payload) => {
+        // The prompts this undo removes, before it removes them: their file
+        // changes are taken back (or forgotten) with them.
+        const promptIds = this.context.promptIdsToUndo(payload.count);
         this.context.undo(payload.count);
+        const history = this.type === 'main' ? this.fileHistory : undefined;
+        if (history === undefined || promptIds.length === 0) return { restored: [], skipped: [] };
+        if (payload.files === 'restore') return history.restore(promptIds);
+        await history.discard(promptIds);
+        return { restored: [], skipped: [] };
+      },
+      previewUndoFiles: async (payload) => {
+        const history = this.type === 'main' ? this.fileHistory : undefined;
+        if (history === undefined) return [];
+        return history.changedFiles(this.context.promptIdsToUndo(payload.count));
       },
       activateSkill: (payload) => {
         if (this.skills === null) {

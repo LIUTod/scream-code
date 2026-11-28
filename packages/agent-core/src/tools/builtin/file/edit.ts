@@ -38,7 +38,7 @@ import {
 } from '../../support/line-diff';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import { scanCache } from '../../support/scan-cache';
-import { withFileMutationLock } from './mutation-queue';
+import { type FileMutationRecorder, withFileMutationLock } from './mutation-queue';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { scanConflictLines, type ConflictBlock } from './conflict-detect';
 import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
@@ -332,6 +332,8 @@ export class EditTool implements BuiltinTool<EditInput> {
      * prompt by EditRecoveryInjector; absent outside an Agent.
      */
     private readonly editRecovery?: EditRecoveryQueue,
+    /** Keeps the original of every file it changes, for undoing a turn's files (see FileHistory). */
+    private readonly fileHistory?: FileMutationRecorder,
   ) {}
 
   async resolveExecution(args: EditInput): Promise<ToolExecution> {
@@ -360,7 +362,7 @@ export class EditTool implements BuiltinTool<EditInput> {
       // Same-path mutations serialize (see mutation-queue). The noop-loop
       // bookkeeping inside `execution` runs under the lock too, so concurrent
       // attempts cannot interleave their failure counters.
-      execute: ({ signal }) => withFileMutationLock(path, () => this.execution(args, path, signal)),
+      execute: ({ signal }) => withFileMutationLock(path, () => this.execution(args, path, signal), this.fileHistory),
     };
   }
 

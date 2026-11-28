@@ -11,7 +11,7 @@ import type { ExecutableTool, ExecutableToolContext, ExecutableToolResult } from
 import { createMcpAuthTool } from '../../mcp/auth-tool';
 import { isRetriableMcpCallError } from '../../mcp/client-shared';
 import type { McpConnectionManager, McpServerEntry } from '../../mcp';
-import { mcpResultToExecutableOutput } from '../../mcp/output';
+import { mcpResultToModelOutput } from '../../mcp/output';
 import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
 import type { MCPClient } from '../../mcp/types';
 import { DEFAULT_AGENT_PROFILES } from '../../profile';
@@ -813,7 +813,7 @@ export class ToolManager {
                   (args ?? {}) as Record<string, unknown>,
                   context.signal,
                 );
-                return mcpResultToExecutableOutput(result, qualified);
+                return mcpResultToModelOutput(result, qualified);
               };
 
               try {
@@ -1469,12 +1469,12 @@ export class ToolManager {
       [
         new b.ReadTool(jian, workspace, this.lspRegistry, this.agent.repetitionGuard, this.agent.editSnapshots),
         new b.ReadGroupTool(jian, workspace, this.lspRegistry, this.agent.repetitionGuard, this.agent.editSnapshots),
-        new b.WriteTool(jian, workspace, this.lspRegistry, this.agent.editRecoveryQueue, this.agent.editSnapshots),
-        new b.EditTool(jian, workspace, this.lspRegistry, this.agent.workingSet, this.agent.editSnapshots, this.agent.editRecoveryQueue),
+        new b.WriteTool(jian, workspace, this.lspRegistry, this.agent.editRecoveryQueue, this.agent.editSnapshots, this.agent.fileHistory),
+        new b.EditTool(jian, workspace, this.lspRegistry, this.agent.workingSet, this.agent.editSnapshots, this.agent.editRecoveryQueue, this.agent.fileHistory),
         new b.GrepTool(jian, workspace, this.agent.repetitionGuard),
         new b.GlobTool(jian, workspace),
         new b.AstGrepTool(jian, workspace),
-        new b.AstEditTool(jian, workspace, this.lspRegistry, this.agent.editRecoveryQueue, this.agent.editSnapshots),
+        new b.AstEditTool(jian, workspace, this.lspRegistry, this.agent.editRecoveryQueue, this.agent.editSnapshots, this.agent.fileHistory),
         new b.BashTool(jian, cwd, background, {
           allowBackground,
           availableTools: this.enabledTools,
@@ -1617,7 +1617,11 @@ export class ToolManager {
 
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.paperSearcher && new b.PaperSearchTool(toolServices.paperSearcher),
-        toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
+        toolServices?.urlFetcher &&
+          new b.FetchURLTool(toolServices.urlFetcher, {
+            // A question about a long page goes to the helper model; only the answer enters the context.
+            answer: (request) => this.agent.answerFromPage(request),
+          }),
         this.lspRegistry && new LspTool(this.agent, workspace, this.lspRegistry),
         // Debugger sessions spawn a Python debuggee through DAP. The deferred
         // `debug` group owns the tool while the portal is active; this eager

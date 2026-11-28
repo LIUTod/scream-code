@@ -230,6 +230,8 @@ export interface SessionEventHost {
    * auth request. Healthy servers say nothing. Optional for headless hosts.
    */
   showMcpNotice?(kind: 'progress' | 'failed' | 'needs-auth', text: string, color: string): void;
+  /** The turn switched to the fallback model; optional for headless hosts. */
+  showFallbackNotice?(text: string): void;
   /** Removes an MCP notice (the servers settled, or the problem went away). */
   clearMcpNotice?(kind: 'progress' | 'failed' | 'needs-auth'): void;
   /** Drops every notice in the footer's notice slot (session switch). */
@@ -898,6 +900,12 @@ export class SessionEventHandler {
       // The failed attempt was a real request too, so 调用次数 counts it.
       sessionApiCalls: this.host.state.appState.sessionApiCalls + 1,
     });
+    // The main model kept failing and the next attempt goes to the fallback one.
+    if (event.fallbackModel !== undefined) {
+      const model = this.host.state.appState.availableModels[event.fallbackModel];
+      const name = model?.displayName ?? model?.model ?? event.fallbackModel;
+      this.host.showFallbackNotice?.(t('status.fallback_switched', { model: name }));
+    }
   }
 
   /**

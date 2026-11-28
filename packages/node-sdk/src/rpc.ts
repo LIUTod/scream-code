@@ -905,9 +905,23 @@ export class SDKRpcClient {
     });
   }
 
-  async undoHistory(input: { sessionId: string; count: number }): Promise<void> {
+  async undoHistory(input: {
+    sessionId: string;
+    count: number;
+    files?: 'restore' | 'keep';
+  }): Promise<import('@scream-code/agent-core').UndoHistoryResult> {
     const rpc = await this.getRpc();
     return rpc.undoHistory({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      count: input.count,
+      ...(input.files === undefined ? {} : { files: input.files }),
+    });
+  }
+
+  async previewUndoFiles(input: { sessionId: string; count: number }): Promise<readonly string[]> {
+    const rpc = await this.getRpc();
+    return rpc.previewUndoFiles({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
       count: input.count,

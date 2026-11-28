@@ -1057,6 +1057,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   /** MCP notice in the footer's notice slot (connect progress, a failure, an auth request). */
+  showFallbackNotice(text: string): void {
+    this.lifecycleController.showFallbackNotice(text);
+  }
+
   showMcpNotice(kind: McpNoticeKind, text: string, color: string): void {
     this.lifecycleController.showMcpNotice(kind, text, color);
   }

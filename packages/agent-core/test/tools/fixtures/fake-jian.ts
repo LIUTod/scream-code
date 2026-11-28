@@ -55,6 +55,7 @@ export function createFakeJian(overrides?: Partial<Jian>): Jian {
     writeText: () => notImplemented('writeText'),
     writeTextAtomic: () => notImplemented('writeTextAtomic'),
     mkdir: () => notImplemented('mkdir'),
+    removeFile: () => notImplemented('removeFile'),
     exec: () => notImplemented('exec'),
     execWithEnv: () => notImplemented('execWithEnv'),
   };

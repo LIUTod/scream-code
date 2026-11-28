@@ -71,6 +71,16 @@ export interface StructureRepairState {
 }
 
 /**
+ * Shared mutable state for the fallback model in a turn. Once a request hands
+ * over to the fallback model (see `ChatFallback`), `llm` holds it and the
+ * remaining steps of the turn use it directly; the next turn starts on the
+ * session model again.
+ */
+export interface FallbackModelState {
+  llm: LLM | undefined;
+}
+
+/**
  * @deprecated Legacy umbrella union. Use `LoopStepStopReason` for per-step
  * model responses and `LoopTurnStopReason` for `TurnResult`.
  */

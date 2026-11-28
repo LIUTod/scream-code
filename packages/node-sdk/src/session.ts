@@ -597,9 +597,22 @@ export class Session {
    * The TUI is responsible for cleaning up the corresponding transcript
    * entries and UI components after this call succeeds.
    */
-  async undoHistory(count: number = 1): Promise<void> {
+  async undoHistory(
+    count: number = 1,
+    options: { files?: 'restore' | 'keep' } = {},
+  ): Promise<import('@scream-code/agent-core').UndoHistoryResult> {
     this.ensureOpen();
-    await this.rpc.undoHistory({ sessionId: this.id, count });
+    return this.rpc.undoHistory({ sessionId: this.id, count, ...options });
+  }
+
+  /**
+   * The files the write tools changed in the last `count` user-prompt turns —
+   * what `undoHistory(count, { files: 'restore' })` would put back. Files
+   * changed only through shell commands are not known.
+   */
+  async previewUndoFiles(count: number = 1): Promise<readonly string[]> {
+    this.ensureOpen();
+    return this.rpc.previewUndoFiles({ sessionId: this.id, count });
   }
 
   async writeMetadata(): Promise<void> {

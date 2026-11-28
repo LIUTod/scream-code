@@ -87,6 +87,17 @@ export interface ModelSelectorOptions {
    */
   readonly onChangeThinking?: (alias: string, level: ThinkingEffort) => void;
   /**
+   * The fallback model (the one a turn switches to when the model in use keeps
+   * failing), or undefined when none is set. Only the /model picker supplies it.
+   */
+  readonly fallbackValue?: string | undefined;
+  /**
+   * Fired when Tab sets the selected model as the fallback, or clears it when
+   * it already is (`undefined`). Persistence is the host's responsibility.
+   * Without it, Tab does nothing and no hint is shown.
+   */
+  readonly onChangeFallback?: ((alias: string | undefined) => void) | undefined;
+  /**
    * Terminal height, read on every render. The selector replaces the editor,
    * so on a short terminal it gives rows back (fewer models per page, no
    * capability or image rows) and keeps the key hints visible. Unknown means
@@ -152,10 +163,12 @@ export class ModelSelectorComponent extends Container implements Focusable {
   private readonly opts: ModelSelectorOptions;
   private readonly list: SearchableList<ModelChoice>;
   private thinkingDraft: ThinkingEffort;
+  private fallback: string | undefined;
 
   constructor(opts: ModelSelectorOptions) {
     super();
     this.opts = opts;
+    this.fallback = opts.fallbackValue;
     const choices = createModelChoices(opts.models);
     const selectedValue = opts.selectedValue ?? opts.currentValue;
     const selectedIdx = choices.findIndex((choice) => choice.alias === selectedValue);
@@ -200,6 +213,16 @@ export class ModelSelectorComponent extends Container implements Focusable {
         return;
       }
     }
+    // Tab: the selected model becomes the fallback, or stops being it. The
+    // model in use cannot stand in for itself. (A letter key would go to the
+    // search line.)
+    if (matchesKey(data, Key.tab)) {
+      if (selected === undefined || this.opts.onChangeFallback === undefined) return;
+      if (selected.alias === this.opts.currentValue) return;
+      this.fallback = this.fallback === selected.alias ? undefined : selected.alias;
+      this.opts.onChangeFallback(this.fallback);
+      return;
+    }
     if (matchesKey(data, Key.enter)) {
       if (selected === undefined) return;
       this.opts.onSelect({
@@ -240,6 +263,13 @@ export class ModelSelectorComponent extends Container implements Focusable {
       { text: t('model.nav_thinking'), rank: 2 },
     ];
     if (view.page.pageCount > 1) navParts.push({ text: t('model.nav_page'), rank: 3 });
+    const highlighted = choices[view.selectedIndex];
+    if (this.opts.onChangeFallback !== undefined && highlighted !== undefined && highlighted.alias !== this.opts.currentValue) {
+      navParts.push({
+        text: highlighted.alias === this.fallback ? t('model.nav_fallback_off') : t('model.nav_fallback_on'),
+        rank: 1,
+      });
+    }
     navParts.push(
       { text: t('model.nav_select'), rank: 0 },
       { text: this.opts.breadcrumb === undefined ? t('model.nav_cancel') : t('dialog.back'), rank: 0 },
@@ -268,6 +298,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
       const isCurrent = choice.alias === this.opts.currentValue;
       let head = `  ${pointerCell(colors, isSelected)}` + rowLabel(colors, isSelected)(choice.name);
       if (isCurrent) head += currentMark(colors);
+      else if (choice.alias === this.fallback) head += ' ' + chalk.hex(colors.warning)(t('model.fallback_mark'));
       names.push(head);
     }
     const column = Math.min(

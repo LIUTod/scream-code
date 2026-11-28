@@ -43,6 +43,7 @@ import {
   type SkillRoot,
   type SkillSummary,
 } from '../skill';
+import { FileHistory } from './file-history';
 import { SessionSubagentHost, type ModelTierBindings } from './subagent-host';
 import type { SubagentCapabilityMode } from './subagent-capability';
 import { SessionDisposables } from './dispose-registry';
@@ -254,6 +255,8 @@ export class Session {
    * every agent this session instantiates (see SessionTokenMeter).
    */
   readonly tokenMeter: SessionTokenMeter;
+  /** What the write tools changed under each user prompt, for undoing files with the conversation. */
+  readonly fileHistory: FileHistory;
   private agentIdCounter = 0;
   /**
    * Every BackgroundManager this session created for one of its agents, held
@@ -299,6 +302,7 @@ export class Session {
     this.tokenMeter = new SessionTokenMeter({
       limitTokens: options.config?.loopControl?.maxSessionTokens,
     });
+    this.fileHistory = new FileHistory({ jian: options.jian, sessionDir: options.homedir, log: this.log });
     this.hookEngine = new HookEngine(options.hooks, {
       cwd: options.jian.getcwd(),
       sessionId: options.id,
@@ -1038,6 +1042,7 @@ export class Session {
       screamHomeDir: this.options.screamHomeDir,
       lspSupervisor: this.options.lspSupervisor,
       tokenMeter: this.tokenMeter,
+      fileHistory: this.fileHistory,
       skills: this.skills,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
       modelProvider: this.options.providerManager,

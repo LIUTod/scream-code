@@ -777,6 +777,8 @@ export class TurnFlow {
           turnId: String(turnId),
           signal,
           llm: this.agent.llm,
+          // Stands in for the rest of the turn when the session model keeps failing.
+          fallbackLlm: () => this.agent.resolveFallbackLlm(),
           // Use messagesForLLM (not the bare `messages` getter) so each
           // LLM-bound build is fingerprinted for prefix-stability / prompt
           // cache observation. The returned messages are identical; this
@@ -952,8 +954,9 @@ export class TurnFlow {
               deduper.beginStep();
               return;
             },
-            afterStep: async ({ usage }) => {
-              this.agent.usage.record(model, usage, 'turn');
+            afterStep: async ({ usage, llm }) => {
+              // Billed to the model that answered: the fallback one once it took over.
+              this.agent.usage.record(llm.modelName || model, usage, 'turn');
               await this.agent.goal.recordTokenUsage(ltodGrandTotal(usage), usage);
               await this.agent.fullCompaction.afterStep();
               deduper.endStep();
