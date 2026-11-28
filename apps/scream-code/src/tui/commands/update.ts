@@ -169,9 +169,18 @@ export async function handleUpdateCommand(host: SlashCommandHost): Promise<void>
   host.showStatus(t('update.checking'));
 
   // Refresh the cache first so we're checking against the latest release.
-  await refreshUpdateCache().catch(() => {});
+  // A failed refresh (offline, registry down) must not read as "up to date":
+  // a stale or empty cache would then claim there is nothing newer.
+  let checked = true;
+  await refreshUpdateCache().catch(() => {
+    checked = false;
+  });
   const cache = await readUpdateCache().catch(() => null);
   const target = selectUpdateTarget(host.state.appState.version, cache?.latest ?? null);
+  if (target === null && !checked) {
+    host.showError(`❌ ${t('update.check_failed')}\n${t('update.network_hint_retry')}`);
+    return;
+  }
   if (target === null) {
     host.showStatus(
       '✅ ' + t('update.already_latest', { version: host.state.appState.version }),

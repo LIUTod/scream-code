@@ -387,6 +387,7 @@ export const zh: Record<string, string> = {
   'update.prompt_never': '永不提醒',
   'update.prompt_never_desc': '以后不再弹出；欢迎区仍显示新版本，随时可用 /update',
   'update.prompt_never_saved': '已关闭更新提醒，需要时输入 /update',
+  'update.check_failed': '无法检查新版本：连不上 npm（网络错误或 npm 源不可用）。',
 
   // ─── MCP ──────────────────────
   'mcp.connecting': '⏳ 连接中',

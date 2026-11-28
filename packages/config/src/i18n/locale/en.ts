@@ -388,6 +388,7 @@ export const en: Record<string, string> = {
   'update.prompt_never': "Don't remind me",
   'update.prompt_never_desc': 'No more prompts; the welcome panel still shows the new version, and /update works any time',
   'update.prompt_never_saved': 'Update prompts turned off; type /update when you want it',
+  'update.check_failed': 'Could not check for a new version: npm could not be reached (network error or registry down).',
 
   // ─── MCP ──────────────────────
   'mcp.connecting': '⏳ Connecting',
